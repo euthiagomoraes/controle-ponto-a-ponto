@@ -23,7 +23,8 @@ Tabela principal: `tbPontoAPonto`
 | G | TIPE | somente leitura |
 | H | DESCRIÇÃO | somente leitura |
 | I | Week | programação manual da semana |
-| J | Logs | histórico cumulativo |
+| J | PONTO-A-PONTO | última data/hora registrada; atualização por TAG |
+| K | Logs | campo auxiliar existente; não é alterado pelo registro de ponto a ponto |
 
 Login: tabela `tbLogin` com `NOME`, `CRACHA`, `ATIVO`, `PERFIL`.
 
@@ -48,7 +49,7 @@ No `app.js`, configure:
 ```js
 const CONFIG = {
   DATA_URL: "URL_DO_FLOW_DE_LEITURA",
-  WRITE_URL: "URL_DO_FLOW_DE_GRAVACAO",
+  WRITE_URL: "URL_DO_FLOW_DE_GRAVACAO_PONTO_A_PONTO",
   TABLE_NAME: "tbPontoAPonto",
   LOGIN_TABLE: "tbLogin"
 };
@@ -68,11 +69,11 @@ O flow recebe:
 ```json
 {
   "TAG": "ZSH-20GHA10AA401-S12",
-  "Logs": "conteúdo anterior\n14/09/2026 08:32:00 - Nome do técnico"
+  "PONTO-A-PONTO": "14/09/2026 08:32:00"
 }
 ```
 
-No Excel, o flow deve localizar a linha usando `TAG` como chave e atualizar somente `Logs`.
+No Excel, o flow deve localizar a linha usando `TAG` como chave e atualizar somente `PONTO-A-PONTO` (coluna J).
 
 ### Login
 Para produção, o login deve consultar `tbLogin` e aceitar somente:
@@ -99,3 +100,18 @@ git push origin main
 ```
 
 O GitHub documenta `git push origin main` como o fluxo normal para enviar commits locais ao repositório remoto.
+
+
+## Integração com Power Automate — consulta
+
+A consulta de equipamentos usa a API `/api/consultar` do Vercel.
+A URL do Power Automate **não fica no `app.js`**.
+
+No Vercel, configure a variável de ambiente:
+`PPA_CONSULTAR_URL` = URL HTTP POST do fluxo `PPA - Consultar Equipamentos`.
+
+O frontend envia `{ "week": "W133" }` para `/api/consultar`.
+A função do Vercel repassa a semana ao Power Automate e devolve as linhas do Excel.
+
+O fluxo do Power Automate deve usar a coluna `WEEK` no filtro:
+`WEEK eq '@{triggerBody()?['week']}'`

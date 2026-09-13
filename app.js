@@ -3,8 +3,8 @@
    Nunca coloque credenciais, client secrets ou senha do OneDrive neste arquivo. */
 
 const CONFIG = {
-  DATA_URL: "",   // GET: Power Automate -> List rows present in a table
-  WRITE_URL: "",  // POST: Power Automate -> Get/Update row by TAG
+  DATA_URL: "/api/consultar",
+  WRITE_URL: "",  // Será integrado depois com o fluxo de registro em J (PONTO-A-PONTO)
   TABLE_NAME: "tbPontoAPonto",
   LOGIN_TABLE: "tbLogin"
 };
@@ -20,21 +20,22 @@ const state = {
   selectedTag: null,
   rows: [],
   mockRows: [
-    {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA401",LOOP:"XV-20GHA10AA401",TAG:"ZSH-20GHA10AA401-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",Week:"W133",Logs:""},
-    {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA402",LOOP:"XV-20GHA10AA402",TAG:"ZSL-20GHA10AA402-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",Week:"W133",Logs:""},
-    {FORN:"FORN-02",SYS:"20GMA",SUBSYS:"KB003",LOOP:"XV-20GMA10KB003",TAG:"ZSH-20GMA10KB003-S12",SERVICE:"NEUTRALIZATION EFFLUENT PIT",TIPE:"INTERFACE ELÉTRICA EQUIPAMENTO",DESCRIÇÃO:"VÁLVULA ON/OFF",Week:"W133",Logs:"12/09/2026 14:32 - @tecnico.campo"},
-    {FORN:"FORN-02",SYS:"20GMA",SUBSYS:"KB004",LOOP:"XV-20GMA10KB004",TAG:"ZSL-20GMA10KB004-S12",SERVICE:"NEUTRALIZATION EFFLUENT PIT",TIPE:"INTERFACE ELÉTRICA EQUIPAMENTO",DESCRIÇÃO:"VÁLVULA ON/OFF",Week:"W132",Logs:""},
-    {FORN:"FORN-02",SYS:"20GMA",SUBSYS:"BB001",LOOP:"P-20GMA10BB001",TAG:"PSH-20GMA10BB001-S12",SERVICE:"EFFLUENT PIT",TIPE:"PRESSURE SWITCH",DESCRIÇÃO:"CHAVE DE PRESSÃO",Week:"W133",Logs:""},
-    {FORN:"FORN-02",SYS:"20GMA",SUBSYS:"BB002",LOOP:"L-20GMA10BB002",TAG:"LSH-20GMA10BB002-S12",SERVICE:"EFFLUENT PIT",TIPE:"LEVEL SWITCH",DESCRIÇÃO:"CHAVE DE NÍVEL",Week:"W133",Logs:""},
-    {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA401",LOOP:"FIC-20GHA10AA401",TAG:"FIC-20GHA10AA401-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"INSTRUMENTAÇÃO",DESCRIÇÃO:"CONTROLADOR DE VAZÃO",Week:"W133",Logs:"13/09/2026 08:05 - @operador.01"},
-    {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"BB001",LOOP:"TIT-20GHA10BB001",TAG:"TIT-20GHA10BB001-S12",SERVICE:"TANK TEMPERATURE",TIPE:"INSTRUMENTAÇÃO",DESCRIÇÃO:"TRANSMISSOR DE TEMPERATURA",Week:"W134",Logs:""},
-    {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA410",LOOP:"XV-20GHA10AA410",TAG:"XV-20GHA10AA410-S12",SERVICE:"WATER SERVICE",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",Week:"W133",Logs:""},
-    {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA411",LOOP:"XV-20GHA10AA411",TAG:"ZSH-20GHA10AA411-S12",SERVICE:"WATER SERVICE",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",Week:"W133",Logs:""}
+    {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA401",LOOP:"XV-20GHA10AA401",TAG:"ZSH-20GHA10AA401-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",WEEK:"W133",PONTOAPONTO:""},
+    {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA402",LOOP:"XV-20GHA10AA402",TAG:"ZSL-20GHA10AA402-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",WEEK:"W133",PONTOAPONTO:""},
+    {FORN:"FORN-02",SYS:"20GMA",SUBSYS:"KB003",LOOP:"XV-20GMA10KB003",TAG:"ZSH-20GMA10KB003-S12",SERVICE:"NEUTRALIZATION EFFLUENT PIT",TIPE:"INTERFACE ELÉTRICA EQUIPAMENTO",DESCRIÇÃO:"VÁLVULA ON/OFF",WEEK:"W133",PONTOAPONTO:"12/09/2026 14:32:00"},
+    {FORN:"FORN-02",SYS:"20GMA",SUBSYS:"KB004",LOOP:"XV-20GMA10KB004",TAG:"ZSL-20GMA10KB004-S12",SERVICE:"NEUTRALIZATION EFFLUENT PIT",TIPE:"INTERFACE ELÉTRICA EQUIPAMENTO",DESCRIÇÃO:"VÁLVULA ON/OFF",WEEK:"W132",PONTOAPONTO:""},
+    {FORN:"FORN-02",SYS:"20GMA",SUBSYS:"BB001",LOOP:"P-20GMA10BB001",TAG:"PSH-20GMA10BB001-S12",SERVICE:"EFFLUENT PIT",TIPE:"PRESSURE SWITCH",DESCRIÇÃO:"CHAVE DE PRESSÃO",WEEK:"W133",PONTOAPONTO:""},
+    {FORN:"FORN-02",SYS:"20GMA",SUBSYS:"BB002",LOOP:"L-20GMA10BB002",TAG:"LSH-20GMA10BB002-S12",SERVICE:"EFFLUENT PIT",TIPE:"LEVEL SWITCH",DESCRIÇÃO:"CHAVE DE NÍVEL",WEEK:"W133",PONTOAPONTO:""},
+    {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA401",LOOP:"FIC-20GHA10AA401",TAG:"FIC-20GHA10AA401-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"INSTRUMENTAÇÃO",DESCRIÇÃO:"CONTROLADOR DE VAZÃO",WEEK:"W133",PONTOAPONTO:"13/09/2026 08:05:00"},
+    {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"BB001",LOOP:"TIT-20GHA10BB001",TAG:"TIT-20GHA10BB001-S12",SERVICE:"TANK TEMPERATURE",TIPE:"INSTRUMENTAÇÃO",DESCRIÇÃO:"TRANSMISSOR DE TEMPERATURA",WEEK:"W134",PONTOAPONTO:""},
+    {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA410",LOOP:"XV-20GHA10AA410",TAG:"XV-20GHA10AA410-S12",SERVICE:"WATER SERVICE",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",WEEK:"W133",PONTOAPONTO:""},
+    {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA411",LOOP:"XV-20GHA10AA411",TAG:"ZSH-20GHA10AA411-S12",SERVICE:"WATER SERVICE",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",WEEK:"W133",PONTOAPONTO:""}
   ]
 };
 
 const $ = id => document.getElementById(id);
 const nowBR = () => new Intl.DateTimeFormat("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit"}).format(new Date()).replace(",","");
+const dateBR = () => new Intl.DateTimeFormat("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric"}).format(new Date());
 
 function currentWeek() {
   const today = new Date();
@@ -44,46 +45,89 @@ function currentWeek() {
 function escapeHTML(value) {
   return String(value ?? "—").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
 }
-function hasLog(row) { return String(row.Logs || "").trim().length > 0; }
-function latestLog(row) {
-  const logs = String(row.Logs || "").split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
-  return logs.length ? logs[logs.length-1] : "Não registrado";
+function normalizeExcelRow(row) {
+  // O Excel Online pode devolver nomes codificados (ex.: FORN_x002e_ e DESCRI_x00c7__x00c3_O).
+  // A API do Vercel converte esses nomes para o formato usado pela interface.
+  return {
+    FORN: row.FORN ?? row.FORN_x002e_ ?? "",
+    SYS: row.SYS ?? "",
+    SUBSYS: row.SUBSYS ?? "",
+    LOOP: row.LOOP ?? "",
+    TAG: row.TAG ?? "",
+    SERVICE: row.SERVICE ?? "",
+    TIPE: row.TIPE ?? "",
+    DESCRIÇÃO: row.DESCRIÇÃO ?? row.DESCRI_x00c7__x00c3_O ?? "",
+    WEEK: row.WEEK ?? "",
+    PONTOAPONTO: row["PONTO-A-PONTO"] ?? row.PONTOAPONTO ?? "",
+    Logs: row.Logs ?? row.LOGS ?? ""
+  };
 }
-function logEntries(row) {
-  return String(row.Logs || "").split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+
+function hasPontoAPonto(row) { return String(row.PONTOAPONTO || "").trim().length > 0; }
+function latestPontoAPonto(row) { return String(row.PONTOAPONTO || "").trim() || "Não registrado"; }
+function latestLog(row) {
+  const raw = String(row.Logs || "").trim();
+  if (!raw) return "Não registrado";
+  const parts = raw.split(/\r?\n/).map(v => v.trim()).filter(Boolean);
+  return parts[parts.length - 1] || raw;
 }
 
 async function loadData() {
-  if (!CONFIG.DATA_URL) {
-    state.rows = state.mockRows.map(r=>({...r}));
-    return;
-  }
-  const response = await fetch(CONFIG.DATA_URL, {method:"GET", headers:{"Accept":"application/json"}});
-  if (!response.ok) throw new Error("Falha ao consultar o Power Automate.");
-  const payload = await response.json();
-  state.rows = Array.isArray(payload) ? payload : (payload.value || payload.rows || []);
-}
+  const response = await fetch(CONFIG.DATA_URL, {
+    method: "POST",
+    headers: {"Content-Type": "application/json", "Accept": "application/json"},
+    body: JSON.stringify({week: currentWeek()})
+  });
 
-async function appendLog(row) {
-  const entry = `${nowBR()} - ${state.currentUser.nome}`;
-  const existing = String(row.Logs || "").trim();
-  const newLogs = existing ? `${existing}\n${entry}` : entry;
+  if (!response.ok) {
+    let message = "Falha ao consultar os equipamentos.";
+    try {
+      const error = await response.json();
+      if (error?.error) message = error.error;
+    } catch {}
+    throw new Error(message);
+  }
+
+  const payload = await response.json();
+  const rows = Array.isArray(payload) ? payload : (payload.value || payload.rows || []);
+  state.rows = rows.map(normalizeExcelRow);
+}
+async function registrarPontoAPonto(row) {
+  const registroData = dateBR();
+  const registroDataHora = nowBR();
+  const usuario = state.currentUser?.nome || "Usuário";
 
   if (CONFIG.WRITE_URL) {
     const response = await fetch(CONFIG.WRITE_URL, {
       method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({TAG:row.TAG, Logs:newLogs})
+      headers:{"Content-Type":"application/json","Accept":"application/json"},
+      body:JSON.stringify({
+        TAG: row.TAG,
+        "PONTO-A-PONTO": registroData,
+        nome: usuario,
+        dataHora: registroDataHora
+      })
     });
-    if (!response.ok) throw new Error("Não foi possível atualizar o log no Excel.");
+    if (!response.ok) {
+      let message = "Não foi possível registrar o ponto a ponto no Excel.";
+      try {
+        const error = await response.json();
+        if (error?.error || error?.mensagem) message = error.error || error.mensagem;
+      } catch {}
+      throw new Error(message);
+    }
   }
-  row.Logs = newLogs;
-  return entry;
+
+  // Atualização otimista da linha carregada; o Excel continua sendo a fonte oficial.
+  row.PONTOAPONTO = registroData;
+  row.Logs = [String(row.Logs || "").trim(), `${registroDataHora} - ${usuario}`].filter(Boolean).join("\n");
+  return registroData;
 }
+
 
 function populateFilters() {
   const week = currentWeek();
-  const rows = state.rows.filter(r => String(r.Week).trim().toUpperCase() === week);
+  const rows = state.rows.filter(r => String(r.WEEK).trim().toUpperCase() === week);
   const sys = [...new Set(rows.map(r=>String(r.SYS||"").trim()).filter(Boolean))].sort();
   const subsys = [...new Set(rows.map(r=>String(r.SUBSYS||"").trim()).filter(Boolean))].sort();
   $("sysFilter").innerHTML = `<option value="">Todos</option>` + sys.map(v=>`<option>${escapeHTML(v)}</option>`).join("");
@@ -96,7 +140,7 @@ function filteredRows() {
   const sys = $("sysFilter").value;
   const subsys = $("subsysFilter").value;
   return state.rows.filter(r =>
-    String(r.Week).trim().toUpperCase() === week &&
+    String(r.WEEK).trim().toUpperCase() === week &&
     (!q || String(r.TAG).toLowerCase().includes(q)) &&
     (!sys || String(r.SYS) === sys) &&
     (!subsys || String(r.SUBSYS) === subsys)
@@ -104,7 +148,7 @@ function filteredRows() {
 }
 
 function counters(rows) {
-  const done = rows.filter(hasLog).length;
+  const done = rows.filter(hasPontoAPonto).length;
   $("totalCount").textContent = rows.length;
   $("doneCount").textContent = done;
   $("pendingCount").textContent = rows.length - done;
@@ -115,15 +159,15 @@ function renderTable() {
   const body = $("tagTableBody");
   body.innerHTML = rows.map(r => {
     const selected = r.TAG === state.selectedTag ? "selected" : "";
-    const log = latestLog(r);
+    const log = latestPontoAPonto(r);
     return `<tr class="${selected}" data-tag="${escapeHTML(r.TAG)}">
       <td class="tag-cell">${escapeHTML(r.TAG)}</td>
       <td>${escapeHTML(r.LOOP)}</td>
       <td>${escapeHTML(r.SERVICE)}</td>
       <td>${escapeHTML(r.TIPE)}</td>
       <td>${escapeHTML(r.DESCRIÇÃO)}</td>
-      <td class="week-cell">${escapeHTML(r.Week)}</td>
-      <td class="log-cell">${hasLog(r) ? escapeHTML(log) : "—"}</td>
+      <td class="week-cell">${escapeHTML(r.WEEK)}</td>
+      <td class="log-cell">${hasPontoAPonto(r) ? escapeHTML(log) : "—"}</td>
     </tr>`;
   }).join("");
   body.querySelectorAll("tr").forEach(tr => tr.onclick = () => selectItem(tr.dataset.tag));
@@ -149,10 +193,10 @@ function selectItem(tag, rerender=true) {
   $("fieldForn").textContent = row.FORN;
   $("fieldSys").textContent = row.SYS;
   $("fieldSubsys").textContent = row.SUBSYS;
-  $("fieldWeek").textContent = row.Week;
+  $("fieldWeek").textContent = row.WEEK;
   $("fieldDescription").textContent = row.DESCRIÇÃO;
   $("fieldLog").textContent = latestLog(row);
-  const done = hasLog(row);
+  const done = hasPontoAPonto(row);
   const badge = $("selectedBadge");
   badge.textContent = done ? "COM LOG" : "PENDENTE";
   badge.className = `tag-badge ${done ? "done" : "pending"}`;
@@ -185,10 +229,10 @@ async function registerPonto() {
   try {
     $("registerBtn").disabled = true;
     $("repeatBtn").disabled = true;
-    const entry = await appendLog(row);
+    const entry = await registrarPontoAPonto(row);
     selectItem(row.TAG);
-    $("actionMessage").textContent = `Registro acrescentado: ${entry}`;
-    toast("Ponto a ponto registrado.");
+    $("actionMessage").textContent = `Registro salvo em PONTO-A-PONTO: ${entry}. Log gravado com usuário, data e hora.`;
+    toast("Ponto a ponto registrado no Excel.");
     renderHistory();
   } catch (error) {
     toast(error.message || "Erro ao registrar.");
@@ -197,18 +241,24 @@ async function registerPonto() {
 }
 
 function renderHistory() {
-  const rows = state.rows.filter(r => String(r.Week).trim().toUpperCase() === currentWeek());
-  const done = rows.filter(hasLog);
+  const rows = state.rows.filter(r => String(r.WEEK).trim().toUpperCase() === currentWeek());
+  const done = rows.filter(hasPontoAPonto);
   $("historyDone").textContent = done.length;
   $("historyPending").textContent = rows.length - done.length;
   $("historyTotal").textContent = rows.length;
 
   const logs = [];
-  rows.forEach(r => logEntries(r).forEach(log => logs.push({tag:r.TAG, log})));
+  rows.forEach(r => {
+    if (String(r.Logs || "").trim()) {
+      logs.push({tag:r.TAG, log:r.Logs});
+    }
+  });
   logs.reverse();
 
   $("historyLog").innerHTML = logs.length ? logs.slice(0,30).map(item => {
-    const parts = item.log.split(" - ");
+    const entries = String(item.log || "").split(/\r?\n/).map(v => v.trim()).filter(Boolean);
+    const latest = entries[entries.length - 1] || "";
+    const parts = latest.split(" - ");
     const time = parts.shift() || "";
     const user = parts.join(" - ") || "Usuário";
     return `<div class="history-log-row">

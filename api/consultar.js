@@ -1,0 +1,66 @@
+export default async function handler(req, res) {
+  // Permite que o frontend hospedado no mesmo projeto Vercel faça a chamada.
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Método não permitido." });
+  }
+
+  const flowUrl = process.env.PPA_CONSULTAR_URL;
+  if (!flowUrl) {
+    return res.status(500).json({
+      error: "A variável PPA_CONSULTAR_URL não está configurada no Vercel."
+    });
+  }
+
+  const week = String(req.body?.week || "").trim().toUpperCase();
+  if (!/^W\d+$/.test(week)) {
+    return res.status(400).json({ error: "Semana inválida." });
+  }
+
+  try {
+    const response = await fetch(flowUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({ week })
+    });
+
+    const text = await response.text();
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: "O Power Automate retornou um erro.",
+        details: text.slice(0, 1000)
+      });
+    }
+
+    let payload;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      return res.status(502).json({
+        error: "A resposta do Power Automate não é um JSON válido."
+      });
+    }
+
+    const rows = Array.isArray(payload)
+      ? payload
+      : (payload.rows || payload.value || []);
+
+    return res.status(200).json({ rows });
+  } catch (error) {
+    return res.status(502).json({
+      error: "Não foi possível conectar ao Power Automate.",
+      details: error.message
+    });
+  }
+}

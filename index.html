@@ -98,7 +98,7 @@
             <div class="field"><span>SUBSYS</span><strong id="fieldSubsys">—</strong></div>
             <div class="field"><span>SEMANA</span><strong id="fieldWeek">—</strong></div>
             <div class="field field-wide"><span>DESCRIÇÃO</span><strong id="fieldDescription">—</strong></div>
-            <div class="field field-wide point-field"><span>ÚLTIMO LOG</span><strong id="fieldLog">Não registrado</strong></div>
+            <div class="field field-wide point-field"><span>ÚLTIMO PONTO A PONTO</span><strong id="fieldLog">Não registrado</strong></div>
           </div>
           <div class="action-area">
             <button id="registerBtn" class="primary-btn" disabled>✓ &nbsp;Registrar data de ponto-a-ponto</button>
@@ -132,11 +132,11 @@
 
     <section id="screen-history" class="screen">
       <div class="page-title-row">
-        <div><span class="section-kicker">AUDITORIA</span><h2>Histórico de registros</h2><p>Histórico consolidado a partir do campo Logs do Excel.</p></div>
+        <div><span class="section-kicker">AUDITORIA</span><h2>Histórico de registros</h2><p>Histórico consolidado a partir do campo PONTO-A-PONTO do Excel.</p></div>
         <button id="refreshHistory" class="ghost-btn">↻ Atualizar</button>
       </div>
       <div class="metrics-grid">
-        <div class="metric-card card"><span>COM LOG</span><strong id="historyDone">0</strong><small>TAGs com pelo menos um registro</small></div>
+        <div class="metric-card card"><span>COM PONTO A PONTO</span><strong id="historyDone">0</strong><small>TAGs com registro de ponto a ponto</small></div>
         <div class="metric-card card"><span>PENDENTES</span><strong id="historyPending">0</strong><small>TAGs sem registro</small></div>
         <div class="metric-card card"><span>PROGRAMADOS</span><strong id="historyTotal">0</strong><small>equipamentos da semana</small></div>
       </div>
@@ -175,7 +175,7 @@
     <button id="closeModal" class="modal-close">×</button>
     <span class="section-kicker">CONFIRMAÇÃO</span>
     <h3>Repetir ponto a ponto?</h3>
-    <p>Será acrescentado um novo registro ao campo <strong>Logs</strong> desta TAG. A <strong>Week</strong> permanecerá inalterada.</p>
+    <p>A coluna <strong>PONTO-A-PONTO</strong> desta TAG será atualizada com a nova data e hora. A <strong>WEEK</strong> permanecerá inalterada e nenhuma nova linha será criada.</p>
     <div class="modal-actions"><button id="cancelModal" class="secondary-btn">Cancelar</button><button id="confirmRepeat" class="primary-btn">Confirmar registro</button></div>
   </div>
 </div>
