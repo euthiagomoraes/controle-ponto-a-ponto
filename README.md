@@ -115,3 +115,22 @@ A função do Vercel repassa a semana ao Power Automate e devolve as linhas do E
 
 O fluxo do Power Automate deve usar a coluna `WEEK` no filtro:
 `WEEK eq '@{triggerBody()?['week']}'`
+
+
+## Variáveis de ambiente da Vercel
+
+Configure em Production:
+
+- `PPA_LOGIN_URL` — URL do fluxo **PPA - Login**
+- `PPA_CONSULTAR_URL` — URL do fluxo **PPA - Consultar Equipamentos**
+- `PPA_REGISTRAR_URL` — URL do fluxo **PPA - Registrar Ponto a Ponto**
+
+O navegador chama apenas `/api/login`, `/api/consultar` e `/api/registrar`; as URLs dos Power Automate não ficam expostas no JavaScript.
+
+### Regras de gravação
+
+- Não cria nova linha no Excel.
+- Localiza a linha pela coluna `TAG`.
+- Atualiza `PONTO-A-PONTO` com somente a data (`dd/MM/yyyy`).
+- Acrescenta em `Logs` o usuário + data + hora, preservando o histórico anterior.
+- `WEEK` não é alterado.

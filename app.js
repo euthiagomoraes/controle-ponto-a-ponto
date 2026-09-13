@@ -1,10 +1,11 @@
-/* REV. 2 — protótipo local.
-   Na integração real, substitua DATA_URL/WRITE_URL por endpoints do Power Automate.
+/* Integração Vercel + Power Automate + Excel.
+   As URLs reais dos fluxos permanecem em variáveis de ambiente do Vercel.
    Nunca coloque credenciais, client secrets ou senha do OneDrive neste arquivo. */
 
 const CONFIG = {
+  LOGIN_URL: "/api/login",
   DATA_URL: "/api/consultar",
-  WRITE_URL: "",  // Será integrado depois com o fluxo de registro em J (PONTO-A-PONTO)
+  WRITE_URL: "/api/registrar",
   TABLE_NAME: "tbPontoAPonto",
   LOGIN_TABLE: "tbLogin"
 };
@@ -22,11 +23,11 @@ const state = {
   mockRows: [
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA401",LOOP:"XV-20GHA10AA401",TAG:"ZSH-20GHA10AA401-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",WEEK:"W133",PONTOAPONTO:""},
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA402",LOOP:"XV-20GHA10AA402",TAG:"ZSL-20GHA10AA402-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",WEEK:"W133",PONTOAPONTO:""},
-    {FORN:"FORN-02",SYS:"20GMA",SUBSYS:"KB003",LOOP:"XV-20GMA10KB003",TAG:"ZSH-20GMA10KB003-S12",SERVICE:"NEUTRALIZATION EFFLUENT PIT",TIPE:"INTERFACE ELÉTRICA EQUIPAMENTO",DESCRIÇÃO:"VÁLVULA ON/OFF",WEEK:"W133",PONTOAPONTO:"12/09/2026 14:32:00"},
+    {FORN:"FORN-02",SYS:"20GMA",SUBSYS:"KB003",LOOP:"XV-20GMA10KB003",TAG:"ZSH-20GMA10KB003-S12",SERVICE:"NEUTRALIZATION EFFLUENT PIT",TIPE:"INTERFACE ELÉTRICA EQUIPAMENTO",DESCRIÇÃO:"VÁLVULA ON/OFF",WEEK:"W133",PONTOAPONTO:"12/09/2026"},
     {FORN:"FORN-02",SYS:"20GMA",SUBSYS:"KB004",LOOP:"XV-20GMA10KB004",TAG:"ZSL-20GMA10KB004-S12",SERVICE:"NEUTRALIZATION EFFLUENT PIT",TIPE:"INTERFACE ELÉTRICA EQUIPAMENTO",DESCRIÇÃO:"VÁLVULA ON/OFF",WEEK:"W132",PONTOAPONTO:""},
     {FORN:"FORN-02",SYS:"20GMA",SUBSYS:"BB001",LOOP:"P-20GMA10BB001",TAG:"PSH-20GMA10BB001-S12",SERVICE:"EFFLUENT PIT",TIPE:"PRESSURE SWITCH",DESCRIÇÃO:"CHAVE DE PRESSÃO",WEEK:"W133",PONTOAPONTO:""},
     {FORN:"FORN-02",SYS:"20GMA",SUBSYS:"BB002",LOOP:"L-20GMA10BB002",TAG:"LSH-20GMA10BB002-S12",SERVICE:"EFFLUENT PIT",TIPE:"LEVEL SWITCH",DESCRIÇÃO:"CHAVE DE NÍVEL",WEEK:"W133",PONTOAPONTO:""},
-    {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA401",LOOP:"FIC-20GHA10AA401",TAG:"FIC-20GHA10AA401-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"INSTRUMENTAÇÃO",DESCRIÇÃO:"CONTROLADOR DE VAZÃO",WEEK:"W133",PONTOAPONTO:"13/09/2026 08:05:00"},
+    {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA401",LOOP:"FIC-20GHA10AA401",TAG:"FIC-20GHA10AA401-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"INSTRUMENTAÇÃO",DESCRIÇÃO:"CONTROLADOR DE VAZÃO",WEEK:"W133",PONTOAPONTO:"13/09/2026"},
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"BB001",LOOP:"TIT-20GHA10BB001",TAG:"TIT-20GHA10BB001-S12",SERVICE:"TANK TEMPERATURE",TIPE:"INSTRUMENTAÇÃO",DESCRIÇÃO:"TRANSMISSOR DE TEMPERATURA",WEEK:"W134",PONTOAPONTO:""},
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA410",LOOP:"XV-20GHA10AA410",TAG:"XV-20GHA10AA410-S12",SERVICE:"WATER SERVICE",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",WEEK:"W133",PONTOAPONTO:""},
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA411",LOOP:"XV-20GHA10AA411",TAG:"ZSH-20GHA10AA411-S12",SERVICE:"WATER SERVICE",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",WEEK:"W133",PONTOAPONTO:""}
@@ -96,26 +97,24 @@ async function registrarPontoAPonto(row) {
   const registroData = dateBR();
   const registroDataHora = nowBR();
   const usuario = state.currentUser?.nome || "Usuário";
+  const cracha = state.currentUser?.CRACHA || state.currentUser?.cracha || "";
 
-  if (CONFIG.WRITE_URL) {
-    const response = await fetch(CONFIG.WRITE_URL, {
-      method:"POST",
-      headers:{"Content-Type":"application/json","Accept":"application/json"},
-      body:JSON.stringify({
-        TAG: row.TAG,
-        "PONTO-A-PONTO": registroData,
-        nome: usuario,
-        dataHora: registroDataHora
-      })
-    });
-    if (!response.ok) {
-      let message = "Não foi possível registrar o ponto a ponto no Excel.";
-      try {
-        const error = await response.json();
-        if (error?.error || error?.mensagem) message = error.error || error.mensagem;
-      } catch {}
-      throw new Error(message);
-    }
+  const response = await fetch(CONFIG.WRITE_URL, {
+    method:"POST",
+    headers:{"Content-Type":"application/json","Accept":"application/json"},
+    body:JSON.stringify({
+      TAG: row.TAG,
+      nome: usuario,
+      cracha
+    })
+  });
+  if (!response.ok) {
+    let message = "Não foi possível registrar o ponto a ponto no Excel.";
+    try {
+      const error = await response.json();
+      if (error?.error || error?.mensagem) message = error.error || error.mensagem;
+    } catch {}
+    throw new Error(message);
   }
 
   // Atualização otimista da linha carregada; o Excel continua sendo a fonte oficial.
@@ -282,18 +281,36 @@ function setupProfile() {
   $("profileAvatar").textContent = initials || "TC";
   $("profileName").textContent = u.nome;
   $("profileName2").textContent = u.nome;
-  $("profileBadge").textContent = `Crachá: ${u.cracHa || u.CRACHA || "—"}`;
-  $("profileBadge2").textContent = u.cracHa || u.CRACHA || "—";
+  $("profileBadge").textContent = `Crachá: ${u.CRACHA || u.cracha || "—"}`;
+  $("profileBadge2").textContent = u.CRACHA || u.cracha || "—";
   $("profileWeek").textContent = currentWeek();
 }
 
-function login(name, badge) {
-  // Mock local para demonstração. Na produção, validar NOME + CRACHA + ATIVO=SIM via Power Automate.
-  state.currentUser = {nome:name, CRACHA:badge};
+async function login(name, badge) {
+  const response = await fetch(CONFIG.LOGIN_URL, {
+    method: "POST",
+    headers: {"Content-Type": "application/json", "Accept": "application/json"},
+    body: JSON.stringify({nome: name, cracha: badge})
+  });
+
+  let payload = {};
+  try { payload = await response.json(); } catch {}
+
+  if (!response.ok || payload.autorizado !== true) {
+    throw new Error(payload.mensagem || payload.error || "Usuário não autorizado.");
+  }
+
+  state.currentUser = {
+    nome: payload.nome || name,
+    CRACHA: payload.cracha || badge,
+    perfil: payload.perfil || ""
+  };
+
   sessionStorage.setItem("ppaUser", JSON.stringify(state.currentUser));
   $("loginScreen").classList.add("hidden");
   $("appShell").classList.remove("hidden");
   $("currentWeek").textContent = currentWeek();
+  $("loginMessage").textContent = "";
   setupProfile();
 }
 
@@ -303,14 +320,30 @@ function logout() {
   $("appShell").classList.add("hidden");
   $("loginScreen").classList.remove("hidden");
   $("loginForm").reset();
+  $("loginMessage").textContent = "";
 }
 
-$("loginForm").addEventListener("submit", e => {
+$("loginForm").addEventListener("submit", async e => {
   e.preventDefault();
   const name = $("loginName").value.trim();
   const badge = $("loginBadge").value.trim();
   if (!name || !badge) return;
-  login(name, badge);
+
+  const button = e.submitter || $("loginForm").querySelector('button[type="submit"]');
+  button.disabled = true;
+  $("loginMessage").textContent = "Validando acesso...";
+  $("loginMessage").className = "form-message";
+
+  try {
+    await login(name, badge);
+    await syncData();
+  } catch (error) {
+    $("loginMessage").textContent = error.message || "Usuário não autorizado.";
+    $("loginMessage").className = "form-message error";
+    sessionStorage.removeItem("ppaUser");
+  } finally {
+    button.disabled = false;
+  }
 });
 
 $("tagSearch").addEventListener("input", () => {
@@ -347,9 +380,17 @@ setInterval(() => {
 
 (async function init() {
   $("currentDateTime").textContent = nowBR();
-  await syncData();
   const saved = sessionStorage.getItem("ppaUser");
-  if (saved) {
-    try { login(JSON.parse(saved).nome, JSON.parse(saved).CRACHA); } catch { }
+  if (!saved) return;
+
+  try {
+    const user = JSON.parse(saved);
+    await login(user.nome, user.CRACHA || user.cracha);
+    await syncData();
+  } catch {
+    sessionStorage.removeItem("ppaUser");
+    state.currentUser = null;
+    $("appShell").classList.add("hidden");
+    $("loginScreen").classList.remove("hidden");
   }
 })();

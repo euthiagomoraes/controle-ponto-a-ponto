@@ -118,7 +118,7 @@
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>TAG</th><th>LOOP</th><th>SERVICE</th><th>TIPE</th><th>DESCRIÇÃO</th><th>SEMANA</th><th>LOGS</th></tr></thead>
+              <thead><tr><th>TAG</th><th>LOOP</th><th>SERVICE</th><th>TIPE</th><th>DESCRIÇÃO</th><th>SEMANA</th><th>PONTO-A-PONTO</th></tr></thead>
               <tbody id="tagTableBody"></tbody>
             </table>
             <div id="emptyState" class="empty-state hidden">
@@ -132,7 +132,7 @@
 
     <section id="screen-history" class="screen">
       <div class="page-title-row">
-        <div><span class="section-kicker">AUDITORIA</span><h2>Histórico de registros</h2><p>Histórico consolidado a partir do campo PONTO-A-PONTO do Excel.</p></div>
+        <div><span class="section-kicker">AUDITORIA</span><h2>Histórico de registros</h2><p>Histórico consolidado a partir do campo Logs do Excel.</p></div>
         <button id="refreshHistory" class="ghost-btn">↻ Atualizar</button>
       </div>
       <div class="metrics-grid">
@@ -175,7 +175,7 @@
     <button id="closeModal" class="modal-close">×</button>
     <span class="section-kicker">CONFIRMAÇÃO</span>
     <h3>Repetir ponto a ponto?</h3>
-    <p>A coluna <strong>PONTO-A-PONTO</strong> desta TAG será atualizada com a nova data e hora. A <strong>WEEK</strong> permanecerá inalterada e nenhuma nova linha será criada.</p>
+    <p>A coluna <strong>PONTO-A-PONTO</strong> desta TAG será atualizada somente com a nova data. O <strong>Logs</strong> receberá o usuário, a data e a hora. A <strong>WEEK</strong> permanecerá inalterada e nenhuma nova linha será criada.</p>
     <div class="modal-actions"><button id="cancelModal" class="secondary-btn">Cancelar</button><button id="confirmRepeat" class="primary-btn">Confirmar registro</button></div>
   </div>
 </div>
