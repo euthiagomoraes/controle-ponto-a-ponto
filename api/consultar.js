@@ -52,9 +52,24 @@ export default async function handler(req, res) {
       });
     }
 
-    const rows = Array.isArray(payload)
-      ? payload
-      : (payload.rows || payload.value || []);
+    let rows;
+    if (Array.isArray(payload)) {
+      rows = payload;
+    } else if (Array.isArray(payload?.rows)) {
+      rows = payload.rows;
+    } else if (typeof payload?.rows === "string") {
+      try {
+        rows = JSON.parse(payload.rows);
+      } catch {
+        return res.status(502).json({
+          error: "O campo rows recebido do Power Automate não contém um JSON válido."
+        });
+      }
+    } else if (Array.isArray(payload?.value)) {
+      rows = payload.value;
+    } else {
+      rows = [];
+    }
 
     return res.status(200).json({ rows });
   } catch (error) {
