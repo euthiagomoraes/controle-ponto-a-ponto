@@ -1,1 +1,185 @@
-<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#07111f"><title>Controle de Ponto a Ponto</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"><link rel="stylesheet" href="./styles.css"></head><body><div class="app-shell"><aside class="sidebar"><div class="brand"><div class="brand-mark">PP</div><div><strong>CONTROLE</strong><span>Ponto a Ponto</span></div></div><nav class="side-nav"><button class="nav-item active" data-screen="home"><span class="nav-icon">⌂</span><span>Início</span></button><button class="nav-item" data-screen="history"><span class="nav-icon">▥</span><span>Histórico</span></button><button class="nav-item" data-screen="profile"><span class="nav-icon">◯</span><span>Perfil</span></button></nav><div class="sidebar-footer"><span class="online-dot"></span>Sistema online</div></aside><main class="main-content"><header class="topbar"><div><p class="eyebrow">OPERAÇÃO DE CAMPO</p><h1>CONTROLE DE PONTO A PONTO</h1><p class="subtitle">Acompanhe e registre os testes de campo em tempo real</p></div><div class="topbar-meta"><span class="online-badge"><i></i> Online</span><span id="currentDateTime">--/--/---- --:--</span></div></header><section id="screen-home" class="screen active-screen"><div class="search-panel card"><div class="search-copy"><span class="section-kicker">CONSULTA</span><h2>Localizar TAG</h2><p>Pesquise pelo código da TAG para carregar os dados do equipamento.</p></div><div class="search-box"><span class="search-icon">⌕</span><input id="tagSearch" type="search" placeholder="Digite a TAG..." autocomplete="off"><button id="clearSearch" class="clear-search" aria-label="Limpar busca">×</button></div></div><div class="content-grid"><section class="equipment-card card"><div class="card-heading"><div><span class="section-kicker">EQUIPAMENTO SELECIONADO</span><h2 id="selectedTagTitle">Selecione uma TAG</h2></div><span id="selectedBadge" class="tag-badge">AGUARDANDO</span></div><div class="equipment-fields"><div class="field"><span>TAG</span><strong id="fieldTag">—</strong></div><div class="field"><span>LOOP</span><strong id="fieldLoop">—</strong></div><div class="field"><span>SERVICE</span><strong id="fieldService">—</strong></div><div class="field"><span>TIPE</span><strong id="fieldType">—</strong></div><div class="field field-wide"><span>DESCRIÇÃO</span><strong id="fieldDescription">—</strong></div><div class="field point-field"><span>PONTO-A-PONTO (W)</span><strong id="fieldPointDate">Não registrado</strong></div></div><div class="action-area"><button id="registerBtn" class="primary-btn" disabled><span>✓</span>Registrar data de ponto-a-ponto</button><button id="repeatBtn" class="secondary-btn" disabled><span>↻</span>Repetir ponto a ponto</button></div><p id="actionMessage" class="action-message" role="status"></p></section><section class="list-card card"><div class="list-header"><div><span class="section-kicker">BASE DE CONTROLE</span><h2>TAGs cadastradas</h2></div><div class="counters"><span><b id="totalCount">0</b> total</span><span class="counter-done"><b id="doneCount">0</b> realizados</span><span class="counter-pending"><b id="pendingCount">0</b> pendentes</span></div></div><div class="table-wrap"><table><thead><tr><th>TAG</th><th>LOOP</th><th>SERVICE</th><th>TIPE</th><th>DESCRIÇÃO</th><th>PONTO-A-PONTO</th><th>LOG</th></tr></thead><tbody id="tagTableBody"></tbody></table><div id="emptyState" class="empty-state hidden"><div>⌕</div><strong>Nenhuma TAG encontrada</strong><span>Tente outro código de TAG.</span></div></div></section></div></section><section id="screen-history" class="screen"><div class="page-title-row"><div><span class="section-kicker">ACOMPANHAMENTO</span><h2>Histórico</h2><p>Visão geral dos registros de ponto a ponto.</p></div><button id="refreshHistory" class="ghost-btn">↻ Atualizar</button></div><div class="metrics-grid"><div class="metric-card card"><span>REALIZADOS</span><strong id="historyDone">0</strong><small>registros concluídos</small></div><div class="metric-card card"><span>PENDENTES</span><strong id="historyPending">0</strong><small>aguardando registro</small></div><div class="metric-card card"><span>TOTAL</span><strong id="historyTotal">0</strong><small>TAGs cadastradas</small></div></div><div class="history-grid"><section class="chart-card card"><div class="card-heading"><div><span class="section-kicker">PROGRESSO</span><h3>Realizados x Pendentes</h3></div></div><div class="donut-wrap"><div id="donutChart" class="donut"><div class="donut-center"><strong id="donutPercent">0%</strong><span>realizado</span></div></div><div class="legend"><div><i class="legend-done"></i><span>Realizados</span><b id="legendDone">0</b></div><div><i class="legend-pending"></i><span>Pendentes</span><b id="legendPending">0</b></div></div></div></section><section class="chart-card card"><div class="card-heading"><div><span class="section-kicker">PRODUÇÃO</span><h3>Quantidade por dia</h3></div></div><div id="barChart" class="bar-chart"></div></section></div><section class="log-card card"><div class="list-header"><div><span class="section-kicker">AUDITORIA</span><h3>Últimas alterações</h3></div></div><div id="historyLog" class="history-log"></div></section></section><section id="screen-profile" class="screen"><div class="profile-layout"><section class="profile-card card"><div class="avatar">TM</div><span class="section-kicker">USUÁRIO CONECTADO</span><h2>Técnico de Campo</h2><p>@tecnico.campo</p><div class="profile-status"><i></i> Sessão ativa</div></section><section class="profile-info card"><span class="section-kicker">PERFIL</span><div class="info-row"><span>Usuário</span><strong>@tecnico.campo</strong></div><div class="info-row"><span>Acesso</span><strong>Operação de campo</strong></div><div class="info-row"><span>Fonte de dados</span><strong>Excel / OneDrive</strong></div><div class="info-row"><span>Última sincronização</span><strong id="lastSync">Agora</strong></div><button id="logoutBtn" class="logout-btn">Sair da conta</button></section></div></section></main></div><div id="confirmModal" class="modal hidden"><div class="modal-backdrop"></div><div class="modal-box"><button id="closeModal" class="modal-close">×</button><span class="section-kicker">CONFIRMAÇÃO</span><h3>Repetir ponto a ponto?</h3><p>Já existe um registro para esta TAG. A nova data/hora substituirá o valor anterior na coluna PONTO-A-PONTO (W).</p><div class="modal-actions"><button id="cancelModal" class="secondary-btn">Cancelar</button><button id="confirmRepeat" class="primary-btn">Confirmar alteração</button></div></div></div><div id="toast" class="toast" role="alert"></div><script src="./app.js"></script></body></html>
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07111f">
+  <title>Controle de Ponto a Ponto</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<div id="loginScreen" class="login-screen">
+  <div class="login-card">
+    <div class="brand-mark large">PP</div>
+    <p class="eyebrow">OPERAÇÃO DE CAMPO</p>
+    <h1>CONTROLE DE<br>PONTO A PONTO</h1>
+    <p class="login-subtitle">Acesso do técnico de campo</p>
+    <form id="loginForm">
+      <label>Nome
+        <input id="loginName" autocomplete="username" placeholder="Digite seu nome" required>
+      </label>
+      <label>Crachá
+        <input id="loginBadge" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Digite o crachá" required>
+      </label>
+      <button class="primary-btn full" type="submit">Entrar</button>
+      <p id="loginMessage" class="form-message"></p>
+    </form>
+    <small>Protótipo Rev. 2 • Integração Excel/Power Automate preparada</small>
+  </div>
+</div>
+
+<div id="appShell" class="app-shell hidden">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">PP</div>
+      <div><strong>CONTROLE</strong><span>Ponto a Ponto</span></div>
+    </div>
+    <nav class="side-nav">
+      <button class="nav-item active" data-screen="home"><span class="nav-icon">⌂</span><span>Início</span></button>
+      <button class="nav-item" data-screen="history"><span class="nav-icon">▥</span><span>Histórico</span></button>
+      <button class="nav-item" data-screen="profile"><span class="nav-icon">◯</span><span>Perfil</span></button>
+    </nav>
+    <div class="sidebar-footer"><span class="online-dot"></span>Sistema online</div>
+  </aside>
+
+  <main class="main-content">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">OPERAÇÃO DE CAMPO</p>
+        <h1>CONTROLE DE PONTO A PONTO</h1>
+        <p class="subtitle">Acompanhe e registre os testes de campo em tempo real</p>
+      </div>
+      <div class="topbar-meta">
+        <span class="online-badge"><i></i> Online</span>
+        <span id="currentDateTime">--/--/---- --:--</span>
+      </div>
+    </header>
+
+    <section id="screen-home" class="screen active-screen">
+      <div class="week-banner card">
+        <div>
+          <span class="section-kicker">PROGRAMAÇÃO DE CAMPO</span>
+          <strong>SEMANA ATUAL: <b id="currentWeek">W---</b></strong>
+          <p>Somente equipamentos programados manualmente para esta semana são exibidos.</p>
+        </div>
+        <div class="week-rule"><span class="online-dot"></span> Programação ativa</div>
+      </div>
+
+      <div class="filters card">
+        <div class="search-box">
+          <span class="search-icon">⌕</span>
+          <input id="tagSearch" type="search" placeholder="Pesquisar por TAG..." autocomplete="off">
+          <button id="clearSearch" class="clear-search" aria-label="Limpar busca">×</button>
+        </div>
+        <label class="select-field">SYS
+          <select id="sysFilter"><option value="">Todos</option></select>
+        </label>
+        <label class="select-field">SUBSYS
+          <select id="subsysFilter"><option value="">Todos</option></select>
+        </label>
+      </div>
+
+      <div class="content-grid">
+        <section class="equipment-card card">
+          <div class="card-heading">
+            <div><span class="section-kicker">EQUIPAMENTO SELECIONADO</span><h2 id="selectedTagTitle">Selecione uma TAG</h2></div>
+            <span id="selectedBadge" class="tag-badge">AGUARDANDO</span>
+          </div>
+          <div class="equipment-fields">
+            <div class="field"><span>TAG</span><strong id="fieldTag">—</strong></div>
+            <div class="field"><span>LOOP</span><strong id="fieldLoop">—</strong></div>
+            <div class="field"><span>SERVICE</span><strong id="fieldService">—</strong></div>
+            <div class="field"><span>TIPE</span><strong id="fieldType">—</strong></div>
+            <div class="field"><span>FORN.</span><strong id="fieldForn">—</strong></div>
+            <div class="field"><span>SYS</span><strong id="fieldSys">—</strong></div>
+            <div class="field"><span>SUBSYS</span><strong id="fieldSubsys">—</strong></div>
+            <div class="field"><span>SEMANA</span><strong id="fieldWeek">—</strong></div>
+            <div class="field field-wide"><span>DESCRIÇÃO</span><strong id="fieldDescription">—</strong></div>
+            <div class="field field-wide point-field"><span>ÚLTIMO LOG</span><strong id="fieldLog">Não registrado</strong></div>
+          </div>
+          <div class="action-area">
+            <button id="registerBtn" class="primary-btn" disabled>✓ &nbsp;Registrar data de ponto-a-ponto</button>
+            <button id="repeatBtn" class="secondary-btn" disabled>↻ &nbsp;Repetir ponto a ponto</button>
+          </div>
+          <p id="actionMessage" class="action-message" role="status"></p>
+        </section>
+
+        <section class="list-card card">
+          <div class="list-header">
+            <div><span class="section-kicker">BASE DE CONTROLE</span><h2>Equipamentos programados</h2></div>
+            <div class="counters">
+              <span><b id="totalCount">0</b> programados</span>
+              <span class="counter-done"><b id="doneCount">0</b> com log</span>
+              <span class="counter-pending"><b id="pendingCount">0</b> pendentes</span>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>TAG</th><th>LOOP</th><th>SERVICE</th><th>TIPE</th><th>DESCRIÇÃO</th><th>SEMANA</th><th>LOGS</th></tr></thead>
+              <tbody id="tagTableBody"></tbody>
+            </table>
+            <div id="emptyState" class="empty-state hidden">
+              <div>⌕</div><strong>Nenhum equipamento encontrado</strong>
+              <span>Ajuste a TAG, SYS ou SUBSYS.</span>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section id="screen-history" class="screen">
+      <div class="page-title-row">
+        <div><span class="section-kicker">AUDITORIA</span><h2>Histórico de registros</h2><p>Histórico consolidado a partir do campo Logs do Excel.</p></div>
+        <button id="refreshHistory" class="ghost-btn">↻ Atualizar</button>
+      </div>
+      <div class="metrics-grid">
+        <div class="metric-card card"><span>COM LOG</span><strong id="historyDone">0</strong><small>TAGs com pelo menos um registro</small></div>
+        <div class="metric-card card"><span>PENDENTES</span><strong id="historyPending">0</strong><small>TAGs sem registro</small></div>
+        <div class="metric-card card"><span>PROGRAMADOS</span><strong id="historyTotal">0</strong><small>equipamentos da semana</small></div>
+      </div>
+      <section class="log-card card">
+        <div class="list-header"><div><span class="section-kicker">LOGS</span><h3>Últimos registros</h3></div></div>
+        <div id="historyLog" class="history-log"></div>
+      </section>
+    </section>
+
+    <section id="screen-profile" class="screen">
+      <div class="profile-layout">
+        <section class="profile-card card">
+          <div id="profileAvatar" class="avatar">TC</div>
+          <span class="section-kicker">USUÁRIO CONECTADO</span>
+          <h2 id="profileName">Técnico de Campo</h2>
+          <p id="profileBadge">@crachá</p>
+          <div class="profile-status"><i></i> Sessão ativa</div>
+        </section>
+        <section class="profile-info card">
+          <span class="section-kicker">PERFIL</span>
+          <div class="info-row"><span>Nome</span><strong id="profileName2">—</strong></div>
+          <div class="info-row"><span>Crachá</span><strong id="profileBadge2">—</strong></div>
+          <div class="info-row"><span>Acesso</span><strong>Operação de campo</strong></div>
+          <div class="info-row"><span>Fonte de dados</span><strong>Excel / OneDrive</strong></div>
+          <div class="info-row"><span>Semana atual</span><strong id="profileWeek">—</strong></div>
+          <button id="logoutBtn" class="logout-btn">Sair da conta</button>
+        </section>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="confirmModal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box">
+    <button id="closeModal" class="modal-close">×</button>
+    <span class="section-kicker">CONFIRMAÇÃO</span>
+    <h3>Repetir ponto a ponto?</h3>
+    <p>Será acrescentado um novo registro ao campo <strong>Logs</strong> desta TAG. A <strong>Week</strong> permanecerá inalterada.</p>
+    <div class="modal-actions"><button id="cancelModal" class="secondary-btn">Cancelar</button><button id="confirmRepeat" class="primary-btn">Confirmar registro</button></div>
+  </div>
+</div>
+<div id="toast" class="toast" role="alert"></div>
+<script src="./app.js"></script>
+</body>
+</html>
