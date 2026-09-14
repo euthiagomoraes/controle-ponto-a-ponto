@@ -6,6 +6,7 @@ const CONFIG = {
   LOGIN_URL: "/api/login",
   DATA_URL: "/api/consultar",
   WRITE_URL: "/api/registrar",
+  DELETE_URL: "/api/excluir",
   TABLE_NAME: "tbPontoAPonto",
   LOGIN_TABLE: "tbLogin"
 };
@@ -93,6 +94,36 @@ async function loadData() {
   const rows = Array.isArray(payload) ? payload : (payload.value || payload.rows || []);
   state.rows = rows.map(normalizeExcelRow);
 }
+async function excluirPontoAPonto(row) {
+  const usuario = state.currentUser?.nome || "Usuário";
+  const cracha = state.currentUser?.CRACHA || state.currentUser?.cracha || "";
+
+  const response = await fetch(CONFIG.DELETE_URL, {
+    method:"POST",
+    headers:{"Content-Type":"application/json","Accept":"application/json"},
+    body:JSON.stringify({
+      TAG: row.TAG,
+      nome: usuario,
+      cracha
+    })
+  });
+  if (!response.ok) {
+    let message = "Não foi possível excluir o registro no Excel.";
+    try {
+      const error = await response.json();
+      if (error?.error || error?.mensagem) message = error.error || error.mensagem;
+    } catch {}
+    throw new Error(message);
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (payload?.sucesso === false) throw new Error(payload.mensagem || "Não foi possível excluir o registro.");
+
+  row.PONTOAPONTO = payload.pontoAPonto ?? "";
+  row.Logs = payload.logs ?? "";
+  return payload;
+}
+
 async function registrarPontoAPonto(row) {
   const registroData = dateBR();
   const registroDataHora = nowBR();
@@ -201,6 +232,7 @@ function selectItem(tag, rerender=true) {
   badge.className = `tag-badge ${done ? "done" : "pending"}`;
   $("registerBtn").disabled = false;
   $("repeatBtn").disabled = !done;
+  $("deleteBtn").disabled = !done;
   $("actionMessage").textContent = "";
   if (rerender) renderTable();
 }
@@ -213,6 +245,7 @@ function clearSelection() {
   $("selectedBadge").className = "tag-badge";
   $("registerBtn").disabled = true;
   $("repeatBtn").disabled = true;
+  $("deleteBtn").disabled = true;
 }
 
 function toast(message) {
@@ -235,6 +268,25 @@ async function registerPonto() {
     renderHistory();
   } catch (error) {
     toast(error.message || "Erro ao registrar.");
+    selectItem(row.TAG);
+  }
+}
+
+async function deletePontoAPonto() {
+  const row = state.rows.find(r => r.TAG === state.selectedTag);
+  if (!row || !hasPontoAPonto(row)) return;
+
+  try {
+    $("registerBtn").disabled = true;
+    $("repeatBtn").disabled = true;
+    $("deleteBtn").disabled = true;
+    const payload = await excluirPontoAPonto(row);
+    selectItem(row.TAG);
+    $("actionMessage").textContent = payload.mensagem || "Último registro de ponto a ponto excluído.";
+    toast("Registro excluído do Excel.");
+    renderHistory();
+  } catch (error) {
+    toast(error.message || "Erro ao excluir registro.");
     selectItem(row.TAG);
   }
 }
@@ -355,8 +407,11 @@ $("sysFilter").onchange = renderTable;
 $("subsysFilter").onchange = renderTable;
 $("registerBtn").onclick = registerPonto;
 $("repeatBtn").onclick = () => $("confirmModal").classList.remove("hidden");
+$("deleteBtn").onclick = () => $("deleteModal").classList.remove("hidden");
 ["closeModal","cancelModal"].forEach(id => $(id).onclick = () => $("confirmModal").classList.add("hidden"));
+["closeDeleteModal","cancelDeleteModal"].forEach(id => $(id).onclick = () => $("deleteModal").classList.add("hidden"));
 $("confirmRepeat").onclick = () => { $("confirmModal").classList.add("hidden"); registerPonto(); };
+$("confirmDelete").onclick = async () => { $("deleteModal").classList.add("hidden"); await deletePontoAPonto(); };
 $("refreshHistory").onclick = async () => { await syncData(); toast("Dados atualizados."); };
 $("logoutBtn").onclick = logout;
 document.querySelectorAll(".nav-item").forEach(b => b.onclick = () => nav(b.dataset.screen));

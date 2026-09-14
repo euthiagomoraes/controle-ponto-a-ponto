@@ -134,3 +134,7 @@ O navegador chama apenas `/api/login`, `/api/consultar` e `/api/registrar`; as U
 - Atualiza `PONTO-A-PONTO` com somente a data (`dd/MM/yyyy`).
 - Acrescenta em `Logs` o usuário + data + hora, preservando o histórico anterior.
 - `WEEK` não é alterado.
+
+
+### Exclusão do último ponto a ponto
+A interface usa `/api/excluir`, protegido pela variável de ambiente `PPA_EXCLUIR_URL`. O fluxo deve localizar a TAG, remover apenas o último registro do Logs do usuário autenticado e restaurar J para a data do registro anterior (ou vazio se não houver outro registro).

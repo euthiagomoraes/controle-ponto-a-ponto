@@ -103,6 +103,7 @@
           <div class="action-area">
             <button id="registerBtn" class="primary-btn" disabled>✓ &nbsp;Registrar data de ponto-a-ponto</button>
             <button id="repeatBtn" class="secondary-btn" disabled>↻ &nbsp;Repetir ponto a ponto</button>
+            <button id="deleteBtn" class="danger-btn" disabled>✕ &nbsp;Excluir registro</button>
           </div>
           <p id="actionMessage" class="action-message" role="status"></p>
         </section>
@@ -177,6 +178,16 @@
     <h3>Repetir ponto a ponto?</h3>
     <p>A coluna <strong>PONTO-A-PONTO</strong> desta TAG será atualizada somente com a nova data. O <strong>Logs</strong> receberá o usuário, a data e a hora. A <strong>WEEK</strong> permanecerá inalterada e nenhuma nova linha será criada.</p>
     <div class="modal-actions"><button id="cancelModal" class="secondary-btn">Cancelar</button><button id="confirmRepeat" class="primary-btn">Confirmar registro</button></div>
+  </div>
+</div>
+<div id="deleteModal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box">
+    <button id="closeDeleteModal" class="modal-close">×</button>
+    <span class="section-kicker">ATENÇÃO</span>
+    <h3>Excluir registro?</h3>
+    <p>Será excluído somente o <strong>último registro de ponto a ponto</strong> desta TAG. A linha do equipamento permanecerá na planilha. O <strong>WEEK</strong> não será alterado e nenhuma nova linha será criada.</p>
+    <div class="modal-actions"><button id="cancelDeleteModal" class="secondary-btn">Cancelar</button><button id="confirmDelete" class="danger-btn">Excluir registro</button></div>
   </div>
 </div>
 <div id="toast" class="toast" role="alert"></div>
