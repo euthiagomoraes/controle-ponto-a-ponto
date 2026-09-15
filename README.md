@@ -138,3 +138,23 @@ O navegador chama apenas `/api/login`, `/api/consultar` e `/api/registrar`; as U
 
 ### Exclusão do último ponto a ponto
 A interface usa `/api/excluir`, protegido pela variável de ambiente `PPA_EXCLUIR_URL`. O fluxo deve localizar a TAG, remover apenas o último registro do Logs do usuário autenticado e restaurar J para a data do registro anterior (ou vazio se não houver outro registro).
+
+## Perfil Supervisor
+
+A interface agora reconhece `PERFIL = SUPERVISOR` retornado pelo fluxo `PPA - Login` e direciona o usuário para uma área de visualização.
+
+### Variável adicional da Vercel
+
+```text
+PPA_DASHBOARD_URL
+```
+
+Essa variável deve apontar para um fluxo Power Automate que devolva toda a `tbPontoAPonto` em JSON (`rows`). O fluxo ainda precisa ser criado/configurado antes de o dashboard supervisor funcionar em produção.
+
+### Regras do dashboard
+
+- Sem filtros: previsto = total da base; realizado = itens com `PONTO-A-PONTO` preenchido.
+- Com `WEEK`: previsto e realizado ficam restritos à semana selecionada.
+- `FORN.`, `SYS` e `SUBSYS` podem ser combinados.
+- O supervisor não recebe ações de registrar, repetir ou excluir.
+- A programação do supervisor é somente leitura.

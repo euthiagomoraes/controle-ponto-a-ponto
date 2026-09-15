@@ -37,9 +37,14 @@
       <div class="brand-mark">PP</div>
       <div><strong>CONTROLE</strong><span>Ponto a Ponto</span></div>
     </div>
-    <nav class="side-nav">
+    <nav class="side-nav" id="sideNavTechnician">
       <button class="nav-item active" data-screen="home"><span class="nav-icon">⌂</span><span>Início</span></button>
       <button class="nav-item" data-screen="history"><span class="nav-icon">▥</span><span>Histórico</span></button>
+      <button class="nav-item" data-screen="profile"><span class="nav-icon">◯</span><span>Perfil</span></button>
+    </nav>
+    <nav class="side-nav hidden" id="sideNavSupervisor">
+      <button class="nav-item active" data-screen="supervisorDashboard"><span class="nav-icon">▦</span><span>Dashboard</span></button>
+      <button class="nav-item" data-screen="supervisorSchedule"><span class="nav-icon">▤</span><span>Programação</span></button>
       <button class="nav-item" data-screen="profile"><span class="nav-icon">◯</span><span>Perfil</span></button>
     </nav>
     <div class="sidebar-footer"><span class="online-dot"></span>Sistema online</div>
@@ -50,7 +55,7 @@
       <div>
         <p class="eyebrow">OPERAÇÃO DE CAMPO</p>
         <h1>CONTROLE DE PONTO A PONTO</h1>
-        <p class="subtitle">Acompanhe e registre os testes de campo em tempo real</p>
+        <p id="topbarSubtitle" class="subtitle">Acompanhe e registre os testes de campo em tempo real</p>
       </div>
       <div class="topbar-meta">
         <span class="online-badge"><i></i> Online</span>
@@ -144,6 +149,85 @@
       <section class="log-card card">
         <div class="list-header"><div><span class="section-kicker">LOGS</span><h3>Últimos registros</h3></div></div>
         <div id="historyLog" class="history-log"></div>
+      </section>
+    </section>
+
+    <section id="screen-supervisorDashboard" class="screen supervisor-screen">
+      <div class="page-title-row supervisor-title-row">
+        <div><span class="section-kicker">GESTÃO E ACOMPANHAMENTO</span><h2>Dashboard do Supervisor</h2><p>Acompanhe o total previsto x realizado em toda a base e aplique filtros interativos.</p></div>
+        <div class="supervisor-week-box">
+          <span>Semana selecionada</span>
+          <label><select id="supervisorWeekFilter"><option value="">Todas</option></select></label>
+        </div>
+      </div>
+
+      <div class="supervisor-filters card">
+        <label class="select-field">FORN.
+          <select id="supervisorFornFilter"><option value="">Todos</option></select>
+        </label>
+        <label class="select-field">SYS
+          <select id="supervisorSysFilter"><option value="">Todos</option></select>
+        </label>
+        <label class="select-field">SUBSYS
+          <select id="supervisorSubsysFilter"><option value="">Todos</option></select>
+        </label>
+        <button id="supervisorClearFilters" class="ghost-btn">↻ Limpar</button>
+      </div>
+
+      <div class="supervisor-metrics metrics-grid">
+        <div class="metric-card metric-blue card"><span>PREVISTO</span><strong id="supervisorPrevisto">0</strong><small>itens do recorte selecionado</small></div>
+        <div class="metric-card metric-green card"><span>REALIZADO</span><strong id="supervisorRealizado">0</strong><small>itens com Ponto a Ponto</small></div>
+        <div class="metric-card metric-orange card"><span>PENDENTE</span><strong id="supervisorPendente">0</strong><small>itens sem registro</small></div>
+        <div class="metric-card metric-purple card"><span>% REALIZADO</span><strong id="supervisorPercentual">0,0%</strong><small>do total previsto</small></div>
+      </div>
+
+      <div class="supervisor-chart-grid">
+        <section class="chart-card card">
+          <div class="chart-card-heading"><div><span class="section-kicker">COMPARATIVO</span><h3>Previsto x Realizado</h3></div><span id="supervisorChartCaption">Toda a base</span></div>
+          <div id="supervisorBars" class="bar-chart" aria-label="Gráfico de previsto versus realizado"></div>
+        </section>
+        <section class="chart-card card">
+          <div class="chart-card-heading"><div><span class="section-kicker">STATUS</span><h3>Status geral</h3></div></div>
+          <div class="donut-wrap">
+            <div id="supervisorDonut" class="donut-chart"><div class="donut-center"><strong id="supervisorDonutValue">0%</strong><span>realizado</span></div></div>
+            <div class="donut-legend"><div><i class="dot done"></i><span>Realizado</span><strong id="supervisorLegendDone">0</strong></div><div><i class="dot pending"></i><span>Pendente</span><strong id="supervisorLegendPending">0</strong></div></div>
+          </div>
+        </section>
+      </div>
+
+      <section class="log-card card supervisor-summary-card">
+        <div class="list-header"><div><span class="section-kicker">VISUALIZAÇÃO</span><h3>Resumo por semana</h3><p>Selecione uma semana no filtro acima ou mantenha “Todas” para comparar o total da base.</p></div></div>
+        <div class="table-wrap supervisor-week-table-wrap">
+          <table><thead><tr><th>WEEK</th><th>PREVISTO</th><th>REALIZADO</th><th>PENDENTE</th><th>% REALIZADO</th></tr></thead><tbody id="supervisorWeekSummaryBody"></tbody></table>
+        </div>
+      </section>
+    </section>
+
+    <section id="screen-supervisorSchedule" class="screen supervisor-screen">
+      <div class="page-title-row">
+        <div><span class="section-kicker">SOMENTE LEITURA</span><h2>Programação da Semana</h2><p>Visualização dos equipamentos programados. Nenhuma ação de registro está disponível para supervisores.</p></div>
+        <button id="supervisorRefreshSchedule" class="ghost-btn">↻ Atualizar</button>
+      </div>
+      <div class="supervisor-schedule-filters card">
+        <label class="select-field">WEEK
+          <select id="supervisorScheduleWeek"><option value="">Todas</option></select>
+        </label>
+        <label class="select-field">FORN.
+          <select id="supervisorScheduleForn"><option value="">Todos</option></select>
+        </label>
+        <label class="select-field">SYS
+          <select id="supervisorScheduleSys"><option value="">Todos</option></select>
+        </label>
+        <label class="select-field">SUBSYS
+          <select id="supervisorScheduleSubsys"><option value="">Todos</option></select>
+        </label>
+      </div>
+      <section class="list-card card">
+        <div class="list-header"><div><span class="section-kicker">BASE DE CONTROLE</span><h2>Equipamentos programados</h2></div><span class="readonly-pill">◉ Somente leitura</span></div>
+        <div class="table-wrap supervisor-schedule-table-wrap">
+          <table><thead><tr><th>TAG</th><th>LOOP</th><th>SERVICE</th><th>TIPE</th><th>DESCRIÇÃO</th><th>FORN.</th><th>SYS</th><th>SUBSYS</th><th>WEEK</th><th>PONTO-A-PONTO</th><th>LOGS</th></tr></thead><tbody id="supervisorScheduleBody"></tbody></table>
+          <div id="supervisorScheduleEmpty" class="empty-state hidden"><div>⌕</div><strong>Nenhum equipamento encontrado</strong><span>Ajuste os filtros da programação.</span></div>
+        </div>
       </section>
     </section>
 

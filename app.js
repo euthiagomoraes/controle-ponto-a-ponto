@@ -7,6 +7,7 @@ const CONFIG = {
   DATA_URL: "/api/consultar",
   WRITE_URL: "/api/registrar",
   DELETE_URL: "/api/excluir",
+  DASHBOARD_URL: "/api/dashboard",
   TABLE_NAME: "tbPontoAPonto",
   LOGIN_TABLE: "tbLogin"
 };
@@ -21,6 +22,7 @@ const state = {
   currentUser: null,
   selectedTag: null,
   rows: [],
+  supervisorRows: [],
   mockRows: [
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA401",LOOP:"XV-20GHA10AA401",TAG:"ZSH-20GHA10AA401-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",WEEK:"W133",PONTOAPONTO:""},
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA402",LOOP:"XV-20GHA10AA402",TAG:"ZSL-20GHA10AA402-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",WEEK:"W133",PONTOAPONTO:""},
@@ -154,6 +156,171 @@ async function registrarPontoAPonto(row) {
   return registroData;
 }
 
+
+
+function isSupervisor() {
+  return String(state.currentUser?.perfil || "").trim().toUpperCase() === "SUPERVISOR";
+}
+
+function populateSelect(selectId, values, selected = "", firstLabel = "Todos") {
+  const select = $(selectId);
+  if (!select) return;
+  const current = selected ?? "";
+  select.innerHTML = `<option value="">${firstLabel}</option>` + values.map(v => `<option value="${escapeHTML(v)}">${escapeHTML(v)}</option>`).join("");
+  if ([...select.options].some(o => o.value === current)) select.value = current;
+}
+
+async function loadSupervisorData() {
+  const response = await fetch(CONFIG.DASHBOARD_URL, {
+    method: "POST",
+    headers: {"Content-Type": "application/json", "Accept": "application/json"},
+    body: JSON.stringify({perfil: state.currentUser?.perfil || "SUPERVISOR"})
+  });
+
+  if (!response.ok) {
+    let message = "Não foi possível carregar o dashboard do supervisor.";
+    try {
+      const error = await response.json();
+      if (error?.error) message = error.error;
+    } catch {}
+    throw new Error(message);
+  }
+
+  const payload = await response.json();
+  let rows = [];
+  if (Array.isArray(payload)) rows = payload;
+  else if (Array.isArray(payload?.rows)) rows = payload.rows;
+  else if (typeof payload?.rows === "string") {
+    try { rows = JSON.parse(payload.rows); } catch { rows = []; }
+  } else if (Array.isArray(payload?.value)) rows = payload.value;
+  state.supervisorRows = rows.map(normalizeExcelRow);
+  populateSupervisorFilters();
+  renderSupervisorDashboard();
+  renderSupervisorSchedule();
+}
+
+function supervisorFilteredRows(ignoreWeek = false) {
+  const week = ignoreWeek ? "" : $("supervisorWeekFilter")?.value || "";
+  const forn = $("supervisorFornFilter")?.value || "";
+  const sys = $("supervisorSysFilter")?.value || "";
+  const subsys = $("supervisorSubsysFilter")?.value || "";
+  return state.supervisorRows.filter(r =>
+    (!week || String(r.WEEK).trim().toUpperCase() === week) &&
+    (!forn || String(r.FORN).trim() === forn) &&
+    (!sys || String(r.SYS).trim() === sys) &&
+    (!subsys || String(r.SUBSYS).trim() === subsys)
+  );
+}
+
+function supervisorScheduleFilteredRows() {
+  const week = $("supervisorScheduleWeek")?.value || "";
+  const forn = $("supervisorScheduleForn")?.value || "";
+  const sys = $("supervisorScheduleSys")?.value || "";
+  const subsys = $("supervisorScheduleSubsys")?.value || "";
+  return state.supervisorRows.filter(r =>
+    (!week || String(r.WEEK).trim().toUpperCase() === week) &&
+    (!forn || String(r.FORN).trim() === forn) &&
+    (!sys || String(r.SYS).trim() === sys) &&
+    (!subsys || String(r.SUBSYS).trim() === subsys)
+  );
+}
+
+function populateSupervisorFilters() {
+  const weeks = [...new Set(state.supervisorRows.map(r => String(r.WEEK || "").trim().toUpperCase()).filter(Boolean))].sort((a,b) => Number(a.slice(1))-Number(b.slice(1)));
+  const forns = [...new Set(state.supervisorRows.map(r => String(r.FORN || "").trim()).filter(Boolean))].sort();
+  const sys = [...new Set(state.supervisorRows.map(r => String(r.SYS || "").trim()).filter(Boolean))].sort();
+  const subsys = [...new Set(state.supervisorRows.map(r => String(r.SUBSYS || "").trim()).filter(Boolean))].sort();
+
+  populateSelect("supervisorWeekFilter", weeks, "", "Todas");
+  populateSelect("supervisorFornFilter", forns);
+  populateSelect("supervisorSysFilter", sys);
+  populateSelect("supervisorSubsysFilter", subsys);
+
+  const currentWeekValue = currentWeek();
+  populateSelect("supervisorScheduleWeek", weeks, weeks.includes(currentWeekValue) ? currentWeekValue : "", "Todas");
+  populateSelect("supervisorScheduleForn", forns);
+  populateSelect("supervisorScheduleSys", sys);
+  populateSelect("supervisorScheduleSubsys", subsys);
+}
+
+function supervisorStats(rows) {
+  const previsto = rows.length;
+  const realizado = rows.filter(hasPontoAPonto).length;
+  const pendente = previsto - realizado;
+  const percentual = previsto ? (realizado / previsto) * 100 : 0;
+  return { previsto, realizado, pendente, percentual };
+}
+
+function renderSupervisorCharts(stats) {
+  $("supervisorPrevisto").textContent = stats.previsto.toLocaleString("pt-BR");
+  $("supervisorRealizado").textContent = stats.realizado.toLocaleString("pt-BR");
+  $("supervisorPendente").textContent = stats.pendente.toLocaleString("pt-BR");
+  $("supervisorPercentual").textContent = `${stats.percentual.toLocaleString("pt-BR", {minimumFractionDigits:1, maximumFractionDigits:1})}%`;
+  $("supervisorDonutValue").textContent = `${stats.percentual.toLocaleString("pt-BR", {maximumFractionDigits:1})}%`;
+  $("supervisorLegendDone").textContent = stats.realizado.toLocaleString("pt-BR");
+  $("supervisorLegendPending").textContent = stats.pendente.toLocaleString("pt-BR");
+  $("supervisorChartCaption").textContent = $("supervisorWeekFilter").value || "Toda a base";
+
+  const max = Math.max(stats.previsto, stats.realizado, 1);
+  const previstoHeight = Math.max(12, (stats.previsto / max) * 100);
+  const realizadoHeight = Math.max(12, (stats.realizado / max) * 100);
+  $("supervisorBars").innerHTML = `
+    <div class="bar-columns">
+      <div class="bar-column"><div class="bar-value">${stats.previsto.toLocaleString("pt-BR")}</div><div class="bar-track"><div class="bar-fill bar-blue" style="height:${previstoHeight}%"></div></div><span>Previsto</span></div>
+      <div class="bar-column"><div class="bar-value">${stats.realizado.toLocaleString("pt-BR")}</div><div class="bar-track"><div class="bar-fill bar-green" style="height:${realizadoHeight}%"></div></div><span>Realizado</span></div>
+    </div>
+    <div class="bar-axis"><span>0</span><span>${Math.ceil(max/4).toLocaleString("pt-BR")}</span><span>${Math.ceil(max/2).toLocaleString("pt-BR")}</span><span>${Math.ceil(max*0.75).toLocaleString("pt-BR")}</span><span>${max.toLocaleString("pt-BR")}</span></div>`;
+
+  $("supervisorDonut").style.setProperty("--done", `${stats.percentual}%`);
+}
+
+function renderSupervisorWeekSummary() {
+  const filteredBase = supervisorFilteredRows(true);
+  const weeks = [...new Set(filteredBase.map(r => String(r.WEEK || "").trim().toUpperCase()).filter(Boolean))].sort((a,b) => Number(a.slice(1))-Number(b.slice(1)));
+  const body = $("supervisorWeekSummaryBody");
+  body.innerHTML = weeks.map(week => {
+    const stats = supervisorStats(filteredBase.filter(r => String(r.WEEK || "").trim().toUpperCase() === week));
+    return `<tr><td><strong>${escapeHTML(week)}</strong></td><td>${stats.previsto.toLocaleString("pt-BR")}</td><td>${stats.realizado.toLocaleString("pt-BR")}</td><td>${stats.pendente.toLocaleString("pt-BR")}</td><td>${stats.percentual.toLocaleString("pt-BR", {minimumFractionDigits:1, maximumFractionDigits:1})}%</td></tr>`;
+  }).join("") || `<tr><td colspan="5" class="empty-table-cell">Nenhum item encontrado.</td></tr>`;
+}
+
+function renderSupervisorDashboard() {
+  const rows = supervisorFilteredRows(false);
+  const stats = supervisorStats(rows);
+  renderSupervisorCharts(stats);
+  renderSupervisorWeekSummary();
+}
+
+function renderSupervisorSchedule() {
+  const rows = supervisorScheduleFilteredRows();
+  const body = $("supervisorScheduleBody");
+  body.innerHTML = rows.map(r => `<tr>
+    <td class="tag-cell">${escapeHTML(r.TAG)}</td>
+    <td>${escapeHTML(r.LOOP)}</td>
+    <td>${escapeHTML(r.SERVICE)}</td>
+    <td>${escapeHTML(r.TIPE)}</td>
+    <td>${escapeHTML(r.DESCRIÇÃO)}</td>
+    <td>${escapeHTML(r.FORN)}</td>
+    <td>${escapeHTML(r.SYS)}</td>
+    <td>${escapeHTML(r.SUBSYS)}</td>
+    <td>${escapeHTML(r.WEEK)}</td>
+    <td>${hasPontoAPonto(r) ? escapeHTML(r.PONTOAPONTO) : "—"}</td>
+    <td class="supervisor-log-cell">${escapeHTML(latestLog(r))}</td>
+  </tr>`).join("");
+  $("supervisorScheduleEmpty").classList.toggle("hidden", rows.length !== 0);
+}
+
+function applyRoleUI() {
+  const supervisor = isSupervisor();
+  $("sideNavTechnician").classList.toggle("hidden", supervisor);
+  $("sideNavSupervisor").classList.toggle("hidden", !supervisor);
+  $("topbarSubtitle").textContent = supervisor
+    ? "Acompanhe previsto x realizado e consulte a programação em modo somente leitura"
+    : "Acompanhe e registre os testes de campo em tempo real";
+  $("profileWeek").textContent = currentWeek();
+  const access = document.querySelector("#screen-profile .info-row:nth-of-type(3) strong");
+  if (access) access.textContent = supervisor ? "Acesso de supervisor" : "Operação de campo";
+}
 
 function populateFilters() {
   const week = currentWeek();
@@ -321,10 +488,17 @@ function renderHistory() {
 }
 
 function nav(screen) {
+  const allowedSupervisor = ["supervisorDashboard", "supervisorSchedule", "profile"];
+  const allowedTechnician = ["home", "history", "profile"];
+  const allowed = isSupervisor() ? allowedSupervisor : allowedTechnician;
+  if (!allowed.includes(screen)) screen = isSupervisor() ? "supervisorDashboard" : "home";
   document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active-screen"));
-  $(`screen-${screen}`).classList.add("active-screen");
+  const target = $(`screen-${screen}`);
+  if (target) target.classList.add("active-screen");
   document.querySelectorAll(".nav-item").forEach(b=>b.classList.toggle("active",b.dataset.screen===screen));
   if (screen === "history") renderHistory();
+  if (screen === "supervisorDashboard") renderSupervisorDashboard();
+  if (screen === "supervisorSchedule") renderSupervisorSchedule();
 }
 
 function setupProfile() {
@@ -363,6 +537,7 @@ async function login(name, badge) {
   $("appShell").classList.remove("hidden");
   $("currentWeek").textContent = currentWeek();
   $("loginMessage").textContent = "";
+  applyRoleUI();
   setupProfile();
 }
 
@@ -388,7 +563,13 @@ $("loginForm").addEventListener("submit", async e => {
 
   try {
     await login(name, badge);
-    await syncData();
+    if (isSupervisor()) {
+      nav("supervisorDashboard");
+      await loadSupervisorData();
+    } else {
+      nav("home");
+      await syncData();
+    }
   } catch (error) {
     $("loginMessage").textContent = error.message || "Usuário não autorizado.";
     $("loginMessage").className = "form-message error";
@@ -416,6 +597,22 @@ $("refreshHistory").onclick = async () => { await syncData(); toast("Dados atual
 $("logoutBtn").onclick = logout;
 document.querySelectorAll(".nav-item").forEach(b => b.onclick = () => nav(b.dataset.screen));
 
+["supervisorWeekFilter","supervisorFornFilter","supervisorSysFilter","supervisorSubsysFilter"].forEach(id => {
+  const el = $(id);
+  if (el) el.onchange = renderSupervisorDashboard;
+});
+["supervisorScheduleWeek","supervisorScheduleForn","supervisorScheduleSys","supervisorScheduleSubsys"].forEach(id => {
+  const el = $(id);
+  if (el) el.onchange = renderSupervisorSchedule;
+});
+$("supervisorClearFilters").onclick = () => {
+  ["supervisorWeekFilter","supervisorFornFilter","supervisorSysFilter","supervisorSubsysFilter"].forEach(id => { if ($(id)) $(id).value = ""; });
+  renderSupervisorDashboard();
+};
+$("supervisorRefreshSchedule").onclick = async () => {
+  try { await loadSupervisorData(); toast("Dashboard atualizado."); } catch (e) { toast(e.message || "Não foi possível atualizar o dashboard."); }
+};
+
 async function syncData() {
   try {
     await loadData();
@@ -441,7 +638,13 @@ setInterval(() => {
   try {
     const user = JSON.parse(saved);
     await login(user.nome, user.CRACHA || user.cracha);
-    await syncData();
+    if (isSupervisor()) {
+      nav("supervisorDashboard");
+      await loadSupervisorData();
+    } else {
+      nav("home");
+      await syncData();
+    }
   } catch {
     sessionStorage.removeItem("ppaUser");
     state.currentUser = null;
