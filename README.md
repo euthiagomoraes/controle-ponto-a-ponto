@@ -158,3 +158,67 @@ Essa variável deve apontar para um fluxo Power Automate que devolva toda a `tbP
 - `FORN.`, `SYS` e `SUBSYS` podem ser combinados.
 - O supervisor não recebe ações de registrar, repetir ou excluir.
 - A programação do supervisor é somente leitura.
+
+## Dashboard Supervisor — contrato otimizado do PPA_DASHBOARD_URL
+
+O dashboard usa uma API única `/api/dashboard` com dois modos:
+
+### `summary`
+
+Recebe:
+```json
+{
+  "perfil": "SUPERVISOR",
+  "mode": "summary",
+  "week": "",
+  "forn": "",
+  "sys": "",
+  "subsys": ""
+}
+```
+
+Retorna apenas agregados e opções de filtro, por exemplo:
+```json
+{
+  "mode": "summary",
+  "stats": {
+    "previsto": 1000,
+    "realizado": 327,
+    "pendente": 673,
+    "percentual": 32.7
+  },
+  "options": {
+    "weeks": ["W132", "W133"],
+    "forns": ["CONSAG"],
+    "sys": ["20GC"],
+    "subsys": ["20GCN10"]
+  },
+  "weeksSummary": [
+    {"week":"W133","previsto":500,"realizado":327,"pendente":173,"percentual":65.4}
+  ]
+}
+```
+
+### `schedule`
+
+Recebe os mesmos filtros e retorna somente as linhas necessárias para a programação visual:
+```json
+{
+  "perfil": "SUPERVISOR",
+  "mode": "schedule",
+  "week": "W133",
+  "forn": "",
+  "sys": "",
+  "subsys": ""
+}
+```
+
+Retorna:
+```json
+{
+  "mode": "schedule",
+  "rows": [ ... ]
+}
+```
+
+A interface não carrega a tabela inteira para o navegador no login. O resumo é agregado pelo Power Automate e a programação detalhada é carregada somente quando o supervisor abre a tela de programação.

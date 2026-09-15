@@ -23,6 +23,7 @@ const state = {
   selectedTag: null,
   rows: [],
   supervisorRows: [],
+  supervisorScheduleRows: [],
   mockRows: [
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA401",LOOP:"XV-20GHA10AA401",TAG:"ZSH-20GHA10AA401-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",WEEK:"W133",PONTOAPONTO:""},
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA402",LOOP:"XV-20GHA10AA402",TAG:"ZSL-20GHA10AA402-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",WEEK:"W133",PONTOAPONTO:""},
@@ -170,11 +171,18 @@ function populateSelect(selectId, values, selected = "", firstLabel = "Todos") {
   if ([...select.options].some(o => o.value === current)) select.value = current;
 }
 
-async function loadSupervisorData() {
+async function dashboardRequest(mode, filters = {}) {
   const response = await fetch(CONFIG.DASHBOARD_URL, {
     method: "POST",
     headers: {"Content-Type": "application/json", "Accept": "application/json"},
-    body: JSON.stringify({perfil: state.currentUser?.perfil || "SUPERVISOR"})
+    body: JSON.stringify({
+      perfil: state.currentUser?.perfil || "SUPERVISOR",
+      mode,
+      week: filters.week || "",
+      forn: filters.forn || "",
+      sys: filters.sys || "",
+      subsys: filters.subsys || ""
+    })
   });
 
   if (!response.ok) {
@@ -185,73 +193,81 @@ async function loadSupervisorData() {
     } catch {}
     throw new Error(message);
   }
-
-  const payload = await response.json();
-  let rows = [];
-  if (Array.isArray(payload)) rows = payload;
-  else if (Array.isArray(payload?.rows)) rows = payload.rows;
-  else if (typeof payload?.rows === "string") {
-    try { rows = JSON.parse(payload.rows); } catch { rows = []; }
-  } else if (Array.isArray(payload?.value)) rows = payload.value;
-  state.supervisorRows = rows.map(normalizeExcelRow);
-  populateSupervisorFilters();
-  renderSupervisorDashboard();
-  renderSupervisorSchedule();
+  return response.json();
 }
 
-function supervisorFilteredRows(ignoreWeek = false) {
-  const week = ignoreWeek ? "" : $("supervisorWeekFilter")?.value || "";
-  const forn = $("supervisorFornFilter")?.value || "";
-  const sys = $("supervisorSysFilter")?.value || "";
-  const subsys = $("supervisorSubsysFilter")?.value || "";
-  return state.supervisorRows.filter(r =>
-    (!week || String(r.WEEK).trim().toUpperCase() === week) &&
-    (!forn || String(r.FORN).trim() === forn) &&
-    (!sys || String(r.SYS).trim() === sys) &&
-    (!subsys || String(r.SUBSYS).trim() === subsys)
+function currentSupervisorDashboardFilters() {
+  return {
+    week: $("supervisorWeekFilter")?.value || "",
+    forn: $("supervisorFornFilter")?.value || "",
+    sys: $("supervisorSysFilter")?.value || "",
+    subsys: $("supervisorSubsysFilter")?.value || ""
+  };
+}
+
+async function loadSupervisorSummary() {
+  const payload = await dashboardRequest("summary", currentSupervisorDashboardFilters());
+
+  // Aceita tanto a resposta otimizada com `stats` quanto a resposta
+  // anterior que devolvia os indicadores diretamente na raiz.
+  const stats = payload?.stats || (
+    ["previsto", "realizado", "pendente", "percentual"].some(k => Object.prototype.hasOwnProperty.call(payload || {}, k))
+      ? {
+          previsto: payload.previsto,
+          realizado: payload.realizado,
+          pendente: payload.pendente,
+          percentual: payload.percentual
+        }
+      : null
   );
+
+  if (stats) {
+    renderSupervisorCharts(stats);
+  }
+
+  const options = payload?.options || {};
+  if (Array.isArray(options.weeks) || Array.isArray(options.forns) || Array.isArray(options.sys) || Array.isArray(options.subsys)) {
+    const currentWeekValue = $("supervisorScheduleWeek")?.value || currentWeek();
+    populateSelect("supervisorWeekFilter", options.weeks || [], $("supervisorWeekFilter")?.value || "", "Todas");
+    populateSelect("supervisorFornFilter", options.forns || [], $("supervisorFornFilter")?.value || "", "Todos");
+    populateSelect("supervisorSysFilter", options.sys || [], $("supervisorSysFilter")?.value || "", "Todos");
+    populateSelect("supervisorSubsysFilter", options.subsys || [], $("supervisorSubsysFilter")?.value || "", "Todos");
+
+    populateSelect("supervisorScheduleWeek", options.weeks || [], currentWeekValue, "Todas");
+    populateSelect("supervisorScheduleForn", options.forns || [], $("supervisorScheduleForn")?.value || "", "Todos");
+    populateSelect("supervisorScheduleSys", options.sys || [], $("supervisorScheduleSys")?.value || "", "Todos");
+    populateSelect("supervisorScheduleSubsys", options.subsys || [], $("supervisorScheduleSubsys")?.value || "", "Todos");
+  }
 }
 
-function supervisorScheduleFilteredRows() {
-  const week = $("supervisorScheduleWeek")?.value || "";
-  const forn = $("supervisorScheduleForn")?.value || "";
-  const sys = $("supervisorScheduleSys")?.value || "";
-  const subsys = $("supervisorScheduleSubsys")?.value || "";
-  return state.supervisorRows.filter(r =>
-    (!week || String(r.WEEK).trim().toUpperCase() === week) &&
-    (!forn || String(r.FORN).trim() === forn) &&
-    (!sys || String(r.SYS).trim() === sys) &&
-    (!subsys || String(r.SUBSYS).trim() === subsys)
-  );
+async function loadSupervisorSchedule() {
+  const filters = {
+    week: $("supervisorScheduleWeek")?.value || currentWeek(),
+    forn: $("supervisorScheduleForn")?.value || "",
+    sys: $("supervisorScheduleSys")?.value || "",
+    subsys: $("supervisorScheduleSubsys")?.value || ""
+  };
+  const payload = await dashboardRequest("schedule", filters);
+  let rows = payload?.rows || [];
+  if (typeof rows === "string") {
+    try { rows = JSON.parse(rows); } catch { rows = []; }
+  }
+  state.supervisorScheduleRows = rows.map(normalizeExcelRow);
+  renderSupervisorSchedule(state.supervisorScheduleRows);
 }
 
-function populateSupervisorFilters() {
-  const weeks = [...new Set(state.supervisorRows.map(r => String(r.WEEK || "").trim().toUpperCase()).filter(Boolean))].sort((a,b) => Number(a.slice(1))-Number(b.slice(1)));
-  const forns = [...new Set(state.supervisorRows.map(r => String(r.FORN || "").trim()).filter(Boolean))].sort();
-  const sys = [...new Set(state.supervisorRows.map(r => String(r.SYS || "").trim()).filter(Boolean))].sort();
-  const subsys = [...new Set(state.supervisorRows.map(r => String(r.SUBSYS || "").trim()).filter(Boolean))].sort();
-
-  populateSelect("supervisorWeekFilter", weeks, "", "Todas");
-  populateSelect("supervisorFornFilter", forns);
-  populateSelect("supervisorSysFilter", sys);
-  populateSelect("supervisorSubsysFilter", subsys);
-
-  const currentWeekValue = currentWeek();
-  populateSelect("supervisorScheduleWeek", weeks, weeks.includes(currentWeekValue) ? currentWeekValue : "", "Todas");
-  populateSelect("supervisorScheduleForn", forns);
-  populateSelect("supervisorScheduleSys", sys);
-  populateSelect("supervisorScheduleSubsys", subsys);
+async function loadSupervisorData() {
+  await loadSupervisorSummary();
 }
 
-function supervisorStats(rows) {
-  const previsto = rows.length;
-  const realizado = rows.filter(hasPontoAPonto).length;
-  const pendente = previsto - realizado;
-  const percentual = previsto ? (realizado / previsto) * 100 : 0;
-  return { previsto, realizado, pendente, percentual };
-}
 
 function renderSupervisorCharts(stats) {
+  stats = {
+    previsto: Number(stats?.previsto || 0),
+    realizado: Number(stats?.realizado || 0),
+    pendente: Number(stats?.pendente || 0),
+    percentual: Number(stats?.percentual || 0)
+  };
   $("supervisorPrevisto").textContent = stats.previsto.toLocaleString("pt-BR");
   $("supervisorRealizado").textContent = stats.realizado.toLocaleString("pt-BR");
   $("supervisorPendente").textContent = stats.pendente.toLocaleString("pt-BR");
@@ -274,25 +290,12 @@ function renderSupervisorCharts(stats) {
   $("supervisorDonut").style.setProperty("--done", `${stats.percentual}%`);
 }
 
-function renderSupervisorWeekSummary() {
-  const filteredBase = supervisorFilteredRows(true);
-  const weeks = [...new Set(filteredBase.map(r => String(r.WEEK || "").trim().toUpperCase()).filter(Boolean))].sort((a,b) => Number(a.slice(1))-Number(b.slice(1)));
-  const body = $("supervisorWeekSummaryBody");
-  body.innerHTML = weeks.map(week => {
-    const stats = supervisorStats(filteredBase.filter(r => String(r.WEEK || "").trim().toUpperCase() === week));
-    return `<tr><td><strong>${escapeHTML(week)}</strong></td><td>${stats.previsto.toLocaleString("pt-BR")}</td><td>${stats.realizado.toLocaleString("pt-BR")}</td><td>${stats.pendente.toLocaleString("pt-BR")}</td><td>${stats.percentual.toLocaleString("pt-BR", {minimumFractionDigits:1, maximumFractionDigits:1})}%</td></tr>`;
-  }).join("") || `<tr><td colspan="5" class="empty-table-cell">Nenhum item encontrado.</td></tr>`;
-}
 
 function renderSupervisorDashboard() {
-  const rows = supervisorFilteredRows(false);
-  const stats = supervisorStats(rows);
-  renderSupervisorCharts(stats);
-  renderSupervisorWeekSummary();
+  // Os números chegam agregados do Power Automate; nenhum carregamento da base inteira no navegador.
 }
 
-function renderSupervisorSchedule() {
-  const rows = supervisorScheduleFilteredRows();
+function renderSupervisorSchedule(rows = state.supervisorScheduleRows || []) {
   const body = $("supervisorScheduleBody");
   body.innerHTML = rows.map(r => `<tr>
     <td class="tag-cell">${escapeHTML(r.TAG)}</td>
@@ -498,7 +501,7 @@ function nav(screen) {
   document.querySelectorAll(".nav-item").forEach(b=>b.classList.toggle("active",b.dataset.screen===screen));
   if (screen === "history") renderHistory();
   if (screen === "supervisorDashboard") renderSupervisorDashboard();
-  if (screen === "supervisorSchedule") renderSupervisorSchedule();
+  if (screen === "supervisorSchedule") { renderSupervisorSchedule(); loadSupervisorSchedule().catch(e => toast(e.message || "Não foi possível carregar a programação.")); }
 }
 
 function setupProfile() {
@@ -599,18 +602,18 @@ document.querySelectorAll(".nav-item").forEach(b => b.onclick = () => nav(b.data
 
 ["supervisorWeekFilter","supervisorFornFilter","supervisorSysFilter","supervisorSubsysFilter"].forEach(id => {
   const el = $(id);
-  if (el) el.onchange = renderSupervisorDashboard;
+  if (el) el.onchange = () => loadSupervisorSummary().catch(e => toast(e.message || "Não foi possível atualizar o dashboard."));
 });
 ["supervisorScheduleWeek","supervisorScheduleForn","supervisorScheduleSys","supervisorScheduleSubsys"].forEach(id => {
   const el = $(id);
-  if (el) el.onchange = renderSupervisorSchedule;
+  if (el) el.onchange = () => loadSupervisorSchedule().catch(e => toast(e.message || "Não foi possível atualizar a programação."));
 });
 $("supervisorClearFilters").onclick = () => {
   ["supervisorWeekFilter","supervisorFornFilter","supervisorSysFilter","supervisorSubsysFilter"].forEach(id => { if ($(id)) $(id).value = ""; });
-  renderSupervisorDashboard();
+  loadSupervisorSummary().catch(e => toast(e.message || "Não foi possível atualizar o dashboard."));
 };
 $("supervisorRefreshSchedule").onclick = async () => {
-  try { await loadSupervisorData(); toast("Dashboard atualizado."); } catch (e) { toast(e.message || "Não foi possível atualizar o dashboard."); }
+  try { await loadSupervisorSchedule(); toast("Programação atualizada."); } catch (e) { toast(e.message || "Não foi possível atualizar a programação."); }
 };
 
 async function syncData() {

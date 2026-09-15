@@ -13,6 +13,16 @@ export default async function handler(req, res) {
     });
   }
 
+  const body = req.body || {};
+  const requestBody = {
+    perfil: String(body.perfil || "SUPERVISOR"),
+    mode: String(body.mode || "summary"),
+    week: String(body.week || ""),
+    forn: String(body.forn || ""),
+    sys: String(body.sys || ""),
+    subsys: String(body.subsys || "")
+  };
+
   try {
     const response = await fetch(flowUrl, {
       method: "POST",
@@ -20,7 +30,7 @@ export default async function handler(req, res) {
         "Content-Type": "application/json",
         "Accept": "application/json"
       },
-      body: JSON.stringify({ perfil: String(req.body?.perfil || "SUPERVISOR") })
+      body: JSON.stringify(requestBody)
     });
 
     const text = await response.text();
@@ -40,6 +50,15 @@ export default async function handler(req, res) {
       });
     }
 
+    // O fluxo otimizado pode devolver o objeto pronto para o dashboard.
+    if (payload && (payload.stats || payload.options || payload.mode === "summary" || payload.mode === "schedule")) {
+      if (typeof payload.rows === "string") {
+        try { payload.rows = JSON.parse(payload.rows); } catch { payload.rows = []; }
+      }
+      return res.status(200).json(payload);
+    }
+
+    // Compatibilidade com a versão anterior do fluxo, que retornava somente rows.
     let rows;
     if (Array.isArray(payload)) rows = payload;
     else if (Array.isArray(payload?.rows)) rows = payload.rows;
@@ -53,7 +72,7 @@ export default async function handler(req, res) {
     } else if (Array.isArray(payload?.value)) rows = payload.value;
     else rows = [];
 
-    return res.status(200).json({ rows });
+    return res.status(200).json({ mode: requestBody.mode, rows });
   } catch (error) {
     return res.status(502).json({
       error: "Não foi possível conectar ao Power Automate do dashboard.",
