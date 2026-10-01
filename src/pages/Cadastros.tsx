@@ -1,0 +1,18 @@
+import { useState } from 'react'
+import { Edit3, UserPlus } from 'lucide-react'
+import { activities, disciplines, employees, teams } from '../data'
+import { AddButton, Button, ExportButton, Field, Filters, Input, Modal, SearchButton, Select, StatusBadge } from '../components/Common'
+
+export function Atividades() { return <CatalogPage title="Cadastro de Atividades" subtitle="Catálogo de atividades técnicas e seus parâmetros." addLabel="Nova atividade" columns={['Código','Nome','Tipo','Disciplina','Situação','Ações']} rows={activities.map(a=>[a.code,a.name,a.type,a.discipline,<span className="active-label">Ativa</span>,'Editar'])}/> }
+export function Disciplinas() { return <CatalogPage title="Disciplinas" subtitle="Disciplinas utilizadas na programação e execução." addLabel="Nova disciplina" columns={['Código','Nome','Descrição','Equipes','Status','Ações']} rows={disciplines.map(d=>[d.code,d.name,d.description,d.teams,<span className="active-label">Ativa</span>,'Editar'])}/> }
+export function Equipes() { return <CatalogPage title="Equipes" subtitle="Equipes vinculadas às disciplinas e responsáveis." addLabel="Nova equipe" columns={['Código','Equipe','Disciplina','Responsável','Pessoas','Status','Ações']} rows={teams.map(t=>[t.code,t.name,t.discipline,t.responsible,t.people,<span className="active-label">Ativa</span>,'Editar'])}/> }
+export function Funcionarios() { return <CatalogPage title="Funcionários" subtitle="Funcionários, equipes e acessos ao sistema." addLabel="Novo funcionário" columns={['Matrícula','Nome','Equipe','Disciplina','Acesso','Situação','Ações']} rows={employees.map(e=>[e.id,e.name,e.team,e.discipline,e.access,<span className="active-label">Ativo</span>,'Gerenciar'])}/> }
+
+function CatalogPage({title,subtitle,addLabel,columns,rows}:{title:string;subtitle:string;addLabel:string;columns:string[];rows:any[][]}) {
+  const [open,setOpen]=useState(false)
+  return <><div className="page-header"><div><h1>{title}</h1><p>{subtitle}</p></div><div className="header-actions"><ExportButton/><AddButton label={addLabel} onClick={()=>setOpen(true)}/></div></div><Filters><Field label="Pesquisar"><Input placeholder="Digite para pesquisar..."/></Field><Field label="Disciplina"><Select><option>Todas</option></Select></Field><Field label="Situação"><Select><option>Todas</option><option>Ativas</option><option>Inativas</option></Select></Field><SearchButton/></Filters><section className="panel table-panel"><div className="table-wrap"><table><thead><tr>{columns.map(c=><th key={c}>{c}</th>)}</tr></thead><tbody>{rows.map((r,i)=><tr key={i}>{r.map((v,j)=><td key={j}>{j===r.length-1?<Button variant="ghost"><Edit3 size={13}/> {v}</Button>:v}</td>)}</tr>)}</tbody></table></div><div className="table-foot"><span>Registros: {rows.length}</span><ExportButton/></div></section>{open&&<GenericCrudModal title={addLabel} onClose={()=>setOpen(false)}/>}</>
+}
+
+function GenericCrudModal({title,onClose}:{title:string;onClose:()=>void}) {
+ return <Modal title={title} onClose={onClose} footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button onClick={onClose}>Salvar</Button></>}><div className="form-grid two"><Field label="Código"><Input placeholder="Ex.: AT-005"/></Field><Field label="Nome"><Input placeholder="Nome do registro"/></Field><Field label="Disciplina"><Select><option>Elétrica</option><option>Instrumentação</option><option>Automação</option><option>Mecânica</option></Select></Field><Field label="Responsável"><Select><option>Selecionar</option><option>João Santos</option><option>Ana Costa</option></Select></Field></div><Field label="Descrição"><textarea placeholder="Descrição..."></textarea></Field></Modal>
+}
