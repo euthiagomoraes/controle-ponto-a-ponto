@@ -140,8 +140,21 @@
         </div>
         <div class="page-actions">
           <span class="current-week-chip">Semana <strong id="dashboardWeek">W---</strong></span>
+          <button id="exportDashboardPdfBtn" class="primary-btn">⇩ Exportar PDF</button>
           <button id="refreshDashboard" class="ghost-btn">↻ Atualizar</button>
         </div>
+      </div>
+
+      <div class="filters card dashboard-filters">
+        <label class="select-field">SEMANA
+          <select id="dashboardWeekFilter"><option value="">Todas</option></select>
+        </label>
+        <label class="select-field">ATIVIDADE
+          <select id="dashboardActivityFilter"><option value="">Todas</option></select>
+        </label>
+        <label class="select-field">EQUIPE
+          <select id="dashboardTeamFilter"><option value="">Todas</option></select>
+        </label>
       </div>
 
       <div class="metrics-grid dashboard-metrics">
@@ -332,6 +345,10 @@
         <section class="list-card card">
           <div class="list-header">
             <div><span class="section-kicker">BASE DE CONTROLE</span><h2>Equipamentos programados</h2></div>
+            <div class="tech-bulk-actions">
+              <label class="select-all-label"><input id="selectAllTags" type="checkbox"> Selecionar todos</label>
+              <button id="registerSelectedBtn" class="primary-btn" disabled>✓ Registrar selecionados (<span id="selectedCount">0</span>)</button>
+            </div>
             <div class="counters">
               <span><b id="totalCount">0</b> programados</span>
               <span class="counter-done"><b id="doneCount">0</b> com log</span>
@@ -340,7 +357,7 @@
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>TAG</th><th>LOOP</th><th>SERVICE</th><th>TIPE</th><th>DESCRIÇÃO</th><th>SEMANA</th><th>LOGS</th></tr></thead>
+              <thead><tr><th class="select-col"></th><th>TAG</th><th>LOOP</th><th>SERVICE</th><th>TIPE</th><th>DESCRIÇÃO</th><th>SEMANA</th><th>LOGS</th></tr></thead>
               <tbody id="tagTableBody"></tbody>
             </table>
             <div id="emptyState" class="empty-state hidden">
@@ -660,6 +677,7 @@
 
 <div id="toast" class="toast" role="alert"></div>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>

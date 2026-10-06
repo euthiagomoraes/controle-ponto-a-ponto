@@ -1,10 +1,10 @@
-# Controle Ponto a Ponto — Rev. 6
+# Controle Ponto a Ponto — Rev. 7
 
 Esta revisão evolui a Rev. 3 para uma arquitetura administrativa modular, mantendo o fluxo de campo de Ponto a Ponto.
 
 ## 1. Dashboard — Previsto x Realizado
 
-A área administrativa mantém o painel de acompanhamento com:
+A área administrativa mantém o painel de acompanhamento com filtros de **Semana**, **Atividade** e **Equipe**, além de exportação de relatório em PDF personalizado com gráfico, filtros, data/hora e responsável logado. O painel mantém:
 - previsto, realizado, saldo e percentual;
 - evolução semanal;
 - progresso da semana;
@@ -63,11 +63,11 @@ A exportação/importação usa o SheetJS Community Edition 0.20.3 no navegador,
 
 ## 5. Visualização modular das colunas
 
-Na configuração de cada atividade, o administrador pode visualizar a estrutura criada em dois modos:
+Na configuração de cada atividade, o administrador pode visualizar e editar a estrutura em dois modos:
 - **Empilhadas** — uma coluna por linha, melhor para edição e telas menores;
-- **Lado a lado** — cartões em grade, melhor para conferência da máscara horizontal.
+- **Lado a lado** — cartões em grade, melhor para conferência horizontal.
 
-A preferência fica gravada no navegador em `ppaColumnViewMode`. A ordem mostrada é exatamente a ordem usada na máscara do Excel.
+A revisão elimina a duplicação visual que ocorria entre a prévia e a lista editável: a própria lista de colunas muda de layout conforme o modo escolhido. A preferência fica gravada no navegador em `ppaColumnViewMode`. A ordem mostrada é exatamente a ordem usada na máscara do Excel.
 
 ## 6. Fluxo de importação Excel
 
@@ -98,7 +98,14 @@ Também permite:
 
 O Login do Técnico consulta os cadastros ativos por código. Nesta revisão, o armazenamento ainda é local para permitir validação visual e funcional.
 
-## 7. Persistência atual
+
+## 6. Execução múltipla no Técnico de Campo
+
+A tela do Técnico de Campo agora possui uma caixa de seleção em cada TAG, opção **Selecionar todos** para os resultados filtrados e o botão **Registrar selecionados**. Os registros são gravados individualmente em sequência, mantendo data/hora, usuário logado e equipe no histórico.
+
+O fluxo individual de seleção/registro continua disponível para operações unitárias.
+
+## 8. Persistência atual
 
 Nesta entrega, as novas configurações são armazenadas em `localStorage`:
 
@@ -110,7 +117,7 @@ Nesta entrega, as novas configurações são armazenadas em `localStorage`:
 
 Isso permite testar toda a interface antes de conectar definitivamente o Supabase.
 
-## 8. Próxima integração de backend
+## 9. Próxima integração de backend
 
 A arquitetura final deve substituir o `localStorage` pelas tabelas existentes do ecossistema Supabase, mantendo RLS e isolamento por família/projeto.
 
@@ -126,7 +133,7 @@ A proposta funcional é:
 
 A integração SQL deve ser feita após conferir os nomes/tipos das colunas atuais, sem substituir a estrutura existente às cegas.
 
-## 9. Git
+## 10. Git
 
 ```powershell
 cd "C:\Users\thiago.moraes\Downloads\controle-ponto-a-ponto"

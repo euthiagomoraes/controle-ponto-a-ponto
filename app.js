@@ -28,6 +28,7 @@ const state = {
   programacoes: [],
   selectedModuleId: null,
   columnViewMode: localStorage.getItem("ppaColumnViewMode") || "stacked",
+  selectedTags: new Set(),
   pendingImport: null,
   mockRows: [
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA401",LOOP:"XV-20GHA10AA401",TAG:"ZSH-20GHA10AA401-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",Week:"W136",Logs:""},
@@ -208,25 +209,104 @@ function toast(message) {
 /* =========================
    DASHBOARD
    ========================= */
-function dashboardMetrics() {
-  const week = currentWeek();
-  const seeded = state.dashboardSeed.find(x=>x.week===week);
-  const scheduled = state.programacoes.filter(x=>x.week===week).reduce((sum,x)=>sum+Number(x.qty||0),0);
-  const planned = Math.max(scheduled, seeded?.planned || 0);
-  const done = seeded?.done || 0;
+function dashboardFilterState() {
+  return {
+    week: $("dashboardWeekFilter")?.value || "",
+    activity: $("dashboardActivityFilter")?.value || "",
+    team: $("dashboardTeamFilter")?.value || ""
+  };
+}
+
+function setupDashboardFilters() {
+  const previous = dashboardFilterState();
+  const weeks = [...new Set([
+    currentWeek(),
+    ...state.dashboardSeed.map(x=>x.week),
+    ...state.programacoes.map(x=>x.week),
+    ...state.rows.map(x=>String(x.Week || "").trim().toUpperCase()).filter(Boolean)
+  ])].sort((a,b)=>Number(a.slice(1))-Number(b.slice(1)));
+  $("dashboardWeekFilter").innerHTML = `<option value="">Todas</option>${weeks.map(w=>`<option value="${escapeHTML(w)}">${escapeHTML(w)}</option>`).join("")}`;
+  $("dashboardActivityFilter").innerHTML = `<option value="">Todas</option>` + state.moduleCatalog.map(m=>`<option value="${escapeHTML(m.id)}">${escapeHTML(m.name)}</option>`).join("");
+  $("dashboardTeamFilter").innerHTML = `<option value="">Todas</option>` + state.teams.map(t=>`<option value="${escapeHTML(t.name)}">${escapeHTML(t.name)}</option>`).join("");
+  $("dashboardWeekFilter").value = weeks.includes(previous.week) ? previous.week : "";
+  $("dashboardActivityFilter").value = state.moduleCatalog.some(m=>m.id===previous.activity) ? previous.activity : "";
+  $("dashboardTeamFilter").value = state.teams.some(t=>t.name===previous.team) ? previous.team : "";
+}
+
+function rowActivityId() {
+  return "ppa";
+}
+
+function parseExecutionLog(log) {
+  const parts = String(log || "").split(" - ").map(x=>x.trim()).filter(Boolean);
+  return {time: parts[0] || "", user: parts[1] || "Usuário", team: parts[2] || ""};
+}
+
+function executionRowsForWeek(week, activity, team) {
+  if (activity && activity !== "ppa") return [];
+  const result = [];
+  state.rows.filter(row=>String(row.Week||"").trim().toUpperCase()===week).forEach(row=>{
+    logEntries(row).forEach(log=>{
+      const meta = parseExecutionLog(log);
+      if (!team || !meta.team || meta.team===team) result.push({row, log, meta});
+    });
+  });
+  return result;
+}
+
+function dashboardData() {
+  const filters = dashboardFilterState();
+  const weeks = [...new Set([
+    ...state.dashboardSeed.map(x=>x.week),
+    ...state.programacoes.map(x=>x.week),
+    ...state.rows.map(x=>String(x.Week || "").trim().toUpperCase()).filter(Boolean),
+    currentWeek()
+  ])].sort((a,b)=>Number(a.slice(1))-Number(b.slice(1)));
+  const selectedWeeks = filters.week ? weeks.filter(w=>w===filters.week) : weeks;
+  const activityName = id => state.moduleCatalog.find(m=>m.id===id)?.name || id;
+  const plannedByWeek = selectedWeeks.map(week=>{
+    const planned = state.programacoes.filter(p=>p.week===week && (!filters.activity || p.activity===filters.activity) && (!filters.team || p.team===filters.team)).reduce((s,p)=>s+Number(p.qty||0),0);
+    const seed = state.dashboardSeed.find(x=>x.week===week);
+    const fallback = !state.programacoes.some(p=>p.week===week) && (!filters.activity || filters.activity==="ppa") && !filters.team ? (seed?.planned||0) : 0;
+    return {week, planned: planned || fallback};
+  });
+  const doneByWeek = selectedWeeks.map(week=>({week, done: executionRowsForWeek(week,filters.activity,filters.team).length || ((!filters.activity||filters.activity==="ppa")&&!filters.team ? (state.dashboardSeed.find(x=>x.week===week)?.done||0) : 0)}));
+  const chart = selectedWeeks.map(week=>({week, planned:plannedByWeek.find(x=>x.week===week)?.planned||0, done:doneByWeek.find(x=>x.week===week)?.done||0}));
+  const planned = chart.reduce((s,x)=>s+x.planned,0);
+  const done = chart.reduce((s,x)=>s+x.done,0);
   const balance = Math.max(planned-done,0);
   const rate = planned ? Math.min(done/planned,1) : 0;
-  return {planned,done,balance,rate,week};
+  const activityMap = new Map();
+  state.moduleCatalog.forEach(m=>activityMap.set(m.id,{name:m.name,planned:0,done:0}));
+  state.programacoes.filter(p=>(!filters.week||p.week===filters.week)&&(!filters.activity||p.activity===filters.activity)&&(!filters.team||p.team===filters.team)).forEach(p=>{
+    const item=activityMap.get(p.activity)||{name:activityName(p.activity),planned:0,done:0}; item.planned+=Number(p.qty||0); activityMap.set(p.activity,item);
+  });
+  if (!state.programacoes.length && (!filters.activity||filters.activity==="ppa") && !filters.team) {
+    const item=activityMap.get("ppa"); if(item) item.planned=chart.reduce((s,x)=>s+x.planned,0);
+  }
+  if (filters.activity) {
+    const item=activityMap.get(filters.activity); if(item) item.done=done;
+  } else {
+    const ppa=activityMap.get("ppa"); if(ppa) ppa.done=executionRowsForWeek(filters.week||currentWeek(),"ppa",filters.team).length || ((!filters.team)?(state.dashboardSeed.find(x=>x.week===currentWeek())?.done||0):0);
+  }
+  const breakdown=[...activityMap.values()].filter(x=>x.planned||x.done).map(x=>({...x,pct:x.planned?Math.round(x.done/x.planned*100):0}));
+  return {filters,weeks:selectedWeeks,chart,planned,done,balance,rate,breakdown};
+}
+
+function dashboardMetrics() {
+  const d = dashboardData();
+  return {planned:d.planned,done:d.done,balance:d.balance,rate:d.rate,week:d.filters.week||currentWeek()};
 }
 
 function renderDashboard() {
-  const m = dashboardMetrics();
+  setupDashboardFilters();
+  const d = dashboardData();
+  const m = {planned:d.planned,done:d.done,balance:d.balance,rate:d.rate,week:d.filters.week||currentWeek()};
   $("dashboardWeek").textContent = m.week;
   $("metricPlanned").textContent = m.planned;
   $("metricDone").textContent = m.done;
   $("metricBalance").textContent = m.balance;
   $("metricRate").textContent = `${Math.round(m.rate*100)}%`;
-
   $("ringRate").textContent = `${Math.round(m.rate*100)}%`;
   $("ringPlanned").textContent = m.planned;
   $("ringDone").textContent = m.done;
@@ -234,46 +314,42 @@ function renderDashboard() {
   const deg = Math.round(m.rate*360);
   $("progressRing").style.background = `conic-gradient(#12a66a 0deg, #12a66a ${deg}deg, #e7edf4 ${deg}deg, #e7edf4 360deg)`;
 
-  const seed = state.dashboardSeed.map(x=>({...x}));
-  const maxValue = Math.max(...seed.map(x=>Math.max(x.planned,x.done)),1);
-  $("weeklyBars").innerHTML = seed.map(item=>{
-    const plannedH = Math.max(5,Math.round((item.planned/maxValue)*178));
-    const doneH = Math.max(5,Math.round((item.done/maxValue)*178));
-    return `<div class="week-group">
-      <div class="bar-pair" aria-label="${escapeHTML(item.week)}">
-        <div class="bar planned" style="height:${plannedH}px"><span class="bar-value">${item.planned}</span></div>
-        <div class="bar done" style="height:${doneH}px"><span class="bar-value">${item.done}</span></div>
-      </div>
-      <span class="week-label">${escapeHTML(item.week)}</span>
-    </div>`;
-  }).join("");
+  const maxValue = Math.max(...d.chart.map(x=>Math.max(x.planned,x.done)),1);
+  $("weeklyBars").innerHTML = d.chart.map(item=>{
+    const plannedH=Math.max(5,Math.round((item.planned/maxValue)*178));
+    const doneH=Math.max(5,Math.round((item.done/maxValue)*178));
+    return `<div class="week-group"><div class="bar-pair" aria-label="${escapeHTML(item.week)}"><div class="bar planned" style="height:${plannedH}px"><span class="bar-value">${item.planned}</span></div><div class="bar done" style="height:${doneH}px"><span class="bar-value">${item.done}</span></div></div><span class="week-label">${escapeHTML(item.week)}</span></div>`;
+  }).join("") || `<div class="empty-state inline"><strong>Nenhum dado para os filtros selecionados.</strong></div>`;
 
-  $("activityBreakdownRows").innerHTML = state.activityStats.map(item=>{
-    const pct = item.planned ? Math.round(item.done/item.planned*100) : 0;
-    return `<div class="breakdown-row">
-      <div class="activity-name">${escapeHTML(item.name)}<small>${item.done} de ${item.planned}</small></div>
-      <div class="bar-track"><i style="width:${Math.min(pct,100)}%"></i></div>
-      <div class="breakdown-value">${pct}%</div>
-    </div>`;
-  }).join("");
+  $("activityBreakdownRows").innerHTML = d.breakdown.map(item=>`<div class="breakdown-row"><div class="activity-name">${escapeHTML(item.name)}<small>${item.done} de ${item.planned}</small></div><div class="bar-track"><i style="width:${Math.min(item.pct,100)}%"></i></div><div class="breakdown-value">${item.pct}%</div></div>`).join("") || `<div class="empty-state inline"><strong>Nenhuma atividade encontrada.</strong></div>`;
 
-  const logs = [];
-  state.rows.forEach(row=>{
-    logEntries(row).forEach(log=>{
-      logs.push({tag:row.TAG,log});
-    });
-  });
-  logs.reverse();
-  $("recentExecutions").innerHTML = logs.length ? logs.slice(0,5).map(item=>{
-    const parts = item.log.split(" - ");
-    const time = parts.shift() || "";
-    const user = parts.join(" - ") || "Usuário";
-    return `<div class="execution-item">
-      <div class="exec-icon">✓</div>
-      <div><strong>${escapeHTML(item.tag)}</strong><span>${escapeHTML(user)}</span></div>
-      <span class="exec-time">${escapeHTML(time)}</span>
-    </div>`;
-  }).join("") : `<div class="empty-state inline"><strong>Nenhuma execução registrada.</strong></div>`;
+  const weekForLogs = d.filters.week || currentWeek();
+  const logs = executionRowsForWeek(weekForLogs,d.filters.activity,d.filters.team).map(x=>({tag:x.row.TAG,log:x.log,meta:x.meta})).reverse();
+  $("recentExecutions").innerHTML = logs.length ? logs.slice(0,5).map(item=>`<div class="execution-item"><div class="exec-icon">✓</div><div><strong>${escapeHTML(item.tag)}</strong><span>${escapeHTML(item.meta.user)}${item.meta.team?` • ${escapeHTML(item.meta.team)}`:""}</span></div><span class="exec-time">${escapeHTML(item.meta.time)}</span></div>`).join("") : `<div class="empty-state inline"><strong>Nenhuma execução registrada.</strong></div>`;
+}
+
+function exportDashboardPDF(){
+  const d=dashboardData(), f=d.filters, now=new Date(), responsible=currentUserLabel();
+  const activityName=f.activity?state.moduleCatalog.find(m=>m.id===f.activity)?.name||f.activity:"Todas";
+  const safeDate=now.toISOString().slice(0,10);
+  if(window.jspdf?.jsPDF){
+    const {jsPDF}=window.jspdf; const doc=new jsPDF({unit:"mm",format:"a4"});
+    let y=18;
+    const line=(text,size=10,bold=false)=>{doc.setFont("helvetica",bold?"bold":"normal");doc.setFontSize(size);doc.text(String(text),15,y);y+=size*.55+3;};
+    doc.setFillColor(7,17,31);doc.rect(0,0,210,28,"F");doc.setTextColor(255,255,255);doc.setFont("helvetica","bold");doc.setFontSize(16);doc.text("CONTROLE DE PONTO A PONTO",15,12);doc.setFontSize(9);doc.setFont("helvetica","normal");doc.text("Relatório gerencial — Dashboard",15,19);doc.text(`Gerado em ${nowBR()}`,15,25);doc.setTextColor(11,23,39);y=38;
+    line("FILTROS",8,true); line(`Semana: ${f.week||"Todas"}   |   Atividade: ${activityName}   |   Equipe: ${f.team||"Todas"}`,9); line(`Responsável pela exportação: ${responsible}`,9); y+=3;
+    line("RESUMO",8,true); line(`Previsto: ${d.planned}    Realizado: ${d.done}    Pendente: ${d.balance}    Realização: ${Math.round(d.rate*100)}%`,11,true); y+=4;
+    line("GRÁFICO — PREVISTO X REALIZADO",8,true);
+    const chartX=22, chartY=y+6, chartW=166, chartH=62, max=Math.max(...d.chart.flatMap(x=>[x.planned,x.done]),1); doc.setDrawColor(210,218,228);doc.line(chartX,chartY+chartH,chartX+chartW,chartY+chartH); const bw=Math.min(10,chartW/Math.max(d.chart.length,1)/3);
+    d.chart.forEach((item,i)=>{const gx=chartX+(i+.5)*(chartW/d.chart.length||chartW);const ph=item.planned/max*chartH,dh=item.done/max*chartH;doc.setFillColor(120,145,175);doc.rect(gx-bw,chartY+chartH-ph,bw,ph,"F");doc.setFillColor(18,166,106);doc.rect(gx,chartY+chartH-dh,bw,dh,"F");doc.setTextColor(60,73,90);doc.setFontSize(7);doc.text(item.week,gx,chartY+chartH+7,{align:"center"});doc.text(String(item.planned),gx-bw/2,chartY+chartH-ph-2,{align:"center"});doc.text(String(item.done),gx+bw/2,chartY+chartH-dh-2,{align:"center"});});
+    y=chartY+chartH+18; line("POR ATIVIDADE",8,true); d.breakdown.forEach(item=>line(`${item.name}: ${item.done}/${item.planned} (${item.pct}%)`,9));
+    doc.setTextColor(120,132,145);doc.setFontSize(7);doc.text("Documento gerado pelo Controle de Ponto a Ponto.",15,285);doc.save(`dashboard-ponto-a-ponto-${f.week||"todas"}-${safeDate}.pdf`);
+  } else {
+    const printWindow=window.open("","_blank","width=1000,height=800");
+    if(!printWindow){toast("Permita pop-ups para gerar o PDF.");return;}
+    const rows=d.chart.map(x=>`<tr><td>${escapeHTML(x.week)}</td><td>${x.planned}</td><td>${x.done}</td></tr>`).join("");
+    printWindow.document.write(`<!doctype html><html lang="pt-BR"><head><title>Dashboard Ponto a Ponto</title><style>body{font-family:Arial,sans-serif;padding:30px;color:#172334}h1{margin:0 0 4px}small{color:#6b7788}.box{display:inline-block;border:1px solid #ddd;padding:12px;margin:8px 8px 8px 0;border-radius:8px}.box b{display:block;font-size:22px}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border-bottom:1px solid #ddd;padding:8px;text-align:left}</style></head><body><h1>CONTROLE DE PONTO A PONTO</h1><small>Gerado em ${escapeHTML(nowBR())} • Responsável: ${escapeHTML(responsible)}</small><p>Semana: ${escapeHTML(f.week||"Todas")} • Atividade: ${escapeHTML(activityName)} • Equipe: ${escapeHTML(f.team||"Todas")}</p><div class="box">Previsto<b>${d.planned}</b></div><div class="box">Realizado<b>${d.done}</b></div><div class="box">Pendente<b>${d.balance}</b></div><div class="box">Realização<b>${Math.round(d.rate*100)}%</b></div><h2>Gráfico — Previsto x Realizado</h2><table><thead><tr><th>Semana</th><th>Previsto</th><th>Realizado</th></tr></thead><tbody>${rows}</tbody></table><h2>Por atividade</h2><table><thead><tr><th>Atividade</th><th>Realizado</th><th>Previsto</th><th>%</th></tr></thead><tbody>${d.breakdown.map(x=>`<tr><td>${escapeHTML(x.name)}</td><td>${x.done}</td><td>${x.planned}</td><td>${x.pct}%</td></tr>`).join("")}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`);printWindow.document.close();
+  }
 }
 
 /* =========================
@@ -409,7 +485,8 @@ async function loadData() {
 
 async function appendLog(row) {
   const name = state.currentUser?.nome || "Usuário";
-  const entry = `${nowBR()} - ${name}`;
+  const team = state.currentUser?.team || "";
+  const entry = `${nowBR()} - ${name}${team ? ` - ${team}` : ""}`;
   const existing = String(row.Logs || "").trim();
   const newLogs = existing ? `${existing}\n${entry}` : entry;
 
@@ -460,27 +537,50 @@ function renderTable() {
   const body = $("tagTableBody");
   body.innerHTML = rows.map(r=>{
     const selected = r.TAG===state.selectedTag ? "selected" : "";
+    const checked = state.selectedTags.has(r.TAG) ? "checked" : "";
     const log = latestLog(r);
     return `<tr class="${selected}" data-tag="${escapeHTML(r.TAG)}">
-      <td class="tag-cell">${escapeHTML(r.TAG)}</td>
-      <td>${escapeHTML(r.LOOP)}</td>
-      <td>${escapeHTML(r.SERVICE)}</td>
-      <td>${escapeHTML(r.TIPE)}</td>
-      <td>${escapeHTML(r.DESCRIÇÃO)}</td>
-      <td class="week-cell">${escapeHTML(r.Week)}</td>
-      <td class="log-cell">${hasLog(r) ? escapeHTML(log) : "—"}</td>
+      <td class="select-cell"><input type="checkbox" class="row-select" data-tag-select="${escapeHTML(r.TAG)}" ${checked} aria-label="Selecionar ${escapeHTML(r.TAG)}"></td>
+      <td class="tag-cell">${escapeHTML(r.TAG)}</td><td>${escapeHTML(r.LOOP)}</td><td>${escapeHTML(r.SERVICE)}</td><td>${escapeHTML(r.TIPE)}</td><td>${escapeHTML(r.DESCRIÇÃO)}</td><td class="week-cell">${escapeHTML(r.Week)}</td><td class="log-cell">${hasLog(r)?escapeHTML(log):"—"}</td>
     </tr>`;
   }).join("");
-
-  body.querySelectorAll("tr").forEach(tr=>tr.onclick=()=>selectItem(tr.dataset.tag));
+  body.querySelectorAll("tr").forEach(tr=>tr.onclick=e=>{if(e.target.closest("input"))return;selectItem(tr.dataset.tag);});
+  body.querySelectorAll("[data-tag-select]").forEach(input=>input.onchange=e=>{e.stopPropagation();if(input.checked)state.selectedTags.add(input.dataset.tagSelect);else state.selectedTags.delete(input.dataset.tagSelect);updateMultiSelectionUI();});
   $("emptyState").classList.toggle("hidden",rows.length!==0);
-  counters(rows);
-
+  counters(rows); updateMultiSelectionUI();
   if (!state.selectedTag && rows.length) selectItem(rows[0].TAG,false);
-  else if (state.selectedTag && !rows.some(r=>r.TAG===state.selectedTag)) {
-    state.selectedTag = null;
-    clearSelection();
-  }
+  else if (state.selectedTag && !rows.some(r=>r.TAG===state.selectedTag)) { state.selectedTag=null; clearSelection(); }
+}
+
+function updateMultiSelectionUI(){
+  const count=state.selectedTags.size;
+  $("selectedCount").textContent=count;
+  $("registerSelectedBtn").disabled=count===0;
+  const visible=filteredRows();
+  $("selectAllTags").checked=visible.length>0 && visible.every(r=>state.selectedTags.has(r.TAG));
+  $("selectAllTags").indeterminate=visible.some(r=>state.selectedTags.has(r.TAG)) && !$("selectAllTags").checked;
+}
+
+function toggleSelectAllTags(){
+  const visible=filteredRows();
+  if($("selectAllTags").checked) visible.forEach(r=>state.selectedTags.add(r.TAG));
+  else visible.forEach(r=>state.selectedTags.delete(r.TAG));
+  renderTable();
+}
+
+async function registerSelectedPontos(){
+  const tags=[...state.selectedTags];
+  if(!tags.length)return;
+  const rows=tags.map(tag=>state.rows.find(r=>r.TAG===tag)).filter(Boolean);
+  try{
+    $("registerSelectedBtn").disabled=true;
+    let done=0;
+    for(const row of rows){ await appendLog(row); done++; }
+    state.selectedTags.clear();
+    renderTable(); renderHistory(); renderDashboard();
+    toast(`${done} registro(s) de execução gravado(s).`);
+    $("actionMessage").textContent=`${done} equipamento(s) registrados em ${nowBR()}.`;
+  }catch(error){ toast(error.message||"Não foi possível registrar os selecionados."); renderTable(); }
 }
 
 function selectItem(tag,rerender=true) {
@@ -850,6 +950,8 @@ function renderModules(){
   $("moduleRequiredCount").textContent=mod.columns.filter(c=>c.required).length;
   $("moduleRecordCount").textContent=(moduleRecordStore()[mod.id]||[]).length;
   $("maskFileName").textContent=`mascara_${makeKey(mod.name)}.xlsx`;
+  const viewClass=state.columnViewMode==="side"?" side-view":" stacked-view";
+  $("columnRows").className=`column-list${viewClass}`;
   $("columnRows").innerHTML=mod.columns.map((c,i)=>`<div class="column-row" draggable="true" data-column-id="${escapeHTML(c.id)}"><div class="column-grip" title="Arraste para mover">☷</div><div class="column-order"><button class="mini-btn" data-move-column-up="${escapeHTML(c.id)}" title="Mover para cima" ${i===0?'disabled':''}>↑</button><button class="mini-btn" data-move-column-down="${escapeHTML(c.id)}" title="Mover para baixo" ${i===mod.columns.length-1?'disabled':''}>↓</button></div><div class="column-info"><strong>${escapeHTML(c.label)}</strong><small>${escapeHTML(c.key)}</small></div><div class="column-type"><span class="module-badge">${columnTypeLabel(c.type)}</span></div><div class="column-required">${c.required?'Obrigatória':'Opcional'}</div><div class="drag-hint">${c.type==='select'?(c.options||[]).join(', ')||'Sem opções':''}</div><div class="column-actions"><button class="mini-btn" data-edit-column="${escapeHTML(c.id)}" title="Editar">✎</button><button class="mini-btn danger" data-delete-column="${escapeHTML(c.id)}" title="Excluir">×</button></div></div>`).join("");
   $("columnRows").querySelectorAll("[data-edit-column]").forEach(b=>b.onclick=()=>openColumnModal(b.dataset.editColumn));
   $("columnRows").querySelectorAll("[data-delete-column]").forEach(b=>b.onclick=()=>deleteColumn(b.dataset.deleteColumn));
@@ -864,14 +966,14 @@ function setColumnViewMode(mode){
   state.columnViewMode=mode==="side"?"side":"stacked";
   localStorage.setItem("ppaColumnViewMode",state.columnViewMode);
   document.querySelectorAll("[data-column-view]").forEach(btn=>btn.classList.toggle("active",btn.dataset.columnView===state.columnViewMode));
-  const mod=selectedModule(); if(mod) renderColumnViewPreview(mod);
+  const mod=selectedModule(); if(mod) renderModules();
 }
 
 function renderColumnViewPreview(mod){
   const host=$("columnViewPreview"); if(!host)return;
   host.classList.toggle("stacked",state.columnViewMode==="stacked");
   host.classList.toggle("side",state.columnViewMode==="side");
-  host.innerHTML=mod.columns.map((c,i)=>`<div class="column-preview-card"><span class="preview-order">${String(i+1).padStart(2,"0")}</span><span class="preview-label">${escapeHTML(c.label)}</span><span class="preview-meta">${escapeHTML(c.key)}</span><span class="preview-chip">${columnTypeLabel(c.type)}${c.required?' • Obrigatória':''}</span></div>`).join("") || `<div class="empty-state inline"><strong>Nenhuma coluna criada.</strong><span>Use “Nova coluna” para montar a máscara.</span></div>`;
+  host.innerHTML="";
   document.querySelectorAll("[data-column-view]").forEach(btn=>btn.classList.toggle("active",btn.dataset.columnView===state.columnViewMode));
 }
 
@@ -1023,7 +1125,8 @@ function loadData(){
   return fetch(CONFIG.DATA_URL,{method:"GET",headers:{Accept:"application/json"}}).then(r=>{if(!r.ok)throw new Error("Falha ao consultar a fonte de dados.");return r.json();}).then(payload=>{state.rows=Array.isArray(payload)?payload:(payload.value||payload.rows||[]);});
 }
 async function appendLog(row){
-  const entry=`${nowBR()} - ${currentUserLabel()}`, existing=String(row.Logs||"").trim(), newLogs=existing?`${existing}\n${entry}`:entry;
+  const team=state.currentUser?.team||"";
+  const entry=`${nowBR()} - ${currentUserLabel()}${team?` - ${team}`:""}`, existing=String(row.Logs||"").trim(), newLogs=existing?`${existing}\n${entry}`:entry;
   if(CONFIG.WRITE_URL){const response=await fetch(CONFIG.WRITE_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({TAG:row.TAG,Logs:newLogs})});if(!response.ok)throw new Error("Não foi possível atualizar o registro.");}
   row.Logs=newLogs; localStorage.setItem("ppaImportedRows",JSON.stringify(state.rows)); return entry;
 }
@@ -1045,7 +1148,7 @@ document.querySelectorAll(".nav-item").forEach(b=>b.onclick=()=>nav(b.dataset.sc
 $("newProgramacaoBtn").onclick=openProgramModal; $("closeProgramModal").onclick=closeProgramModal; $("cancelProgramModal").onclick=closeProgramModal; $("programModal").querySelector(".modal-backdrop").onclick=closeProgramModal; $("programForm").addEventListener("submit",e=>{e.preventDefault();createProgramacao();});
 $("programWeekFilter").onchange=renderProgramacao; $("programActivityFilter").onchange=renderProgramacao; $("programTeamFilter").onchange=renderProgramacao; $("programActivity").onchange=()=>renderProgramCustomFields($("programActivity").value);
 $("refreshDashboard").onclick=()=>{renderDashboard();toast("Dashboard atualizado.");};
-$("tagSearch").addEventListener("input",()=>{$("clearSearch").style.display=$("tagSearch").value?"block":"none";renderTable();}); $("clearSearch").onclick=()=>{$("tagSearch").value="";$("clearSearch").style.display="none";renderTable();}; $("sysFilter").onchange=renderTable;$("subsysFilter").onchange=renderTable; $("registerBtn").onclick=registerPonto; $("repeatBtn").onclick=()=>$("confirmModal").classList.remove("hidden"); ["closeModal","cancelModal"].forEach(id=>$(id).onclick=()=>$("confirmModal").classList.add("hidden")); $("confirmModal").querySelector(".modal-backdrop").onclick=()=>$("confirmModal").classList.add("hidden"); $("confirmRepeat").onclick=()=>{$("confirmModal").classList.add("hidden");registerPonto();}; $("refreshHistory").onclick=async()=>{await loadData();populateFilters();renderTable();renderHistory();toast("Dados atualizados.");}; $("logoutBtn").onclick=logout;
+$("tagSearch").addEventListener("input",()=>{$("clearSearch").style.display=$("tagSearch").value?"block":"none";renderTable();}); $("selectAllTags").onchange=toggleSelectAllTags; $("registerSelectedBtn").onclick=registerSelectedPontos; $("clearSearch").onclick=()=>{$("tagSearch").value="";$("clearSearch").style.display="none";renderTable();}; $("sysFilter").onchange=renderTable;$("subsysFilter").onchange=renderTable; $("registerBtn").onclick=registerPonto; $("repeatBtn").onclick=()=>$("confirmModal").classList.remove("hidden"); ["closeModal","cancelModal"].forEach(id=>$(id).onclick=()=>$("confirmModal").classList.add("hidden")); $("confirmModal").querySelector(".modal-backdrop").onclick=()=>$("confirmModal").classList.add("hidden"); $("confirmRepeat").onclick=()=>{$("confirmModal").classList.add("hidden");registerPonto();}; $("refreshHistory").onclick=async()=>{await loadData();populateFilters();renderTable();renderHistory();toast("Dados atualizados.");}; $("logoutBtn").onclick=logout;
 
 /* módulos */
 $("newActivityBtn").onclick=()=>openActivityModal(); $("editActivityBtn").onclick=()=>openActivityModal(state.selectedModuleId); $("deleteActivityBtn").onclick=deleteActivity; $("newColumnBtn").onclick=()=>openColumnModal(); $("exportModuleMaskBtn").onclick=exportModuleMask; $("importModuleMaskBtn").onclick=triggerModuleImport; $("moduleExcelInput").addEventListener("change",e=>importModuleFile(e.target.files[0]));
