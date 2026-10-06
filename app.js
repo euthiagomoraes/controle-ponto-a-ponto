@@ -26,6 +26,9 @@ const state = {
   rows: [],
   role: null,
   programacoes: [],
+  selectedModuleId: null,
+  columnViewMode: localStorage.getItem("ppaColumnViewMode") || "stacked",
+  pendingImport: null,
   mockRows: [
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA401",LOOP:"XV-20GHA10AA401",TAG:"ZSH-20GHA10AA401-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",Week:"W136",Logs:""},
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA402",LOOP:"XV-20GHA10AA402",TAG:"ZSL-20GHA10AA402-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",Week:"W136",Logs:""},
@@ -833,18 +836,43 @@ function loadProgramacoes(){
 /* ---------- MÓDULOS / COLUNAS ---------- */
 function renderModules(){
   normalizeModules();
-  const mods=state.moduleCatalog; $("moduleCountBadge").textContent=mods.length;
+  const mods=state.moduleCatalog;
+  $("moduleCountBadge").textContent=mods.length;
   $("moduleCards").innerHTML=mods.map(m=>`<button class="module-card ${m.id===state.selectedModuleId?'active':''}" data-module-id="${escapeHTML(m.id)}"><h4>${escapeHTML(m.name)}</h4><p>${escapeHTML(m.description||"Sem descrição")}</p><div class="module-card-meta"><span><b>${m.columns.length}</b> colunas</span><span><b>${(moduleRecordStore()[m.id]||[]).length}</b> registros</span></div></button>`).join("");
   $("moduleCards").querySelectorAll(".module-card").forEach(btn=>btn.onclick=()=>{state.selectedModuleId=btn.dataset.moduleId;renderModules();});
   const mod=selectedModule();
-  $("moduleEditorEmpty").classList.toggle("hidden",!!mod); $("moduleEditor").classList.toggle("hidden",!mod); if(!mod)return;
-  $("moduleTitle").textContent=mod.name; $("moduleDescription").textContent=mod.description||""; $("moduleColumnCount").textContent=mod.columns.length; $("moduleRequiredCount").textContent=mod.columns.filter(c=>c.required).length; $("moduleRecordCount").textContent=(moduleRecordStore()[mod.id]||[]).length; $("maskFileName").textContent=`mascara_${makeKey(mod.name)}.xlsx`;
+  $("moduleEditorEmpty").classList.toggle("hidden",!!mod);
+  $("moduleEditor").classList.toggle("hidden",!mod);
+  if(!mod)return;
+  $("moduleTitle").textContent=mod.name;
+  $("moduleDescription").textContent=mod.description||"";
+  $("moduleColumnCount").textContent=mod.columns.length;
+  $("moduleRequiredCount").textContent=mod.columns.filter(c=>c.required).length;
+  $("moduleRecordCount").textContent=(moduleRecordStore()[mod.id]||[]).length;
+  $("maskFileName").textContent=`mascara_${makeKey(mod.name)}.xlsx`;
   $("columnRows").innerHTML=mod.columns.map((c,i)=>`<div class="column-row" draggable="true" data-column-id="${escapeHTML(c.id)}"><div class="column-grip" title="Arraste para mover">☷</div><div class="column-order"><button class="mini-btn" data-move-column-up="${escapeHTML(c.id)}" title="Mover para cima" ${i===0?'disabled':''}>↑</button><button class="mini-btn" data-move-column-down="${escapeHTML(c.id)}" title="Mover para baixo" ${i===mod.columns.length-1?'disabled':''}>↓</button></div><div class="column-info"><strong>${escapeHTML(c.label)}</strong><small>${escapeHTML(c.key)}</small></div><div class="column-type"><span class="module-badge">${columnTypeLabel(c.type)}</span></div><div class="column-required">${c.required?'Obrigatória':'Opcional'}</div><div class="drag-hint">${c.type==='select'?(c.options||[]).join(', ')||'Sem opções':''}</div><div class="column-actions"><button class="mini-btn" data-edit-column="${escapeHTML(c.id)}" title="Editar">✎</button><button class="mini-btn danger" data-delete-column="${escapeHTML(c.id)}" title="Excluir">×</button></div></div>`).join("");
   $("columnRows").querySelectorAll("[data-edit-column]").forEach(b=>b.onclick=()=>openColumnModal(b.dataset.editColumn));
   $("columnRows").querySelectorAll("[data-delete-column]").forEach(b=>b.onclick=()=>deleteColumn(b.dataset.deleteColumn));
   $("columnRows").querySelectorAll("[data-move-column-up]").forEach(b=>b.onclick=()=>moveColumn(b.dataset.moveColumnUp,-1));
   $("columnRows").querySelectorAll("[data-move-column-down]").forEach(b=>b.onclick=()=>moveColumn(b.dataset.moveColumnDown,1));
-  setupColumnDragDrop(); renderMaskPreview(mod);
+  renderColumnViewPreview(mod);
+  renderMaskPreview(mod);
+  setupColumnDragDrop();
+}
+
+function setColumnViewMode(mode){
+  state.columnViewMode=mode==="side"?"side":"stacked";
+  localStorage.setItem("ppaColumnViewMode",state.columnViewMode);
+  document.querySelectorAll("[data-column-view]").forEach(btn=>btn.classList.toggle("active",btn.dataset.columnView===state.columnViewMode));
+  const mod=selectedModule(); if(mod) renderColumnViewPreview(mod);
+}
+
+function renderColumnViewPreview(mod){
+  const host=$("columnViewPreview"); if(!host)return;
+  host.classList.toggle("stacked",state.columnViewMode==="stacked");
+  host.classList.toggle("side",state.columnViewMode==="side");
+  host.innerHTML=mod.columns.map((c,i)=>`<div class="column-preview-card"><span class="preview-order">${String(i+1).padStart(2,"0")}</span><span class="preview-label">${escapeHTML(c.label)}</span><span class="preview-meta">${escapeHTML(c.key)}</span><span class="preview-chip">${columnTypeLabel(c.type)}${c.required?' • Obrigatória':''}</span></div>`).join("") || `<div class="empty-state inline"><strong>Nenhuma coluna criada.</strong><span>Use “Nova coluna” para montar a máscara.</span></div>`;
+  document.querySelectorAll("[data-column-view]").forEach(btn=>btn.classList.toggle("active",btn.dataset.columnView===state.columnViewMode));
 }
 
 function setupColumnDragDrop(){
@@ -905,33 +933,56 @@ function exportModuleMask(){
   const mod=selectedModule(); if(!mod){toast("Selecione um módulo.");return;}
   const headers=mod.columns.map(c=>c.label); const blank=Array(mod.columns.length).fill("");
   if(window.XLSX){
-    const ws=XLSX.utils.aoa_to_sheet([headers,blank]); const info=[["Módulo",mod.name],["Instruções","Não altere os cabeçalhos. Campos com * são obrigatórios."],["Colunas",mod.columns.length],["Tipos",mod.columns.map(c=>`${c.label}: ${columnTypeLabel(c.type)}`).join(" | ")]]; const infoWs=XLSX.utils.aoa_to_sheet(info); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Importação"); XLSX.utils.book_append_sheet(wb,infoWs,"Leia-me"); XLSX.writeFile(wb,`mascara_${makeKey(mod.name)}.xlsx`);
+    const ws=XLSX.utils.aoa_to_sheet([headers,blank]); ws['!cols']=mod.columns.map(c=>({wch:Math.max(12,Math.min(32,c.label.length+3))}));
+    const info=[["Módulo",mod.name],["Instruções","Não altere os cabeçalhos. Campos com * são obrigatórios."],["Colunas",mod.columns.length],["Tipos",mod.columns.map(c=>`${c.label}: ${columnTypeLabel(c.type)}`).join(" | ")],["Importação","Ao importar novamente, escolha Nova importação (substitui) ou Inclusão (adiciona)."]];
+    const infoWs=XLSX.utils.aoa_to_sheet(info); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Importação"); XLSX.utils.book_append_sheet(wb,infoWs,"Leia-me"); XLSX.writeFile(wb,`mascara_${makeKey(mod.name)}.xlsx`);
   } else exportCSV(mod,headers,blank);
   toast(`Máscara de ${mod.name} exportada.`);
 }
 function exportCSV(mod,headers,blank){ const esc=v=>`"${String(v??"").replace(/"/g,'""')}"`; const csv=[headers,blank].map(row=>row.map(esc).join(";")).join("\n"); const blob=new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8;"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`mascara_${makeKey(mod.name)}.csv`; a.click(); URL.revokeObjectURL(a.href); }
-function triggerModuleImport(){ $("moduleExcelInput").value=""; $("moduleExcelInput").click(); }
+function triggerModuleImport(){ const mod=selectedModule(); if(!mod){toast("Selecione um módulo.");return;} $("moduleExcelInput").value=""; $("moduleExcelInput").click(); }
+
+async function readModuleFile(file){
+  let rows=[];
+  if(window.XLSX){ const data=await file.arrayBuffer(); const wb=XLSX.read(data,{type:"array",cellDates:true}); if(!wb.SheetNames.length)throw new Error("O arquivo não possui uma planilha."); rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:"",raw:false}); }
+  else { const text=await file.text(); rows=text.split(/\r?\n/).filter(Boolean).map(line=>line.split(/;|,/).map(v=>v.replace(/^"|"$/g,"").trim())); }
+  return rows;
+}
+function validateAndMapImportRows(rows,mod){
+  if(!rows.length)throw new Error("Arquivo sem dados."); const headers=rows[0].map(h=>String(h??"").trim()); if(!headers.some(Boolean))throw new Error("A primeira linha não contém cabeçalhos.");
+  const normalizedHeaders=headers.map(h=>makeKey(h)); const missing=mod.columns.filter(c=>c.required&&!normalizedHeaders.some(h=>h===makeKey(c.label)||h===makeKey(c.key)));
+  if(missing.length)throw new Error(`Colunas obrigatórias ausentes: ${missing.map(c=>c.label).join(", ")}.`);
+  const imported=rows.slice(1).filter(r=>r.some(v=>String(v??"").trim()!=="")).map((r,rowIndex)=>{ const obj={_linha_excel:rowIndex+2,_imported_at:new Date().toISOString()}; mod.columns.forEach(c=>{ const idx=normalizedHeaders.findIndex(h=>h===makeKey(c.label)||h===makeKey(c.key)); obj[c.key]=idx>=0?(r[idx]??""):""; }); return obj; });
+  return {headers,imported};
+}
+function openImportModeModal(file,rows){
+  const mod=selectedModule(); if(!mod)return; state.pendingImport={fileName:file.name,rows,modId:mod.id}; const existing=(moduleRecordStore()[mod.id]||[]).length;
+  $("importFileName").textContent=file.name; $("importExistingCount").textContent=existing; $("importModeDescription").textContent=`${rows.imported.length} registro(s) válido(s) encontrado(s) para “${mod.name}”. Escolha como os dados devem ser gravados.`; $("importModeMessage").textContent=""; $("importModeMessage").classList.remove("ok"); $("importModeModal").classList.remove("hidden");
+}
+function closeImportModeModal(){ $("importModeModal").classList.add("hidden"); state.pendingImport=null; }
+async function persistImportedRecords(mod,records,mode){
+  // Persistência local da Rev. 6. Este ponto fica isolado para a integração Supabase/DB sem alterar o fluxo da tela.
+  const store=moduleRecordStore(); const existing=Array.isArray(store[mod.id])?store[mod.id]:[]; const stamped=records.map(r=>({...r,_module_id:mod.id,_import_id:`imp-${Date.now()}-${Math.random().toString(36).slice(2,8)}`}));
+  store[mod.id]=mode==="append"?[...existing,...stamped]:stamped; persistModuleRecords(); return store[mod.id];
+}
+async function confirmModuleImport(mode){
+  const pending=state.pendingImport; const mod=pending?moduleById(pending.modId):null; if(!pending||!mod)return; const before=(moduleRecordStore()[mod.id]||[]).length; const count=pending.rows.imported.length;
+  try{
+    $("importModeMessage").textContent="Gravando registros..."; const records=await persistImportedRecords(mod,pending.rows.imported,mode);
+    if(mod.id==="ppa") syncImportedPpa(mode==="append"?records:pending.rows.imported,mod,mode);
+    $("importModeMessage").classList.add("ok"); $("importModeMessage").textContent=mode==="append"?`Inclusão concluída: ${count} registro(s) adicionados. Base total: ${records.length}.`:`Nova importação concluída: ${count} registro(s) gravados. Base substituída de ${before} registro(s).`;
+    renderModules(); renderDashboard(); toast(mode==="append"?"Registros incluídos com sucesso.":"Nova importação concluída."); setTimeout(closeImportModeModal,550);
+  }catch(e){ $("importModeMessage").classList.remove("ok"); $("importModeMessage").textContent=e.message||"Não foi possível gravar a importação."; }
+}
 async function importModuleFile(file){
   const mod=selectedModule(); if(!mod||!file)return;
-  try{
-    let rows=[];
-    if(window.XLSX){ const data=await file.arrayBuffer(); const wb=XLSX.read(data,{type:"array",cellDates:true}); const sheet=wb.Sheets[wb.SheetNames[0]]; rows=XLSX.utils.sheet_to_json(sheet,{header:1,defval:"",raw:false}); }
-    else { const text=await file.text(); rows=text.split(/\r?\n/).filter(Boolean).map(line=>line.split(/;|,/).map(v=>v.replace(/^"|"$/g,"").trim())); }
-    if(!rows.length){throw new Error("Arquivo sem dados.");}
-    const headers=rows[0].map(h=>String(h||"").trim()); const normalizedHeaders=headers.map(h=>makeKey(h));
-    const expected=mod.columns.map(c=>makeKey(c.label)); const missing=mod.columns.filter((c,i)=>c.required&&!headers.some(h=>makeKey(h)===makeKey(c.label)&&h!==""));
-    if(missing.length) throw new Error(`Colunas obrigatórias ausentes: ${missing.map(c=>c.label).join(", ")}.`);
-    const imported=rows.slice(1).filter(r=>r.some(v=>String(v??"").trim()!=="")).map(r=>{ const obj={}; mod.columns.forEach(c=>{ const idx=normalizedHeaders.findIndex(h=>h===makeKey(c.label)||h===makeKey(c.key)); if(idx>=0)obj[c.key]=r[idx]??""; }); return obj; });
-    moduleRecordStore()[mod.id]=imported; persistModuleRecords();
-    if(mod.id==="ppa") syncImportedPpa(imported,mod);
-    $("importResultMessage").classList.add("ok"); $("importResultMessage").textContent=`Importação concluída: ${imported.length} registros carregados no módulo ${mod.name}.`;
-    renderModules(); renderDashboard(); toast("Excel importado com sucesso.");
-  }catch(e){ $("importResultMessage").classList.remove("ok"); $("importResultMessage").textContent=e.message||"Não foi possível importar o arquivo."; }
+  try{ const rows=await readModuleFile(file); const mapped=validateAndMapImportRows(rows,mod); if(!mapped.imported.length)throw new Error("O arquivo não possui linhas de dados para importar."); openImportModeModal(file,mapped); }
+  catch(e){ $("importResultMessage").classList.remove("ok"); $("importResultMessage").textContent=e.message||"Não foi possível importar o arquivo."; }
 }
-function syncImportedPpa(records,mod){
+function syncImportedPpa(records,mod,mode="new"){
   const read=(r,keys)=>{for(const k of keys){ if(r[k]!==undefined && String(r[k]).trim()!=="") return r[k]; }return "";};
-  const mapped=records.map(r=>({FORN:read(r,["forn"]),SYS:read(r,["sys"]),SUBSYS:read(r,["subsys"]),LOOP:read(r,["loop"]),TAG:read(r,["tag"]),SERVICE:read(r,["service"]),TIPE:read(r,["type","tipe"]),DESCRIÇÃO:read(r,["descricao","descrição"]),Week:read(r,["week"]),Logs:""})).filter(r=>r.TAG);
-  if(mapped.length){ state.rows=mapped; localStorage.setItem("ppaImportedRows",JSON.stringify(mapped)); }
+  const mapped=records.map(r=>({FORN:read(r,["forn"]),SYS:read(r,["sys"]),SUBSYS:read(r,["subsys"]),LOOP:read(r,["loop"]),TAG:read(r,["tag"]),SERVICE:read(r,["service"]),TIPE:read(r,["type","tipe"]),DESCRIÇÃO:read(r,["descricao","descrição"]),Week:read(r,["week"]),Logs:read(r,["logs"])})).filter(r=>r.TAG);
+  state.rows=mode==="append"?[...state.rows,...mapped]:mapped; localStorage.setItem("ppaImportedRows",JSON.stringify(state.rows));
 }
 
 /* ---------- ACESSOS ---------- */
@@ -1000,6 +1051,8 @@ $("tagSearch").addEventListener("input",()=>{$("clearSearch").style.display=$("t
 $("newActivityBtn").onclick=()=>openActivityModal(); $("editActivityBtn").onclick=()=>openActivityModal(state.selectedModuleId); $("deleteActivityBtn").onclick=deleteActivity; $("newColumnBtn").onclick=()=>openColumnModal(); $("exportModuleMaskBtn").onclick=exportModuleMask; $("importModuleMaskBtn").onclick=triggerModuleImport; $("moduleExcelInput").addEventListener("change",e=>importModuleFile(e.target.files[0]));
 $("closeActivityModal").onclick=closeActivityModal; $("cancelActivityModal").onclick=closeActivityModal; $("activityModal").querySelector(".modal-backdrop").onclick=closeActivityModal; $("activityForm").addEventListener("submit",e=>{e.preventDefault();saveActivity();});
 $("closeColumnModal").onclick=closeColumnModal; $("cancelColumnModal").onclick=closeColumnModal; $("columnModal").querySelector(".modal-backdrop").onclick=closeColumnModal; $("columnForm").addEventListener("submit",e=>{e.preventDefault();saveColumn();});
+document.querySelectorAll("[data-column-view]").forEach(btn=>btn.onclick=()=>setColumnViewMode(btn.dataset.columnView));
+$("closeImportModeModal").onclick=closeImportModeModal; $("cancelImportMode").onclick=closeImportModeModal; $("importModeModal").querySelector(".modal-backdrop").onclick=closeImportModeModal; document.querySelectorAll("[data-import-mode]").forEach(btn=>btn.onclick=()=>confirmModuleImport(btn.dataset.importMode));
 $("closeDeleteModuleConfirm").onclick=()=>$("deleteModuleConfirm").classList.add("hidden"); $("cancelDeleteModule").onclick=()=>$("deleteModuleConfirm").classList.add("hidden"); $("deleteModuleConfirm").querySelector(".modal-backdrop").onclick=()=>$("deleteModuleConfirm").classList.add("hidden"); $("confirmDeleteModule").onclick=confirmDeleteActivity;
 
 /* acessos */
@@ -1008,7 +1061,7 @@ $("newAccessBtn").onclick=()=>openAccessModal(); $("closeAccessModal").onclick=c
 setInterval(()=>{$("currentDateTime").textContent=nowBR();$("currentWeek").textContent=currentWeek();},1000);
 
 (async function init(){
-  loadModuleCatalog(); loadProgramacoes(); $("currentDateTime").textContent=nowBR(); $("currentWeek").textContent=currentWeek();
+  loadModuleCatalog(); loadProgramacoes(); $("currentDateTime").textContent=nowBR(); $("currentWeek").textContent=currentWeek(); setColumnViewMode(state.columnViewMode);
   const saved=sessionStorage.getItem("ppaSession");
   if(saved){try{const session=JSON.parse(saved);if(session?.role&&ROLE_LABELS[session.role]){state.currentUser=session;showAppForRole(session.role);syncAll();return;}}catch{}}
   backToAccessChooser();

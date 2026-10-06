@@ -399,6 +399,14 @@
               <div><span>REGISTROS IMPORTADOS</span><strong id="moduleRecordCount">0</strong></div>
             </div>
             <div class="column-builder-head"><div><span class="section-kicker">MÁSCARA DO EXCEL</span><h4>Colunas personalizadas</h4><p>Crie, edite, ordene e exclua campos. A mesma estrutura será usada na programação e na importação/exportação.</p></div><button id="newColumnBtn" class="primary-btn">＋ Nova coluna</button></div>
+            <div class="column-view-toolbar">
+              <div><span class="section-kicker">VISUALIZAÇÃO</span><strong>Estrutura das colunas</strong><small>Escolha como o modelo deve aparecer na configuração e no celular.</small></div>
+              <div class="segmented-control" role="group" aria-label="Visualização das colunas">
+                <button type="button" class="view-toggle active" data-column-view="stacked">▤ Empilhadas</button>
+                <button type="button" class="view-toggle" data-column-view="side">▥ Lado a lado</button>
+              </div>
+            </div>
+            <div id="columnViewPreview" class="column-view-preview"></div>
             <div id="columnRows" class="column-list"></div>
             <div class="excel-preview-wrap">
               <div class="excel-preview-head"><div><span class="section-kicker">PRÉ-VISUALIZAÇÃO</span><h4>Máscara que será exportada</h4></div><span id="maskFileName" class="file-chip">—</span></div>
@@ -553,6 +561,34 @@
       <p id="columnFormMessage" class="form-message"></p>
       <div class="modal-actions"><button type="button" id="cancelColumnModal" class="secondary-btn">Cancelar</button><button type="submit" class="primary-btn">Salvar coluna</button></div>
     </form>
+  </div>
+</div>
+
+<div id="importModeModal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box import-choice-modal">
+    <button id="closeImportModeModal" class="modal-close">×</button>
+    <span class="section-kicker">IMPORTAÇÃO PARA O BANCO</span>
+    <h3>Como deseja importar os registros?</h3>
+    <p id="importModeDescription">O arquivo será validado pela máscara do módulo antes da gravação.</p>
+    <div class="import-mode-grid">
+      <button type="button" class="import-mode-card" data-import-mode="new">
+        <span class="import-mode-icon">↻</span>
+        <strong>Nova importação</strong>
+        <small>Substitui os registros já importados deste módulo.</small>
+      </button>
+      <button type="button" class="import-mode-card" data-import-mode="append">
+        <span class="import-mode-icon">＋</span>
+        <strong>Inclusão</strong>
+        <small>Adiciona os registros do arquivo aos que já existem.</small>
+      </button>
+    </div>
+    <div class="import-mode-summary">
+      <span>Arquivo: <b id="importFileName">—</b></span>
+      <span>Registros atuais: <b id="importExistingCount">0</b></span>
+    </div>
+    <p id="importModeMessage" class="form-message"></p>
+    <div class="modal-actions"><button type="button" id="cancelImportMode" class="secondary-btn">Cancelar</button></div>
   </div>
 </div>
 

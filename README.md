@@ -1,4 +1,4 @@
-# Controle Ponto a Ponto — Rev. 4
+# Controle Ponto a Ponto — Rev. 6
 
 Esta revisão evolui a Rev. 3 para uma arquitetura administrativa modular, mantendo o fluxo de campo de Ponto a Ponto.
 
@@ -61,6 +61,22 @@ Para o módulo **Ponto a Ponto**, os campos compatíveis também são normalizad
 
 A exportação/importação usa o SheetJS Community Edition 0.20.3 no navegador, conforme a instalação standalone publicada pela documentação oficial. Para estabilidade em produção, a própria documentação recomenda versionar/venderizar a biblioteca em vez de depender de CDN. citeturn426366search3turn426366search14
 
+## 5. Visualização modular das colunas
+
+Na configuração de cada atividade, o administrador pode visualizar a estrutura criada em dois modos:
+- **Empilhadas** — uma coluna por linha, melhor para edição e telas menores;
+- **Lado a lado** — cartões em grade, melhor para conferência da máscara horizontal.
+
+A preferência fica gravada no navegador em `ppaColumnViewMode`. A ordem mostrada é exatamente a ordem usada na máscara do Excel.
+
+## 6. Fluxo de importação Excel
+
+Ao selecionar um arquivo no módulo, o sistema primeiro valida a primeira planilha contra as colunas configuradas. Depois abre uma escolha obrigatória:
+- **Nova importação**: substitui os registros já carregados daquele módulo;
+- **Inclusão**: mantém a base atual e acrescenta os registros do novo arquivo.
+
+A opção escolhida fica registrada no processamento e os registros recebem identificação da importação/linha do Excel. Na integração definitiva, este ponto deve chamar a rotina de gravação transacional do Supabase para que `tb_modulo_registros`/`tb_ponto_a_ponto` receba a operação de substituição ou inclusão sem duplicar dados de forma acidental.
+
 ## 5. Pessoas e códigos de acesso
 
 Nova área administrativa: **Pessoas & Acessos**.
@@ -82,7 +98,7 @@ Também permite:
 
 O Login do Técnico consulta os cadastros ativos por código. Nesta revisão, o armazenamento ainda é local para permitir validação visual e funcional.
 
-## 6. Persistência atual
+## 7. Persistência atual
 
 Nesta entrega, as novas configurações são armazenadas em `localStorage`:
 
@@ -94,7 +110,7 @@ Nesta entrega, as novas configurações são armazenadas em `localStorage`:
 
 Isso permite testar toda a interface antes de conectar definitivamente o Supabase.
 
-## 7. Próxima integração de backend
+## 8. Próxima integração de backend
 
 A arquitetura final deve substituir o `localStorage` pelas tabelas existentes do ecossistema Supabase, mantendo RLS e isolamento por família/projeto.
 
@@ -110,7 +126,7 @@ A proposta funcional é:
 
 A integração SQL deve ser feita após conferir os nomes/tipos das colunas atuais, sem substituir a estrutura existente às cegas.
 
-## 8. Git
+## 9. Git
 
 ```powershell
 cd "C:\Users\thiago.moraes\Downloads\controle-ponto-a-ponto"
