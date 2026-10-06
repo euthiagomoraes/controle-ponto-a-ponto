@@ -4,66 +4,286 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#07111f">
-  <title>Controle de Ponto a Ponto</title>
+  <title>Controle Ponto a Ponto</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
+
+<!-- =========================
+     LOGIN / ACCESS SELECTOR
+     ========================= -->
 <div id="loginScreen" class="login-screen">
-  <div class="login-card">
-    <div class="brand-mark large">PP</div>
-    <p class="eyebrow">OPERAÇÃO DE CAMPO</p>
-    <h1>CONTROLE DE<br>PONTO A PONTO</h1>
-    <p class="login-subtitle">Acesso do técnico de campo</p>
-    <form id="loginForm">
-      <label>Nome
-        <input id="loginName" autocomplete="username" placeholder="Digite seu nome" required>
-      </label>
-      <label>Crachá
-        <input id="loginBadge" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Digite o crachá" required>
-      </label>
-      <button class="primary-btn full" type="submit">Entrar</button>
-      <p id="loginMessage" class="form-message"></p>
-    </form>
-    <small>Protótipo Rev. 2 • Integração Excel/Power Automate preparada</small>
+  <div class="login-shell">
+    <div class="login-brand">
+      <div class="brand-mark large">PP</div>
+      <div>
+        <strong>CONTROLE</strong>
+        <span>Ponto a Ponto</span>
+      </div>
+    </div>
+
+    <div id="accessChooser" class="login-card access-card">
+      <p class="eyebrow">ACESSO AO SISTEMA</p>
+      <h1>Como você deseja entrar?</h1>
+      <p class="login-subtitle">Escolha o ambiente correspondente ao seu perfil de acesso.</p>
+
+      <div class="access-grid">
+        <button class="access-option" data-role="admin">
+          <span class="access-icon">⌘</span>
+          <span class="access-copy">
+            <strong>Administrador</strong>
+            <small>Dashboard, programação e gestão do sistema</small>
+          </span>
+          <span class="access-arrow">→</span>
+        </button>
+        <button class="access-option" data-role="technician">
+          <span class="access-icon">◉</span>
+          <span class="access-copy">
+            <strong>Técnico de campo</strong>
+            <small>Atividades, ponto a ponto e histórico</small>
+          </span>
+          <span class="access-arrow">→</span>
+        </button>
+      </div>
+
+      <small class="login-footnote">Os acessos e permissões devem ser validados no backend.</small>
+    </div>
+
+    <div id="adminLoginCard" class="login-card role-login hidden">
+      <button class="back-login" data-back-login>← Voltar</button>
+      <span class="role-chip admin">ACESSO ADMINISTRATIVO</span>
+      <h1>Entrar como Administrador</h1>
+      <p class="login-subtitle">Acesse indicadores e programação de atividades.</p>
+      <form id="adminLoginForm">
+        <label>E-mail
+          <input id="adminEmail" type="email" autocomplete="username" placeholder="seu@email.com" required>
+        </label>
+        <label>Senha
+          <input id="adminPassword" type="password" autocomplete="current-password" placeholder="Digite sua senha" required>
+        </label>
+        <button class="primary-btn full" type="submit">Entrar no painel</button>
+        <p id="adminLoginMessage" class="form-message"></p>
+      </form>
+      <small class="login-footnote">Demo local: use qualquer e-mail e senha com 4+ caracteres.</small>
+    </div>
+
+    <div id="technicianLoginCard" class="login-card role-login hidden">
+      <button class="back-login" data-back-login>← Voltar</button>
+      <span class="role-chip tech">ACESSO DE CAMPO</span>
+      <h1>Entrar como Técnico</h1>
+      <p class="login-subtitle">Use o código de acesso liberado pelo administrador.</p>
+      <form id="technicianLoginForm">
+        <label>Código de acesso
+          <input id="techAccessCode" inputmode="numeric" autocomplete="one-time-code" placeholder="Digite seu código" required>
+        </label>
+        <button class="primary-btn full" type="submit">Entrar na operação</button>
+        <p id="techLoginMessage" class="form-message"></p>
+      </form>
+      <small class="login-footnote">Na integração final, validar <strong>tb_acessos</strong> + permissões.</small>
+    </div>
   </div>
 </div>
 
+<!-- =========================
+     APP SHELL
+     ========================= -->
 <div id="appShell" class="app-shell hidden">
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-mark">PP</div>
       <div><strong>CONTROLE</strong><span>Ponto a Ponto</span></div>
     </div>
-    <nav class="side-nav">
+
+    <nav id="adminNav" class="side-nav hidden">
+      <button class="nav-item active" data-screen="dashboard"><span class="nav-icon">▦</span><span>Dashboard</span></button>
+      <button class="nav-item" data-screen="programacao"><span class="nav-icon">□</span><span>Programação</span></button>
+      <button class="nav-item" data-screen="profile"><span class="nav-icon">◯</span><span>Perfil</span></button>
+    </nav>
+
+    <nav id="techNav" class="side-nav hidden">
       <button class="nav-item active" data-screen="home"><span class="nav-icon">⌂</span><span>Início</span></button>
       <button class="nav-item" data-screen="history"><span class="nav-icon">▥</span><span>Histórico</span></button>
       <button class="nav-item" data-screen="profile"><span class="nav-icon">◯</span><span>Perfil</span></button>
     </nav>
-    <div class="sidebar-footer"><span class="online-dot"></span>Sistema online</div>
+
+    <div class="sidebar-footer"><span class="online-dot"></span><span id="sidebarRoleText">Sistema online</span></div>
   </aside>
 
   <main class="main-content">
     <header class="topbar">
       <div>
-        <p class="eyebrow">OPERAÇÃO DE CAMPO</p>
-        <h1>CONTROLE DE PONTO A PONTO</h1>
-        <p class="subtitle">Acompanhe e registre os testes de campo em tempo real</p>
+        <p id="topbarEyebrow" class="eyebrow">CONTROLE OPERACIONAL</p>
+        <h1 id="topbarTitle">CONTROLE DE PONTO A PONTO</h1>
+        <p id="topbarSubtitle" class="subtitle">Acompanhamento da operação em campo</p>
       </div>
       <div class="topbar-meta">
+        <span id="roleBadge" class="role-top-badge">—</span>
         <span class="online-badge"><i></i> Online</span>
         <span id="currentDateTime">--/--/---- --:--</span>
       </div>
     </header>
 
-    <section id="screen-home" class="screen active-screen">
+    <!-- =========================
+         ADMIN: DASHBOARD
+         ========================= -->
+    <section id="screen-dashboard" class="screen active-screen">
+      <div class="page-title-row">
+        <div>
+          <span class="section-kicker">VISÃO GERENCIAL</span>
+          <h2>Previsto x realizado</h2>
+          <p>Acompanhe a execução das atividades programadas e o saldo operacional.</p>
+        </div>
+        <div class="page-actions">
+          <span class="current-week-chip">Semana <strong id="dashboardWeek">W---</strong></span>
+          <button id="refreshDashboard" class="ghost-btn">↻ Atualizar</button>
+        </div>
+      </div>
+
+      <div class="metrics-grid dashboard-metrics">
+        <div class="metric-card card">
+          <span>PREVISTO</span>
+          <strong id="metricPlanned">0</strong>
+          <small>atividades programadas</small>
+        </div>
+        <div class="metric-card card">
+          <span>REALIZADO</span>
+          <strong id="metricDone">0</strong>
+          <small>execuções registradas</small>
+        </div>
+        <div class="metric-card card">
+          <span>SALDO</span>
+          <strong id="metricBalance">0</strong>
+          <small>atividades ainda pendentes</small>
+        </div>
+        <div class="metric-card card">
+          <span>REALIZAÇÃO</span>
+          <strong id="metricRate">0%</strong>
+          <small>realizado sobre o previsto</small>
+        </div>
+      </div>
+
+      <div class="dashboard-grid">
+        <section class="card chart-card">
+          <div class="list-header">
+            <div>
+              <span class="section-kicker">EVOLUÇÃO SEMANAL</span>
+              <h3>Volume previsto x realizado</h3>
+            </div>
+            <span class="legend">
+              <span><i class="legend-dot planned"></i>Previsto</span>
+              <span><i class="legend-dot done"></i>Realizado</span>
+            </span>
+          </div>
+          <div id="weeklyBars" class="weekly-bars"></div>
+        </section>
+
+        <section class="card progress-card">
+          <div>
+            <span class="section-kicker">EXECUÇÃO DA SEMANA</span>
+            <h3>Andamento geral</h3>
+          </div>
+          <div class="progress-ring" id="progressRing">
+            <div class="progress-ring-inner">
+              <strong id="ringRate">0%</strong>
+              <span>realizado</span>
+            </div>
+          </div>
+          <div class="progress-summary">
+            <div><span>Previsto</span><strong id="ringPlanned">0</strong></div>
+            <div><span>Realizado</span><strong id="ringDone">0</strong></div>
+            <div><span>Pendente</span><strong id="ringPending">0</strong></div>
+          </div>
+        </section>
+
+        <section class="card activity-breakdown">
+          <div class="list-header">
+            <div>
+              <span class="section-kicker">POR ATIVIDADE</span>
+              <h3>Previsto x realizado</h3>
+            </div>
+          </div>
+          <div id="activityBreakdownRows" class="breakdown-list"></div>
+        </section>
+
+        <section class="card recent-executions">
+          <div class="list-header">
+            <div>
+              <span class="section-kicker">ÚLTIMAS EXECUÇÕES</span>
+              <h3>Registros recentes</h3>
+            </div>
+          </div>
+          <div id="recentExecutions" class="execution-list"></div>
+        </section>
+      </div>
+    </section>
+
+    <!-- =========================
+         ADMIN: PROGRAMAÇÃO
+         ========================= -->
+    <section id="screen-programacao" class="screen">
+      <div class="page-title-row">
+        <div>
+          <span class="section-kicker">PLANEJAMENTO</span>
+          <h2>Programação de atividades</h2>
+          <p>Cadastre o que deverá ser executado em cada semana e equipe.</p>
+        </div>
+        <button id="newProgramacaoBtn" class="primary-btn">＋ Nova programação</button>
+      </div>
+
+      <div class="filters card programming-filters">
+        <label class="select-field">SEMANA
+          <select id="programWeekFilter"></select>
+        </label>
+        <label class="select-field">ATIVIDADE
+          <select id="programActivityFilter"><option value="">Todas</option></select>
+        </label>
+        <label class="select-field">EQUIPE
+          <select id="programTeamFilter"><option value="">Todas</option></select>
+        </label>
+        <div class="program-summary">
+          <span><b id="programCount">0</b> programações</span>
+          <span><b id="programQuantity">0</b> atividades previstas</span>
+        </div>
+      </div>
+
+      <section class="card program-table-card">
+        <div class="table-wrap large-table">
+          <table>
+            <thead>
+              <tr>
+                <th>SEMANA</th>
+                <th>DATA</th>
+                <th>ATIVIDADE</th>
+                <th>EQUIPE</th>
+                <th>RESPONSÁVEL</th>
+                <th>QTD.</th>
+                <th>OBSERVAÇÃO</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="programTableBody"></tbody>
+          </table>
+          <div id="programEmpty" class="empty-state hidden">
+            <div>□</div>
+            <strong>Nenhuma programação encontrada</strong>
+            <span>Cadastre uma atividade ou ajuste os filtros.</span>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <!-- =========================
+         TECHNICIAN: POINT TO POINT
+         ========================= -->
+    <section id="screen-home" class="screen">
       <div class="week-banner card">
         <div>
           <span class="section-kicker">PROGRAMAÇÃO DE CAMPO</span>
           <strong>SEMANA ATUAL: <b id="currentWeek">W---</b></strong>
-          <p>Somente equipamentos programados manualmente para esta semana são exibidos.</p>
+          <p>Somente equipamentos programados para esta semana são exibidos.</p>
         </div>
         <div class="week-rule"><span class="online-dot"></span> Programação ativa</div>
       </div>
@@ -130,9 +350,12 @@
       </div>
     </section>
 
+    <!-- =========================
+         TECHNICIAN: HISTORY
+         ========================= -->
     <section id="screen-history" class="screen">
       <div class="page-title-row">
-        <div><span class="section-kicker">AUDITORIA</span><h2>Histórico de registros</h2><p>Histórico consolidado a partir do campo Logs do Excel.</p></div>
+        <div><span class="section-kicker">AUDITORIA</span><h2>Histórico de registros</h2><p>Histórico consolidado das execuções em campo.</p></div>
         <button id="refreshHistory" class="ghost-btn">↻ Atualizar</button>
       </div>
       <div class="metrics-grid">
@@ -146,21 +369,23 @@
       </section>
     </section>
 
+    <!-- =========================
+         PROFILE
+         ========================= -->
     <section id="screen-profile" class="screen">
       <div class="profile-layout">
         <section class="profile-card card">
           <div id="profileAvatar" class="avatar">TC</div>
           <span class="section-kicker">USUÁRIO CONECTADO</span>
-          <h2 id="profileName">Técnico de Campo</h2>
-          <p id="profileBadge">@crachá</p>
+          <h2 id="profileName">Usuário</h2>
+          <p id="profileBadge">—</p>
           <div class="profile-status"><i></i> Sessão ativa</div>
         </section>
         <section class="profile-info card">
           <span class="section-kicker">PERFIL</span>
           <div class="info-row"><span>Nome</span><strong id="profileName2">—</strong></div>
-          <div class="info-row"><span>Crachá</span><strong id="profileBadge2">—</strong></div>
-          <div class="info-row"><span>Acesso</span><strong>Operação de campo</strong></div>
-          <div class="info-row"><span>Fonte de dados</span><strong>Excel / OneDrive</strong></div>
+          <div class="info-row"><span>Identificador</span><strong id="profileBadge2">—</strong></div>
+          <div class="info-row"><span>Perfil de acesso</span><strong id="profileRole2">—</strong></div>
           <div class="info-row"><span>Semana atual</span><strong id="profileWeek">—</strong></div>
           <button id="logoutBtn" class="logout-btn">Sair da conta</button>
         </section>
@@ -169,16 +394,68 @@
   </main>
 </div>
 
+<!-- =========================
+     PROGRAMMING MODAL
+     ========================= -->
+<div id="programModal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box program-modal">
+    <button id="closeProgramModal" class="modal-close">×</button>
+    <span class="section-kicker">NOVA PROGRAMAÇÃO</span>
+    <h3>Adicionar atividade</h3>
+    <p>Defina o que será executado, por quem e em qual semana.</p>
+
+    <form id="programForm" class="program-form">
+      <div class="form-grid-2">
+        <label>Semana
+          <select id="programWeek" required></select>
+        </label>
+        <label>Data prevista
+          <input id="programDate" type="date" required>
+        </label>
+      </div>
+      <div class="form-grid-2">
+        <label>Atividade
+          <select id="programActivity" required></select>
+        </label>
+        <label>Equipe
+          <select id="programTeam" required></select>
+        </label>
+      </div>
+      <div class="form-grid-2">
+        <label>Responsável
+          <select id="programResponsible" required></select>
+        </label>
+        <label>Quantidade prevista
+          <input id="programQtyInput" type="number" min="1" step="1" value="1" required>
+        </label>
+      </div>
+      <label>Observação
+        <textarea id="programNote" rows="3" maxlength="250" placeholder="Detalhes adicionais da programação..."></textarea>
+      </label>
+      <p id="programFormMessage" class="form-message"></p>
+      <div class="modal-actions">
+        <button type="button" id="cancelProgramModal" class="secondary-btn">Cancelar</button>
+        <button type="submit" class="primary-btn">Salvar programação</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div id="confirmModal" class="modal hidden">
   <div class="modal-backdrop"></div>
   <div class="modal-box">
     <button id="closeModal" class="modal-close">×</button>
     <span class="section-kicker">CONFIRMAÇÃO</span>
     <h3>Repetir ponto a ponto?</h3>
-    <p>Será acrescentado um novo registro ao campo <strong>Logs</strong> desta TAG. A <strong>Week</strong> permanecerá inalterada.</p>
-    <div class="modal-actions"><button id="cancelModal" class="secondary-btn">Cancelar</button><button id="confirmRepeat" class="primary-btn">Confirmar registro</button></div>
+    <p>Será acrescentado um novo registro ao histórico desta TAG. A semana programada permanece inalterada.</p>
+    <div class="modal-actions">
+      <button id="cancelModal" class="secondary-btn">Cancelar</button>
+      <button id="confirmRepeat" class="primary-btn">Confirmar registro</button>
+    </div>
   </div>
 </div>
+
 <div id="toast" class="toast" role="alert"></div>
 <script src="./app.js"></script>
 </body>

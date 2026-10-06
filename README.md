@@ -1,48 +1,86 @@
-# Planning Pro
+# Controle Ponto a Ponto — Rev. 3
 
-Sistema de gerenciamento de atividades e programa��o de campo.
+Entrega da nova estrutura de telas:
 
-## Stack
+## 1. Dashboard — Previsto x Realizado
 
-- Frontend: React + Vite
-- Banco de dados: Supabase PostgreSQL
-- Autentica��o: Supabase Auth
-- Arquivos/evid�ncias: Supabase Storage
-- Hospedagem: Vercel
+Tela administrativa com:
+- KPIs de previsto, realizado, saldo e percentual de realização.
+- Comparativo semanal em barras.
+- Anel de progresso da semana atual.
+- Quebra por atividade: Ponto a Ponto, Loop Teste e Preservação.
+- Últimas execuções registradas.
 
-## Arquitetura
+## 2. Programação — imput de atividades
 
-GitHub
-  ?
-Vercel
-  ?
-Planning Pro
-  ?
-Supabase
-  +-- PostgreSQL
-  +-- Auth
-  +-- Storage
+Tela administrativa para cadastrar atividades:
+- Semana
+- Data prevista
+- Atividade
+- Equipe
+- Responsável
+- Quantidade prevista
+- Observação
 
-## M�dulos
+As programações ficam em `localStorage` neste protótipo para facilitar a validação visual/funcional. O módulo já foi separado para futura gravação em `tb_programacoes`.
 
-- Dashboard
-- Programa��o
-- Nova Programa��o
-- Execu��o em campo
-- Hist�rico
-- Cadastro de Pessoas
-- Cadastro de Equipes
-- Cadastro de Atividades
+Exemplo de equipes/atividades:
+- Equipe A → Ponto a Ponto
+- Equipe B → Loop Teste
+- Equipe C → Preservação
 
-## Desenvolvimento
+## 3. Login separado — Administrador x Técnico
 
-npm install
+A primeira tela agora apresenta dois acessos distintos:
 
-npm run build
+### Administrador
+Login por e-mail + senha (mock local nesta entrega).
 
-## Vari�veis de ambiente
+### Técnico
+Login por código de acesso (mock local nesta entrega).
 
-VITE_SUPABASE_URL=
-VITE_SUPABASE_PUBLISHABLE_KEY=
+O código do técnico é o ponto de entrada previsto para consultar `tb_acessos`, `tb_pessoas` e `tb_permissoes` na integração final.
 
-Nunca versionar arquivos .env ou chaves secretas.
+## Base atual preservada
+
+O módulo técnico de Ponto a Ponto, Histórico e Perfil continua disponível e mantém o fluxo da revisão anterior.
+
+## Integração Supabase
+
+O arquivo `app.js` já possui:
+
+```js
+const CONFIG = {
+  SUPABASE_URL: "",
+  SUPABASE_ANON_KEY: ""
+};
+```
+
+A etapa seguinte de backend deve ligar:
+
+- `tb_atividades`
+- `tb_equipes`
+- `tb_equipe_membros`
+- `tb_pessoas`
+- `tb_acessos`
+- `tb_permissoes`
+- `tb_programacoes`
+- `tb_execucoes_campo`
+
+ao frontend.
+
+**Importante:** o controle visual de perfil feito em JavaScript é apenas demonstrativo. Em produção, a autorização precisa ser aplicada no backend/RLS e não apenas no frontend.
+
+## Desenvolvimento local
+
+Abra `index.html` diretamente ou publique a pasta em Vercel.
+
+## Git
+
+```powershell
+cd "C:\Users\thiago.moraes\Downloads\controle-ponto-a-ponto"
+git status
+git add index.html app.js styles.css README.md
+git commit -m "Adiciona dashboard programacao e login por perfil"
+git push origin main
+```
