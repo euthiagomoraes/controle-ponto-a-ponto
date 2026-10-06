@@ -100,6 +100,8 @@
     <nav id="adminNav" class="side-nav hidden">
       <button class="nav-item active" data-screen="dashboard"><span class="nav-icon">▦</span><span>Dashboard</span></button>
       <button class="nav-item" data-screen="programacao"><span class="nav-icon">□</span><span>Programação</span></button>
+      <button class="nav-item" data-screen="atividades"><span class="nav-icon">◇</span><span>Atividades</span></button>
+      <button class="nav-item" data-screen="acessos"><span class="nav-icon">◎</span><span>Pessoas & Acessos</span></button>
       <button class="nav-item" data-screen="profile"><span class="nav-icon">◯</span><span>Perfil</span></button>
     </nav>
 
@@ -370,6 +372,66 @@
     </section>
 
     <!-- =========================
+         ADMIN: ATIVIDADES / MÓDULOS
+         ========================= -->
+    <section id="screen-atividades" class="screen">
+      <div class="page-title-row">
+        <div><span class="section-kicker">ARQUITETURA MODULAR</span><h2>Atividades e módulos</h2><p>Cada atividade funciona como um módulo independente, com colunas próprias e máscara de Excel.</p></div>
+        <div class="page-actions"><button id="exportModuleMaskBtn" class="ghost-btn">⇩ Exportar máscara</button><button id="importModuleMaskBtn" class="ghost-btn">⇧ Importar Excel</button><button id="newActivityBtn" class="primary-btn">＋ Nova atividade</button><input id="moduleExcelInput" type="file" accept=".xlsx,.xls,.csv" class="hidden"></div>
+      </div>
+      <div class="module-layout">
+        <section class="module-list card">
+          <div class="list-header"><div><span class="section-kicker">MÓDULOS</span><h3>Atividades cadastradas</h3></div><span id="moduleCountBadge" class="tag-badge">0</span></div>
+          <div id="moduleCards" class="module-cards"></div>
+        </section>
+        <section class="module-editor card">
+          <div id="moduleEditorEmpty" class="module-empty">
+            <div class="empty-icon">◇</div><strong>Selecione um módulo</strong><span>As colunas personalizadas e a máscara do Excel aparecerão aqui.</span>
+          </div>
+          <div id="moduleEditor" class="hidden">
+            <div class="module-editor-head">
+              <div><span class="section-kicker">CONFIGURAÇÃO DO MÓDULO</span><h3 id="moduleTitle">—</h3><p id="moduleDescription">—</p></div>
+              <div class="module-head-actions"><button id="editActivityBtn" class="ghost-btn">Editar atividade</button><button id="deleteActivityBtn" class="danger-btn">Excluir atividade</button></div>
+            </div>
+            <div class="module-kpis">
+              <div><span>COLUNAS</span><strong id="moduleColumnCount">0</strong></div>
+              <div><span>OBRIGATÓRIAS</span><strong id="moduleRequiredCount">0</strong></div>
+              <div><span>REGISTROS IMPORTADOS</span><strong id="moduleRecordCount">0</strong></div>
+            </div>
+            <div class="column-builder-head"><div><span class="section-kicker">MÁSCARA DO EXCEL</span><h4>Colunas personalizadas</h4><p>Crie, edite, ordene e exclua campos. A mesma estrutura será usada na programação e na importação/exportação.</p></div><button id="newColumnBtn" class="primary-btn">＋ Nova coluna</button></div>
+            <div id="columnRows" class="column-list"></div>
+            <div class="excel-preview-wrap">
+              <div class="excel-preview-head"><div><span class="section-kicker">PRÉ-VISUALIZAÇÃO</span><h4>Máscara que será exportada</h4></div><span id="maskFileName" class="file-chip">—</span></div>
+              <div class="table-wrap excel-preview-table"><table id="maskPreviewTable"></table></div>
+              <p id="importResultMessage" class="form-message"></p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- =========================
+         ADMIN: PESSOAS & ACESSOS
+         ========================= -->
+    <section id="screen-acessos" class="screen">
+      <div class="page-title-row">
+        <div><span class="section-kicker">CONTROLE DE ACESSO</span><h2>Pessoas e códigos de acesso</h2><p>Cadastre o usuário de campo, gere seu código e defina o perfil/equipe de atuação.</p></div>
+        <button id="newAccessBtn" class="primary-btn">＋ Novo usuário</button>
+      </div>
+      <div class="access-admin-grid">
+        <div class="metrics-grid access-metrics">
+          <div class="metric-card card"><span>USUÁRIOS</span><strong id="accessTotal">0</strong><small>pessoas cadastradas</small></div>
+          <div class="metric-card card"><span>ATIVOS</span><strong id="accessActive">0</strong><small>com acesso liberado</small></div>
+          <div class="metric-card card"><span>CÓDIGOS</span><strong id="accessCodes">0</strong><small>códigos gerados</small></div>
+        </div>
+        <section class="card access-table-card">
+          <div class="list-header"><div><span class="section-kicker">CADASTRO</span><h3>Usuários de campo</h3></div><div class="access-search"><input id="accessSearch" type="search" placeholder="Buscar nome, e-mail ou equipe..."></div></div>
+          <div class="table-wrap large-table"><table><thead><tr><th>NOME</th><th>FUNÇÃO</th><th>E-MAIL</th><th>CÓDIGO</th><th>EQUIPE</th><th>PERFIL</th><th>STATUS</th><th></th></tr></thead><tbody id="accessTableBody"></tbody></table><div id="accessEmpty" class="empty-state hidden"><div>◎</div><strong>Nenhum usuário encontrado</strong><span>Cadastre a primeira pessoa para liberar acesso.</span></div></div>
+        </section>
+      </div>
+    </section>
+
+    <!-- =========================
          PROFILE
          ========================= -->
     <section id="screen-profile" class="screen">
@@ -433,12 +495,116 @@
       <label>Observação
         <textarea id="programNote" rows="3" maxlength="250" placeholder="Detalhes adicionais da programação..."></textarea>
       </label>
+      <div id="programCustomFields" class="dynamic-form-grid"></div>
       <p id="programFormMessage" class="form-message"></p>
       <div class="modal-actions">
         <button type="button" id="cancelProgramModal" class="secondary-btn">Cancelar</button>
         <button type="submit" class="primary-btn">Salvar programação</button>
       </div>
     </form>
+  </div>
+</div>
+
+<div id="activityModal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box program-modal">
+    <button id="closeActivityModal" class="modal-close">×</button>
+    <span class="section-kicker">MÓDULO DE ATIVIDADE</span>
+    <h3 id="activityModalTitle">Nova atividade</h3>
+    <p>Cadastre o módulo e, depois, defina as colunas específicas que ele usará.</p>
+    <form id="activityForm" class="program-form">
+      <label>Nome da atividade
+        <input id="activityNameInput" type="text" maxlength="80" placeholder="Ex.: Ponto a Ponto" required>
+      </label>
+      <label>Descrição
+        <textarea id="activityDescriptionInput" rows="3" maxlength="220" placeholder="Descreva o objetivo desta atividade..."></textarea>
+      </label>
+      <p id="activityFormMessage" class="form-message"></p>
+      <div class="modal-actions"><button type="button" id="cancelActivityModal" class="secondary-btn">Cancelar</button><button type="submit" class="primary-btn">Salvar módulo</button></div>
+    </form>
+  </div>
+</div>
+
+<div id="columnModal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box program-modal">
+    <button id="closeColumnModal" class="modal-close">×</button>
+    <span class="section-kicker">COLUNA PERSONALIZADA</span>
+    <h3 id="columnModalTitle">Nova coluna</h3>
+    <p>Essa coluna fará parte da máscara do Excel e dos campos da programação.</p>
+    <form id="columnForm" class="program-form">
+      <div class="form-grid-2">
+        <label>Nome exibido
+          <input id="columnLabelInput" type="text" maxlength="60" placeholder="Ex.: CABINET" required>
+        </label>
+        <label>Chave
+          <input id="columnKeyInput" type="text" maxlength="40" placeholder="Ex.: cabinet" required>
+        </label>
+      </div>
+      <div class="form-grid-2">
+        <label>Tipo de dado
+          <select id="columnTypeInput"><option value="text">Texto</option><option value="number">Número</option><option value="date">Data</option><option value="select">Lista</option><option value="boolean">Sim/Não</option></select>
+        </label>
+        <label class="check-field"><input id="columnRequiredInput" type="checkbox"> <span>Campo obrigatório</span></label>
+      </div>
+      <label>Opções da lista (separadas por vírgula)
+        <input id="columnOptionsInput" type="text" maxlength="250" placeholder="Ex.: ATIVO, INATIVO, BLOQUEADO">
+      </label>
+      <p id="columnFormMessage" class="form-message"></p>
+      <div class="modal-actions"><button type="button" id="cancelColumnModal" class="secondary-btn">Cancelar</button><button type="submit" class="primary-btn">Salvar coluna</button></div>
+    </form>
+  </div>
+</div>
+
+<div id="accessModal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box program-modal">
+    <button id="closeAccessModal" class="modal-close">×</button>
+    <span class="section-kicker">PESSOA & ACESSO</span>
+    <h3 id="accessModalTitle">Novo usuário</h3>
+    <p>O código gerado será utilizado na tela de Login do Técnico.</p>
+    <form id="accessForm" class="program-form">
+      <div class="form-grid-2">
+        <label>Nome completo
+          <input id="accessNameInput" type="text" maxlength="100" required>
+        </label>
+        <label>Função
+          <input id="accessFunctionInput" type="text" maxlength="80" placeholder="Ex.: Técnico de Instrumentação" required>
+        </label>
+      </div>
+      <div class="form-grid-2">
+        <label>E-mail
+          <input id="accessEmailInput" type="email" maxlength="120" placeholder="nome@empresa.com">
+        </label>
+        <label>Código de acesso
+          <div class="inline-input"><input id="accessCodeInput" type="text" maxlength="8" inputmode="numeric" required><button type="button" id="generateAccessCodeBtn" class="ghost-btn">Gerar</button></div>
+        </label>
+      </div>
+      <div class="form-grid-2">
+        <label>Perfil
+          <select id="accessRoleInput"><option value="technician">Técnico</option><option value="admin">Administrador</option></select>
+        </label>
+        <label>Equipe
+          <select id="accessTeamInput"></select>
+        </label>
+      </div>
+      <label>Status
+        <select id="accessStatusInput"><option value="ATIVO">Ativo</option><option value="INATIVO">Inativo</option></select>
+      </label>
+      <p id="accessFormMessage" class="form-message"></p>
+      <div class="modal-actions"><button type="button" id="cancelAccessModal" class="secondary-btn">Cancelar</button><button type="submit" class="primary-btn">Salvar usuário</button></div>
+    </form>
+  </div>
+</div>
+
+<div id="deleteModuleConfirm" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box">
+    <button id="closeDeleteModuleConfirm" class="modal-close">×</button>
+    <span class="section-kicker">CONFIRMAÇÃO</span>
+    <h3>Excluir módulo?</h3>
+    <p id="deleteModuleText">A atividade e sua estrutura serão removidas localmente.</p>
+    <div class="modal-actions"><button id="cancelDeleteModule" class="secondary-btn">Cancelar</button><button id="confirmDeleteModule" class="primary-btn danger-fill">Excluir</button></div>
   </div>
 </div>
 
@@ -457,6 +623,7 @@
 </div>
 
 <div id="toast" class="toast" role="alert"></div>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>

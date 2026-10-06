@@ -1,86 +1,125 @@
-# Controle Ponto a Ponto — Rev. 3
+# Controle Ponto a Ponto — Rev. 4
 
-Entrega da nova estrutura de telas:
+Esta revisão evolui a Rev. 3 para uma arquitetura administrativa modular, mantendo o fluxo de campo de Ponto a Ponto.
 
 ## 1. Dashboard — Previsto x Realizado
 
-Tela administrativa com:
-- KPIs de previsto, realizado, saldo e percentual de realização.
-- Comparativo semanal em barras.
-- Anel de progresso da semana atual.
-- Quebra por atividade: Ponto a Ponto, Loop Teste e Preservação.
-- Últimas execuções registradas.
+A área administrativa mantém o painel de acompanhamento com:
+- previsto, realizado, saldo e percentual;
+- evolução semanal;
+- progresso da semana;
+- comparação por atividade;
+- últimas execuções.
 
-## 2. Programação — imput de atividades
+## 2. Programação
 
-Tela administrativa para cadastrar atividades:
-- Semana
-- Data prevista
-- Atividade
-- Equipe
-- Responsável
-- Quantidade prevista
-- Observação
+A programação agora trabalha com o ID do módulo/atividade e pode receber campos personalizados definidos na configuração do próprio módulo.
 
-As programações ficam em `localStorage` neste protótipo para facilitar a validação visual/funcional. O módulo já foi separado para futura gravação em `tb_programacoes`.
+Campos de planejamento fixos:
+- Semana;
+- Data prevista;
+- Atividade;
+- Equipe;
+- Responsável;
+- Quantidade prevista;
+- Observação.
 
-Exemplo de equipes/atividades:
-- Equipe A → Ponto a Ponto
-- Equipe B → Loop Teste
-- Equipe C → Preservação
+Depois dos campos fixos, o formulário adiciona dinamicamente as colunas personalizadas do módulo selecionado.
 
-## 3. Login separado — Administrador x Técnico
+## 3. Atividades e módulos
 
-A primeira tela agora apresenta dois acessos distintos:
+Nova área administrativa: **Atividades e módulos**.
 
-### Administrador
-Login por e-mail + senha (mock local nesta entrega).
+Cada atividade é tratada como um módulo independente. Os exemplos iniciais são:
+- Ponto a Ponto;
+- Loop Teste;
+- Preservação.
 
-### Técnico
-Login por código de acesso (mock local nesta entrega).
+Para cada módulo o administrador pode:
+- criar uma nova atividade;
+- editar nome e descrição;
+- excluir a atividade;
+- criar colunas personalizadas;
+- editar colunas;
+- excluir colunas;
+- reordenar colunas por arrastar e soltar;
+- definir tipo do campo: Texto, Número, Data, Lista ou Sim/Não;
+- definir campo obrigatório;
+- definir opções para campos do tipo Lista.
 
-O código do técnico é o ponto de entrada previsto para consultar `tb_acessos`, `tb_pessoas` e `tb_permissoes` na integração final.
+## 4. Máscara de Excel por módulo
 
-## Base atual preservada
+Cada atividade possui sua própria máscara.
 
-O módulo técnico de Ponto a Ponto, Histórico e Perfil continua disponível e mantém o fluxo da revisão anterior.
+O botão **Exportar máscara** gera um arquivo `.xlsx` com:
+- planilha **Importação** contendo os cabeçalhos na ordem configurada;
+- segunda planilha **Leia-me** com instruções e tipos de campo.
 
-## Integração Supabase
+O botão **Importar Excel** lê a primeira planilha do arquivo, valida as colunas obrigatórias e grava os registros no módulo.
 
-O arquivo `app.js` já possui:
+Para o módulo **Ponto a Ponto**, os campos compatíveis também são normalizados para o fluxo técnico existente.
 
-```js
-const CONFIG = {
-  SUPABASE_URL: "",
-  SUPABASE_ANON_KEY: ""
-};
-```
+A exportação/importação usa o SheetJS Community Edition 0.20.3 no navegador, conforme a instalação standalone publicada pela documentação oficial. Para estabilidade em produção, a própria documentação recomenda versionar/venderizar a biblioteca em vez de depender de CDN. citeturn426366search3turn426366search14
 
-A etapa seguinte de backend deve ligar:
+## 5. Pessoas e códigos de acesso
 
-- `tb_atividades`
-- `tb_equipes`
-- `tb_equipe_membros`
-- `tb_pessoas`
-- `tb_acessos`
-- `tb_permissoes`
-- `tb_programacoes`
-- `tb_execucoes_campo`
+Nova área administrativa: **Pessoas & Acessos**.
 
-ao frontend.
+Permite cadastrar:
+- nome;
+- função;
+- e-mail;
+- código de acesso;
+- perfil;
+- equipe;
+- status.
 
-**Importante:** o controle visual de perfil feito em JavaScript é apenas demonstrativo. Em produção, a autorização precisa ser aplicada no backend/RLS e não apenas no frontend.
+Também permite:
+- gerar código automaticamente;
+- editar cadastro;
+- excluir cadastro;
+- bloquear/desbloquear acesso.
 
-## Desenvolvimento local
+O Login do Técnico consulta os cadastros ativos por código. Nesta revisão, o armazenamento ainda é local para permitir validação visual e funcional.
 
-Abra `index.html` diretamente ou publique a pasta em Vercel.
+## 6. Persistência atual
 
-## Git
+Nesta entrega, as novas configurações são armazenadas em `localStorage`:
+
+- `ppaModules` — módulos/atividades e suas colunas;
+- `ppaAccesses` — pessoas e códigos;
+- `ppaModuleRecords` — registros importados por módulo;
+- `ppaProgramacoes` — programação;
+- `ppaImportedRows` — base importada do Ponto a Ponto.
+
+Isso permite testar toda a interface antes de conectar definitivamente o Supabase.
+
+## 7. Próxima integração de backend
+
+A arquitetura final deve substituir o `localStorage` pelas tabelas existentes do ecossistema Supabase, mantendo RLS e isolamento por família/projeto.
+
+A proposta funcional é:
+
+- `tb_pessoas` → pessoas;
+- `tb_acessos` → códigos de acesso e status;
+- `tb_permissoes` → permissões por usuário/equipe/módulo;
+- `tb_atividades` → módulos;
+- tabela de configuração de colunas → definição da máscara de cada atividade;
+- `tb_programacoes` → planejamento + dados personalizados;
+- `tb_execucoes_campo` → execução real.
+
+A integração SQL deve ser feita após conferir os nomes/tipos das colunas atuais, sem substituir a estrutura existente às cegas.
+
+## 8. Git
 
 ```powershell
 cd "C:\Users\thiago.moraes\Downloads\controle-ponto-a-ponto"
 git status
 git add index.html app.js styles.css README.md
-git commit -m "Adiciona dashboard programacao e login por perfil"
+ git commit -m "Cria arquitetura modular, acessos e mascaras Excel"
 git push origin main
 ```
+
+## Observação de segurança
+
+A separação Administrador x Técnico no frontend é apenas de interface. Em produção, a autorização real deve ser garantida por Supabase Auth, RLS e permissões no backend.
