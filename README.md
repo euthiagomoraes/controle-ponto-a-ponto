@@ -166,3 +166,28 @@ A tela **Programação de atividades** agora possui:
 - importação **cumulativa**, acrescentando novas linhas sem apagar as programações existentes.
 
 O template gera as planilhas `Programação` e `Leia-me`. A atividade selecionada é identificada no template e usada como referência durante a importação.
+
+
+## Rev. 13 — Programação persistida no Supabase
+
+### 1. Banco de dados
+Execute no SQL Editor do Supabase o arquivo `001_programacao_supabase.sql`. Ele cria:
+- `tb_atividades`: atividades/módulos;
+- `tb_atividade_colunas`: estrutura das colunas e o flag `editavel_tecnico`;
+- `tb_programacoes`: programação importada, incluindo `custom_data` JSONB.
+
+### 2. Configuração do frontend
+Edite `supabase-config.js` e informe a **anon key** do projeto. A URL já está configurada para o projeto utilizado pelo sistema.
+
+### 3. Regra de edição
+Em **Atividades > Colunas**, cada coluna possui o campo **Técnico pode alterar**.
+- Marcado: o Técnico pode alterar o valor no registro de campo.
+- Desmarcado: o campo aparece bloqueado.
+
+A importação do Excel grava os valores das colunas em `tb_programacoes.custom_data`. O Técnico recebe a programação do banco ao entrar e pode alterar somente os campos autorizados.
+
+### 4. Nova programação x inclusão
+- **Nova programação**: remove a programação atual e grava a nova carga.
+- **Incluir na Programação**: acrescenta os novos registros.
+
+> As policies `anon` do SQL são provisórias para compatibilizar com o login local atual. Ao migrar o login para Supabase Auth, substitua-as por policies baseadas no usuário/perfil.

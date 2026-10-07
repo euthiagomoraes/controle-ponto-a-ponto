@@ -3,8 +3,8 @@
    Integração final: conectar os loaders/actions às tabelas do ecossistema Supabase. */
 
 const CONFIG = {
-  SUPABASE_URL: "",
-  SUPABASE_ANON_KEY: "",
+  SUPABASE_URL: window.PPA_SUPABASE_CONFIG?.url || "",
+  SUPABASE_ANON_KEY: window.PPA_SUPABASE_CONFIG?.anonKey || "",
   // Endpoints legados do Excel/Power Automate ficam apenas como fallback.
   DATA_URL: "",
   WRITE_URL: "",
@@ -33,6 +33,7 @@ const state = {
   pendingProgramImport: null,
   programHistory: [],
   settings: {primary:"#0b5cff", accent:"#12a66a", header:"#07111f", background:"#f6f8fb", logo:""},
+  supabase: null,
   mockRows: [
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA401",LOOP:"XV-20GHA10AA401",TAG:"ZSH-20GHA10AA401-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",Week:"W136",Logs:""},
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA402",LOOP:"XV-20GHA10AA402",TAG:"ZSL-20GHA10AA402-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",Week:"W136",Logs:""},
@@ -90,6 +91,14 @@ const latestLog = row => {
   return logs.length ? logs[logs.length-1] : "Não registrado";
 };
 const logEntries = row => String(row.Logs || "").split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+
+function getSupabaseClient(){
+  if(state.supabase)return state.supabase;
+  const ok=CONFIG.SUPABASE_URL&&CONFIG.SUPABASE_ANON_KEY&&!String(CONFIG.SUPABASE_ANON_KEY).includes("COLE_AQUI");
+  if(!ok||!window.supabase?.createClient)return null;
+  state.supabase=window.supabase.createClient(CONFIG.SUPABASE_URL,CONFIG.SUPABASE_ANON_KEY); return state.supabase;
+}
+function dbEnabled(){return !!getSupabaseClient();}
 
 function currentWeek() {
   const today = new Date();
@@ -630,23 +639,16 @@ function closeProgramImportModal(){
   state.pendingProgramImport=null;
 }
 
-function confirmProgramImport(mode){
-  const pending=state.pendingProgramImport;
-  if(!pending||!mode)return;
-  try{
-    const before=state.programacoes.length;
-    if(mode==="append") state.programacoes.push(...pending.records);
-    else state.programacoes=[...pending.records];
-    persistProgramacoes();
-    recordProgramImport(mode,pending);
-    closeProgramImportModal();
-    renderProgramacao();
-    renderDashboard();
-    if(mode==="append") toast(`${pending.records.length} programação(ões) incluída(s). Base anterior preservada: ${before} registro(s).`);
-    else toast(`Nova programação criada com ${pending.records.length} registro(s). A programação anterior foi substituída.`);
-  }catch(e){
-    $("programImportMessage").textContent=e.message||"Não foi possível gravar a importação.";
-  }
+async function confirmProgramImport(mode){
+  const pending=state.pendingProgramImport;if(!pending||!mode)return;
+  try{const sb=getSupabaseClient();
+    if(sb){await syncModulesToDB();if(mode==="new"){const {error}=await sb.from("tb_programacoes").delete().neq("id","00000000-0000-0000-0000-000000000000");if(error)throw error;}
+      const payload=pending.records.map(r=>({week:r.week,date:r.date||null,activity_id:r.activity,team:r.team,responsible:r.responsible,qty:r.qty,note:r.note||null,custom_data:r.customData||{},import_mode:mode,import_file:pending.fileName,created_by:state.currentUser?.nome||"Usuário"}));
+      const {data,error}=await sb.from("tb_programacoes").insert(payload).select();if(error)throw error;
+      state.programacoes=mode==="new"?[]:state.programacoes; state.programacoes.push(...(data||[]).map(p=>({id:p.id,week:p.week,date:p.date,activity:p.activity_id,team:p.team,responsible:p.responsible,qty:Number(p.qty||0),note:p.note||"",customData:p.custom_data||{}})));
+    }else{if(mode==="append")state.programacoes.push(...pending.records);else state.programacoes=[...pending.records];persistProgramacoes();}
+    recordProgramImport(mode,pending);closeProgramImportModal();await loadProgramacoes();await loadData();renderProgramacao();renderDashboard();toast(mode==="append"?`${pending.records.length} programação(ões) incluída(s).`:`Nova programação criada com ${pending.records.length} registro(s).`);
+  }catch(e){$("programImportMessage").textContent=e.message||"Não foi possível gravar a importação.";}
 }
 
 function setupSidebar(){
@@ -802,6 +804,7 @@ function selectItem(tag,rerender=true) {
   $("registerBtn").disabled = false;
   $("repeatBtn").disabled = !done;
   $("actionMessage").textContent = "";
+  renderTechnicianCustomFields(row);
   if (rerender) renderTable();
 }
 
@@ -871,24 +874,6 @@ function setupProfile() {
   }
 }
 
-function syncAll() {
-  $("currentDateTime").textContent = nowBR();
-  $("currentWeek").textContent = currentWeek();
-  loadProgramacoes();
-  if (state.role === "technician") {
-    loadData().then(()=>{
-      populateFilters();
-      renderTable();
-      renderHistory();
-    }).catch(e=>toast(e.message || "Não foi possível sincronizar."));
-  }
-  if (state.role === "admin") {
-    renderDashboard();
-    renderProgramacao();
-  }
-}
-
-
 /* =========================================================
    Rev. 4 — arquitetura modular + usuários/códigos + Excel
    ========================================================= */
@@ -947,14 +932,33 @@ function normalizeModules(){
       }
     }catch{ state.moduleCatalog=clone(MODULE_DEFAULTS); }
   } else state.moduleCatalog=clone(MODULE_DEFAULTS);
+  state.moduleCatalog=state.moduleCatalog.map(m=>({...m,columns:(m.columns||[]).map(c=>({...c,technicianEditable:!!c.technicianEditable}))}));
   state.activities=state.moduleCatalog;
   localStorage.setItem("ppaModules",JSON.stringify(state.moduleCatalog));
   if(!state.selectedModuleId) state.selectedModuleId=state.moduleCatalog[0]?.id||null;
 }
 
+async function syncModulesToDB(){
+  const sb=getSupabaseClient(); if(!sb)return;
+  for(const m of state.moduleCatalog){
+    const {error}=await sb.from("tb_atividades").upsert({id:m.id,nome:m.name,descricao:m.description||null,ativo:true,updated_at:new Date().toISOString()},{onConflict:"id"});
+    if(error)throw error;
+    const cols=(m.columns||[]).map((c,i)=>({id:c.id,atividade_id:m.id,chave:c.key,rotulo:c.label,tipo:c.type,obrigatorio:!!c.required,editavel_tecnico:!!c.technicianEditable,opcoes:c.options||[],ordem:i,updated_at:new Date().toISOString()}));
+    if(cols.length){const {error:ce}=await sb.from("tb_atividade_colunas").upsert(cols,{onConflict:"id"});if(ce)throw ce;}
+  }
+}
+async function loadModulesFromDB(){
+  const sb=getSupabaseClient();if(!sb)return;
+  const {data:mods,error}=await sb.from("tb_atividades").select("*").eq("ativo",true).order("created_at");if(error||!Array.isArray(mods)||!mods.length)return;
+  const {data:cols}=await sb.from("tb_atividade_colunas").select("*").order("ordem");
+  state.moduleCatalog=mods.map(m=>({id:m.id,name:m.nome,description:m.descricao||"",columns:(cols||[]).filter(c=>c.atividade_id===m.id).map(c=>({id:c.id,key:c.chave,label:c.rotulo,type:c.tipo,required:!!c.obrigatorio,technicianEditable:!!c.editavel_tecnico,options:c.opcoes||[]}))}));
+  state.activities=state.moduleCatalog; if(!state.selectedModuleId)state.selectedModuleId=state.moduleCatalog[0]?.id||null; localStorage.setItem("ppaModules",JSON.stringify(state.moduleCatalog));
+}
+
 function persistModules(){
   state.activities=state.moduleCatalog;
   localStorage.setItem("ppaModules",JSON.stringify(state.moduleCatalog));
+  syncModulesToDB().catch(e=>toast(`Configuração local salva; banco: ${e.message||"erro"}`));
 }
 
 function normalizeAccesses(){
@@ -1067,6 +1071,27 @@ function weekOptions(){
 
 function getPlanningColumnValue(column,row){ return row?.customData?.[column.key] ?? ""; }
 
+function renderTechnicianCustomFields(row){
+  const host=$("technicianCustomFields"); if(!host)return;
+  const mod=moduleById(row?.activityModuleId||row?.activity); if(!mod){host.innerHTML="";return;}
+  const cols=(mod.columns||[]).filter(c=>!["week","date","activity","team","responsible","qty","note"].includes(c.key));
+  if(!cols.length){host.innerHTML="";return;}
+  host.innerHTML=`<div class="dynamic-fields-heading"><span>Dados da atividade</span><small>Campos bloqueados não podem ser alterados pelo Técnico.</small></div>`+cols.map(c=>{
+    const value=row?.customData?.[c.key]??"", disabled=c.technicianEditable?"":"disabled";
+    if(c.type==="select")return `<label class="dynamic-field"><span>${escapeHTML(c.label)}${c.required?' *':''}</span><select data-tech-custom-key="${escapeHTML(c.key)}" ${disabled}><option value="">Selecione</option>${(c.options||[]).map(o=>`<option value="${escapeHTML(o)}" ${String(o)===String(value)?"selected":""}>${escapeHTML(o)}</option>`).join("")}</select></label>`;
+    if(c.type==="boolean")return `<label class="dynamic-field"><span>${escapeHTML(c.label)}</span><select data-tech-custom-key="${escapeHTML(c.key)}" ${disabled}><option value="">Selecione</option><option value="SIM" ${value==="SIM"?"selected":""}>SIM</option><option value="NÃO" ${value==="NÃO"?"selected":""}>NÃO</option></select></label>`;
+    return `<label class="dynamic-field"><span>${escapeHTML(c.label)}${c.required?' *':''}</span><input data-tech-custom-key="${escapeHTML(c.key)}" type="${c.type==="number"?"number":c.type==="date"?"date":"text"}" value="${escapeHTML(value)}" ${disabled}></label>`;
+  }).join("");
+  host.querySelectorAll("[data-tech-custom-key]:not([disabled])").forEach(el=>el.addEventListener("change",()=>saveTechnicianCustomField(row,el.dataset.techCustomKey,el.value)));
+}
+async function saveTechnicianCustomField(row,key,value){
+  row.customData=row.customData||{}; row.customData[key]=value; persistImportedRows();
+  const sb=getSupabaseClient();
+  if(sb&&row.programacaoId){const {error}=await sb.from("tb_programacoes").update({custom_data:row.customData,updated_at:new Date().toISOString()}).eq("id",row.programacaoId); if(error){toast("Não foi possível salvar no banco.");return;}}
+  toast("Campo atualizado.");
+}
+function persistImportedRows(){localStorage.setItem("ppaImportedRows",JSON.stringify(state.rows));}
+
 function renderProgramCustomFields(activityId, values={}){
   const mod=moduleById(activityId); const host=$("programCustomFields"); if(!mod){host.innerHTML="";return;}
   host.innerHTML=mod.columns.filter(c=>!['week','date','activity','team','responsible','qty','note'].includes(c.key)).map(c=>{
@@ -1119,19 +1144,11 @@ function createProgramacao(){
 }
 
 function persistProgramacoes(){ localStorage.setItem("ppaProgramacoes",JSON.stringify(state.programacoes)); }
-function loadProgramacoes(){
-  const saved=localStorage.getItem("ppaProgramacoes");
-  let parsed=null;
-  if(saved){try{parsed=JSON.parse(saved);if(!Array.isArray(parsed))parsed=null;}catch{parsed=null;}}
-  state.programacoes=parsed||clone(state.mockProgramacoes);
-  /* compatibilidade: versões anteriores guardavam o nome da atividade,
-     enquanto a arquitetura modular passa a guardar o ID do módulo. */
-  state.programacoes=state.programacoes.map(p=>{
-    if(!p.activity)return p;
-    const mod=state.moduleCatalog?.find(m=>m.id===p.activity)||state.moduleCatalog?.find(m=>m.name===p.activity);
-    return mod?{...p,activity:mod.id,customData:p.customData||{}}:{...p,customData:p.customData||{}};
-  });
-  persistProgramacoes();
+async function loadProgramacoes(){
+  const sb=getSupabaseClient();
+  if(sb){const {data,error}=await sb.from("tb_programacoes").select("*").order("created_at",{ascending:true}); if(!error&&Array.isArray(data)){state.programacoes=data.map(p=>({id:p.id,week:p.week,date:p.date,activity:p.activity_id,team:p.team,responsible:p.responsible,qty:Number(p.qty||0),note:p.note||"",customData:p.custom_data||{},createdAt:p.created_at})); localStorage.setItem("ppaProgramacoes",JSON.stringify(state.programacoes)); return;}}
+  const saved=localStorage.getItem("ppaProgramacoes"); let parsed=null; if(saved){try{parsed=JSON.parse(saved);if(!Array.isArray(parsed))parsed=null;}catch{parsed=null;}}
+  state.programacoes=parsed||clone(state.mockProgramacoes); state.programacoes=state.programacoes.map(p=>{const mod=state.moduleCatalog?.find(m=>m.id===p.activity)||state.moduleCatalog?.find(m=>m.name===p.activity);return mod?{...p,activity:mod.id,customData:p.customData||{}}:{...p,customData:p.customData||{}};}); persistProgramacoes();
 }
 
 /* ---------- MÓDULOS / COLUNAS ---------- */
@@ -1153,7 +1170,7 @@ function renderModules(){
   $("maskFileName").textContent=`mascara_${makeKey(mod.name)}.xlsx`;
   const viewClass=state.columnViewMode==="side"?" side-view":" stacked-view";
   $("columnRows").className=`column-list${viewClass}`;
-  $("columnRows").innerHTML=mod.columns.map((c,i)=>`<div class="column-row" draggable="true" data-column-id="${escapeHTML(c.id)}"><div class="column-grip" title="Arraste para mover">☷</div><div class="column-order"><button class="mini-btn" data-move-column-up="${escapeHTML(c.id)}" title="Mover para cima" ${i===0?'disabled':''}>↑</button><button class="mini-btn" data-move-column-down="${escapeHTML(c.id)}" title="Mover para baixo" ${i===mod.columns.length-1?'disabled':''}>↓</button></div><div class="column-info"><strong>${escapeHTML(c.label)}</strong><small>${escapeHTML(c.key)}</small></div><div class="column-type"><span class="module-badge">${columnTypeLabel(c.type)}</span></div><div class="column-required">${c.required?'Obrigatória':'Opcional'}</div><div class="drag-hint">${c.type==='select'?(c.options||[]).join(', ')||'Sem opções':''}</div><div class="column-actions"><button class="mini-btn" data-edit-column="${escapeHTML(c.id)}" title="Editar">✎</button><button class="mini-btn danger" data-delete-column="${escapeHTML(c.id)}" title="Excluir">×</button></div></div>`).join("");
+  $("columnRows").innerHTML=mod.columns.map((c,i)=>`<div class="column-row" draggable="true" data-column-id="${escapeHTML(c.id)}"><div class="column-grip" title="Arraste para mover">☷</div><div class="column-order"><button class="mini-btn" data-move-column-up="${escapeHTML(c.id)}" title="Mover para cima" ${i===0?'disabled':''}>↑</button><button class="mini-btn" data-move-column-down="${escapeHTML(c.id)}" title="Mover para baixo" ${i===mod.columns.length-1?'disabled':''}>↓</button></div><div class="column-info"><strong>${escapeHTML(c.label)}</strong><small>${escapeHTML(c.key)}</small></div><div class="column-type"><span class="module-badge">${columnTypeLabel(c.type)}</span></div><div class="column-required">${c.required?'Obrigatória':'Opcional'}</div><div class="column-required">${c.technicianEditable?'Editável pelo Técnico':'Bloqueada'}</div><div class="drag-hint">${c.type==='select'?(c.options||[]).join(', ')||'Sem opções':''}</div><div class="column-actions"><button class="mini-btn" data-edit-column="${escapeHTML(c.id)}" title="Editar">✎</button><button class="mini-btn danger" data-delete-column="${escapeHTML(c.id)}" title="Excluir">×</button></div></div>`).join("");
   $("columnRows").querySelectorAll("[data-edit-column]").forEach(b=>b.onclick=()=>openColumnModal(b.dataset.editColumn));
   $("columnRows").querySelectorAll("[data-delete-column]").forEach(b=>b.onclick=()=>deleteColumn(b.dataset.deleteColumn));
   $("columnRows").querySelectorAll("[data-move-column-up]").forEach(b=>b.onclick=()=>moveColumn(b.dataset.moveColumnUp,-1));
@@ -1204,16 +1221,16 @@ function confirmDeleteActivity(){
 
 function openColumnModal(id=null){
   const mod=selectedModule(); if(!mod)return; state.editingColumnId=id; const c=id?mod.columns.find(x=>x.id===id):null;
-  $("columnModalTitle").textContent=c?"Editar coluna":"Nova coluna"; $("columnLabelInput").value=c?.label||""; $("columnKeyInput").value=c?.key||""; $("columnTypeInput").value=c?.type||"text"; $("columnRequiredInput").checked=!!c?.required; $("columnOptionsInput").value=(c?.options||[]).join(", "); $("columnFormMessage").textContent=""; $("columnModal").classList.remove("hidden");
+  $("columnModalTitle").textContent=c?"Editar coluna":"Nova coluna"; $("columnLabelInput").value=c?.label||""; $("columnKeyInput").value=c?.key||""; $("columnTypeInput").value=c?.type||"text"; $("columnRequiredInput").checked=!!c?.required; $("columnTechnicianEditableInput").checked=!!c?.technicianEditable; $("columnOptionsInput").value=(c?.options||[]).join(", "); $("columnFormMessage").textContent=""; $("columnModal").classList.remove("hidden");
 }
 function closeColumnModal(){ $("columnModal").classList.add("hidden"); state.editingColumnId=null; }
 function saveColumn(){
   const mod=selectedModule(); if(!mod)return;
-  const label=$("columnLabelInput").value.trim(); let key=makeKey($("columnKeyInput").value.trim()||label); const type=$("columnTypeInput").value; const required=$("columnRequiredInput").checked; const options=$("columnOptionsInput").value.split(",").map(x=>x.trim()).filter(Boolean);
+  const label=$("columnLabelInput").value.trim(); let key=makeKey($("columnKeyInput").value.trim()||label); const type=$("columnTypeInput").value; const required=$("columnRequiredInput").checked; const technicianEditable=$("columnTechnicianEditableInput").checked; const options=$("columnOptionsInput").value.split(",").map(x=>x.trim()).filter(Boolean);
   if(!label){$("columnFormMessage").textContent="Informe o nome exibido.";return;}
   if(mod.columns.some(c=>c.key===key&&c.id!==state.editingColumnId)){ $("columnFormMessage").textContent="A chave desta coluna já existe neste módulo.";return; }
-  if(state.editingColumnId){ const c=mod.columns.find(x=>x.id===state.editingColumnId); Object.assign(c,{label,key,type,required,options:type==='select'?options:[]}); }
-  else mod.columns.push({id:`col-${Date.now()}`,label,key,type,required,options:type==='select'?options:[]});
+  if(state.editingColumnId){ const c=mod.columns.find(x=>x.id===state.editingColumnId); Object.assign(c,{label,key,type,required,technicianEditable,options:type==='select'?options:[]}); }
+  else mod.columns.push({id:`col-${Date.now()}`,label,key,type,required,technicianEditable,options:type==='select'?options:[]});
   persistModules(); closeColumnModal(); renderModules(); toast("Coluna salva.");
 }
 function deleteColumn(id){ const mod=selectedModule(); if(!mod)return; if(!confirm(`Excluir a coluna “${mod.columns.find(c=>c.id===id)?.label||''}”?`))return; mod.columns=mod.columns.filter(c=>c.id!==id); persistModules(); renderModules(); toast("Coluna excluída."); }
@@ -1322,7 +1339,10 @@ function setupProfile(){
 }
 function loadData(){
   const imported=localStorage.getItem("ppaImportedRows"); if(imported){try{const parsed=JSON.parse(imported);if(Array.isArray(parsed)&&parsed.length){state.rows=parsed;return;}}catch{}}
-  if(!CONFIG.DATA_URL){ state.rows=clone(state.mockRows); return; }
+  if(!CONFIG.DATA_URL){
+    const imported=state.programacoes.flatMap(p=>{const cd=p.customData||{}; const tag=cd.tag||cd.TAG||cd.codigo||`${p.activity}-${p.id}`; return [{...cd,TAG:tag,LOOP:cd.loop||"",SERVICE:cd.service||"",TIPE:cd.type||cd.TIPE||"",DESCRIÇÃO:cd.descricao||cd.DESCRIÇÃO||"",FORN:cd.forn||"",SYS:cd.sys||"",SUBSYS:cd.subsys||"",Week:p.week,Logs:cd.logs||"",customData:cd,activityModuleId:p.activity,programacaoId:p.id}];});
+    state.rows=imported.length?imported:clone(state.mockRows); persistImportedRows(); return;
+  }
   return fetch(CONFIG.DATA_URL,{method:"GET",headers:{Accept:"application/json"}}).then(r=>{if(!r.ok)throw new Error("Falha ao consultar a fonte de dados.");return r.json();}).then(payload=>{state.rows=Array.isArray(payload)?payload:(payload.value||payload.rows||[]);});
 }
 async function appendLog(row){
@@ -1332,9 +1352,9 @@ async function appendLog(row){
   row.Logs=newLogs; localStorage.setItem("ppaImportedRows",JSON.stringify(state.rows)); return entry;
 }
 
-function syncAll(){
-  loadModuleCatalog(); loadProgramacoes(); loadProgramHistory(); $("currentDateTime").textContent=nowBR(); $("currentWeek").textContent=currentWeek();
-  if(state.role==="technician") loadData().then(()=>{populateFilters();renderTable();renderHistory();renderDashboard();}).catch(e=>toast(e.message||"Não foi possível sincronizar."));
+async function syncAll(){
+  loadModuleCatalog(); loadProgramHistory(); await loadModulesFromDB(); if(getSupabaseClient()) await syncModulesToDB(); await loadProgramacoes(); $("currentDateTime").textContent=nowBR(); $("currentWeek").textContent=currentWeek();
+  if(state.role==="technician"){await loadData();populateFilters();renderTable();renderHistory();renderDashboard();}
   if(state.role==="admin"){renderDashboard();renderProgramacao();renderModules();renderAccesses();}
 }
 

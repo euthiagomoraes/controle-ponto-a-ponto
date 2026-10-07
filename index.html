@@ -9,6 +9,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./supabase-config.js"></script>
 </head>
 <body>
 
@@ -370,6 +372,7 @@
             <div class="field"><span>SEMANA</span><strong id="fieldWeek">—</strong></div>
             <div class="field field-wide"><span>DESCRIÇÃO</span><strong id="fieldDescription">—</strong></div>
             <div class="field field-wide point-field"><span>ÚLTIMO LOG</span><strong id="fieldLog">Não registrado</strong></div>
+            <div id="technicianCustomFields" class="field-wide dynamic-fields-grid"></div>
           </div>
           <div class="action-area">
             <button id="registerBtn" class="primary-btn" disabled>✓ &nbsp;Registrar data de ponto-a-ponto</button>
@@ -647,6 +650,7 @@
           <select id="columnTypeInput"><option value="text">Texto</option><option value="number">Número</option><option value="date">Data</option><option value="select">Lista</option><option value="boolean">Sim/Não</option></select>
         </label>
         <label class="check-field"><input id="columnRequiredInput" type="checkbox"> <span>Campo obrigatório</span></label>
+        <label class="check-field"><input id="columnTechnicianEditableInput" type="checkbox"> <span>Técnico pode alterar</span></label>
       </div>
       <label>Opções da lista (separadas por vírgula)
         <input id="columnOptionsInput" type="text" maxlength="250" placeholder="Ex.: ATIVO, INATIVO, BLOQUEADO">
