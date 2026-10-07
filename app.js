@@ -180,30 +180,7 @@ function loginTechnician(code) {
   syncAll();
 }
 
-async function logout() {
-  try {
-    const sb = getSupabaseClient();
 
-    if (sb) {
-      await sb.auth.signOut();
-    }
-  } catch (error) {
-    console.error("Erro ao sair:", error);
-  }
-
-  sessionStorage.removeItem("ppaSession");
-
-  state.currentUser = null;
-  state.role = null;
-
-  $("appShell").classList.add("hidden");
-  $("loginScreen").classList.remove("hidden");
-
-  backToAccessChooser();
-
-  $("adminLoginForm").reset();
-  $("technicianLoginForm").reset();
-}
 
 function nav(screen) {
   const allowedAdmin = ["dashboard","programacao","profile"];
@@ -1742,6 +1719,89 @@ function renderDashboard() {
         <span>Os registros de campo aparecerão aqui.</span>
       </div>
     `;
+}
+
+async function loadAuthenticatedProfile() {
+  const sb = getSupabaseClient();
+
+  if (!sb) {
+    console.error("Supabase não está configurado.");
+    return false;
+  }
+
+  try {
+    const {
+      data: { user },
+      error: authError
+    } = await sb.auth.getUser();
+
+    if (authError) {
+      console.error("Erro ao obter usuário autenticado:", authError);
+      return false;
+    }
+
+    if (!user) {
+      return false;
+    }
+
+    const { data: pessoa, error: pessoaError } = await sb
+      .from("tb_pessoas")
+      .select(`
+        id,
+        nome,
+        cracha,
+        perfil,
+        ativo,
+        auth_user_id,
+        equipe_id,
+        disciplina
+      `)
+      .eq("auth_user_id", user.id)
+      .eq("ativo", true)
+      .single();
+
+    if (pessoaError) {
+      console.error("Erro ao carregar tb_pessoas:", pessoaError);
+      return false;
+    }
+
+    if (!pessoa) {
+      console.error(
+        "Usuário autenticado não possui registro em tb_pessoas."
+      );
+      return false;
+    }
+
+    state.currentUser = {
+      id: pessoa.id,
+      authUserId: pessoa.auth_user_id,
+      nome: pessoa.nome,
+      identificador: pessoa.cracha,
+      perfil: pessoa.perfil,
+      disciplina: pessoa.disciplina,
+      equipeId: pessoa.equipe_id,
+      email: user.email,
+      role:
+        pessoa.perfil === "ADMINISTRADOR"
+          ? "admin"
+          : "technician"
+    };
+
+    sessionStorage.setItem(
+      "ppaSession",
+      JSON.stringify(state.currentUser)
+    );
+
+    return true;
+
+  } catch (error) {
+    console.error(
+      "Falha ao carregar perfil autenticado:",
+      error
+    );
+
+    return false;
+  }
 }
 
 async function syncAll(){
