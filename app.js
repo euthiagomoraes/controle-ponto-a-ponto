@@ -32,6 +32,7 @@ const state = {
   pendingImport: null,
   pendingProgramImport: null,
   programHistory: [],
+  settings: {primary:"#0b5cff", accent:"#12a66a", header:"#07111f", background:"#f6f8fb", logo:""},
   mockRows: [
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA401",LOOP:"XV-20GHA10AA401",TAG:"ZSH-20GHA10AA401-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",Week:"W136",Logs:""},
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA402",LOOP:"XV-20GHA10AA402",TAG:"ZSL-20GHA10AA402-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",Week:"W136",Logs:""},
@@ -300,113 +301,49 @@ function dashboardMetrics() {
   return {planned:d.planned,done:d.done,balance:d.balance,rate:d.rate,week:d.filters.week||currentWeek()};
 }
 
-const DASHBOARD_ACTIVITY_COLORS = ["#0b5cff","#12a66a","#f59e0b","#8b5cf6","#ef4444","#06b6d4","#ec4899","#64748b"];
-function activityColor(activityId, index=0){
-  const modIndex=state.moduleCatalog.findIndex(m=>m.id===activityId);
-  return DASHBOARD_ACTIVITY_COLORS[(modIndex>=0?modIndex:index)%DASHBOARD_ACTIVITY_COLORS.length];
+const DEFAULT_SETTINGS={primary:"#0b5cff",accent:"#12a66a",header:"#07111f",background:"#f6f8fb",logo:""};
+function loadSettings(){try{const v=JSON.parse(localStorage.getItem("ppaSettings")||"null");state.settings={...DEFAULT_SETTINGS,...(v||{})};}catch{state.settings={...DEFAULT_SETTINGS};}applySettings();}
+function persistSettings(){localStorage.setItem("ppaSettings",JSON.stringify(state.settings));applySettings();}
+function applySettings(){const r=document.documentElement;r.style.setProperty("--sys-primary",state.settings.primary);r.style.setProperty("--sys-accent",state.settings.accent);r.style.setProperty("--sys-header",state.settings.header);r.style.setProperty("--sys-bg",state.settings.background);const logo=state.settings.logo;document.querySelectorAll(".brand-mark").forEach(el=>{if(logo){el.style.backgroundImage=`url(${logo})`;el.style.backgroundSize="contain";el.style.backgroundRepeat="no-repeat";el.style.backgroundPosition="center";el.textContent="";}else{el.style.backgroundImage="";el.textContent="PP";}});}
+function currentSettings(){return state.settings||DEFAULT_SETTINGS;}
+function setupSettings(){
+  const st=currentSettings(); ["PrimaryColor","AccentColor","HeaderColor","BgColor"].forEach(k=>{const id="settings"+k;if($(id))$(id).value=st[{PrimaryColor:"primary",AccentColor:"accent",HeaderColor:"header",BgColor:"background"}[k]];});
+  const img=$("settingsLogoPreview"), ph=$("settingsLogoPlaceholder"); if(img&&ph){if(st.logo){img.src=st.logo;img.classList.remove("hidden");ph.classList.add("hidden");}else{img.classList.add("hidden");ph.classList.remove("hidden");}}
+  const input=$("settingsLogoInput"); if(input) input.onchange=e=>{const file=e.target.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{state.settings.logo=reader.result;setupSettings();};reader.readAsDataURL(file);};
+  $("removeSettingsLogoBtn")&&( $("removeSettingsLogoBtn").onclick=()=>{state.settings.logo="";if($("settingsLogoInput"))$("settingsLogoInput").value="";setupSettings();});
+  $("saveSettingsBtn")&&( $("saveSettingsBtn").onclick=()=>{state.settings={...state.settings,primary:$("settingsPrimaryColor").value,accent:$("settingsAccentColor").value,header:$("settingsHeaderColor").value,background:$("settingsBgColor").value};persistSettings();$("settingsMessage").textContent="Configurações salvas. Os próximos documentos usarão esta identidade visual.";$("settingsMessage").classList.add("ok");});
+  $("resetSettingsBtn")&&( $("resetSettingsBtn").onclick=()=>{state.settings={...DEFAULT_SETTINGS};persistSettings();setupSettings();$("settingsMessage").textContent="Padrão restaurado.";$("settingsMessage").classList.add("ok");});
 }
 
-function renderDashboard() {
-  setupDashboardFilters();
-  const d = dashboardData();
-  const m = {planned:d.planned,done:d.done,balance:d.balance,rate:d.rate,week:d.filters.week||currentWeek()};
-  $("dashboardWeek").textContent = m.week;
-  $("metricPlanned").textContent = m.planned;
-  $("metricDone").textContent = m.done;
-  $("metricBalance").textContent = m.balance;
-  $("metricRate").textContent = `${Math.round(m.rate*100)}%`;
-  $("ringRate").textContent = `${Math.round(m.rate*100)}%`;
-  $("ringPlanned").textContent = m.planned;
-  $("ringDone").textContent = m.done;
-  $("ringPending").textContent = m.balance;
-  const deg = Math.round(m.rate*360);
-  $("progressRing").style.background = `conic-gradient(#12a66a 0deg, #12a66a ${deg}deg, #e7edf4 ${deg}deg, #e7edf4 360deg)`;
-
-  const maxValue = Math.max(...d.chart.map(x=>Math.max(x.planned,x.done)),1);
-  $("weeklyBars").innerHTML = d.chart.map(item=>{
-    const plannedH=Math.max(5,Math.round((item.planned/maxValue)*178));
-    const doneH=Math.max(5,Math.round((item.done/maxValue)*178));
-    return `<div class="week-group"><div class="bar-pair" aria-label="${escapeHTML(item.week)}"><div class="bar planned" style="height:${plannedH}px"><span class="bar-value">${item.planned}</span></div><div class="bar done" style="height:${doneH}px"><span class="bar-value">${item.done}</span></div></div><span class="week-label">${escapeHTML(item.week)}</span></div>`;
-  }).join("") || `<div class="empty-state inline"><strong>Nenhum dado para os filtros selecionados.</strong></div>`;
-
-  $("activityBreakdownRows").innerHTML = d.breakdown.map((item,index)=>{
-    const color=activityColor(item.id,index);
-    return `<div class="breakdown-row"><div class="activity-name"><span class="activity-color-dot" style="background:${color}"></span>${escapeHTML(item.name)}<small>${item.done} de ${item.planned}</small></div><div class="bar-track"><i style="width:${Math.min(item.pct,100)}%;background:${color}"></i></div><div class="breakdown-value" style="color:${color}">${item.pct}%</div></div>`;
-  }).join("") || `<div class="empty-state inline"><strong>Nenhuma atividade encontrada.</strong></div>`;
-
-  const weekForLogs = d.filters.week || currentWeek();
-  const logs = executionRowsForWeek(weekForLogs,d.filters.activity,d.filters.team).map(x=>({tag:x.row.TAG,log:x.log,meta:x.meta})).reverse();
-  $("recentExecutions").innerHTML = logs.length ? logs.slice(0,5).map(item=>`<div class="execution-item"><div class="exec-icon">✓</div><div><strong>${escapeHTML(item.tag)}</strong><span>${escapeHTML(item.meta.user)}${item.meta.team?` • ${escapeHTML(item.meta.team)}`:""}</span></div><span class="exec-time">${escapeHTML(item.meta.time)}</span></div>`).join("") : `<div class="empty-state inline"><strong>Nenhuma execução registrada.</strong></div>`;
+function reportRowsForDashboard(){const d=dashboardData();return d.breakdown.map(x=>({label:x.name,planned:x.planned,done:x.done,pending:Math.max(0,x.planned-x.done),pct:x.pct}));}
+function drawStationeryCanvas(title,subtitle,rows,filename){
+  const W=1600, header=180, rowH=52, tableH=78+rows.length*rowH, H=Math.max(920,header+tableH+250);const c=document.createElement("canvas");c.width=W;c.height=H;const x=c.getContext("2d"),st=currentSettings();
+  x.fillStyle=st.background;x.fillRect(0,0,W,H);x.fillStyle=st.header;x.fillRect(0,0,W,header);x.fillStyle=st.primary;x.fillRect(0,header-7,W,7);
+  if(st.logo){const im=new Image();im.onload=()=>drawStationeryCanvasWithImage(im);im.src=st.logo;}else drawStationeryCanvasWithImage(null);
+  function drawStationeryCanvasWithImage(im){
+    if(im){const ratio=Math.min(120/im.width,90/im.height);const iw=im.width*ratio,ih=im.height*ratio;x.drawImage(im,55,38,iw,ih);}else{x.fillStyle="#fff";x.font="800 30px Arial";x.fillText("PP",70,100);}
+    x.fillStyle="#fff";x.font="800 34px Arial";x.fillText(title,205,62);x.font="20px Arial";x.fillText(subtitle,205,100);x.font="16px Arial";x.fillText(`Responsável: ${currentUserLabel()}`,205,135);
+    x.fillStyle="#fff";x.fillRect(55,header+28,W-110,92);const cards=[['PREVISTO',rows.reduce((a,r)=>a+r.planned,0),st.primary],['EXECUTADO',rows.reduce((a,r)=>a+r.done,0),st.accent],['PENDENTE',rows.reduce((a,r)=>a+r.pending,0),'#f59e0b'],['EXECUÇÃO',`${Math.round((rows.reduce((a,r)=>a+r.done,0)/(rows.reduce((a,r)=>a+r.planned,0)||1))*100)}%`,st.header]];cards.forEach((q,i)=>{const cx=75+i*360;x.fillStyle=q[2];x.font="800 17px Arial";x.fillText(q[0],cx,header+62);x.fillStyle=st.header;x.font="800 31px Arial";x.fillText(String(q[1]),cx,header+98);});
+    const top=header+150; x.fillStyle=st.header;x.fillRect(55,top,W-110,46);x.fillStyle="#fff";x.font="700 17px Arial";x.fillText("ATIVIDADE",75,top+29);x.fillText("PREVISTO",900,top+29);x.fillText("EXECUTADO",1080,top+29);x.fillText("PENDENTE",1280,top+29);
+    rows.forEach((r,i)=>{const yy=top+46+i*rowH;x.fillStyle=i%2?"#f8fafc":"#fff";x.fillRect(55,yy,W-110,rowH);x.strokeStyle="#e5eaf0";x.strokeRect(55,yy,W-110,rowH);x.fillStyle=st.header;x.font="600 17px Arial";x.fillText(String(r.label).slice(0,65),75,yy+33);x.fillText(String(r.planned),925,yy+33);x.fillStyle=st.accent;x.fillText(String(r.done),1120,yy+33);x.fillStyle="#d97706";x.fillText(String(r.pending),1320,yy+33);});
+    const foot=top+46+rows.length*rowH+55;x.fillStyle="#64748b";x.font="15px Arial";x.fillText(`Gerado em ${nowBR()} • Documento gerado pelo Controle de Ponto a Ponto`,55,foot);const a=document.createElement("a");a.download=filename;a.href=c.toDataURL("image/jpeg",.95);a.click();
+  }
 }
 
-function downloadCanvasJPEG(title,subtitle,rows,filename){
-  const canvas=document.createElement("canvas"), w=1400, h=Math.max(760,460+rows.length*58); canvas.width=w;canvas.height=h;
-  const c=canvas.getContext("2d"); c.fillStyle="#f6f8fb";c.fillRect(0,0,w,h); c.fillStyle="#07111f";c.fillRect(0,0,w,112);
-  c.fillStyle="#fff";c.font="700 34px Arial";c.fillText(title,56,48);c.font="18px Arial";c.fillText(subtitle,56,82);
-  const max=Math.max(...rows.flatMap(r=>[r.planned||0,r.done||0,r.pending||0]),1); const base=500; const chartH=300; const left=100; const usable=w-170; const groupW=usable/Math.max(rows.length,1);
-  c.strokeStyle="#d8e0e9";c.beginPath();c.moveTo(left,base);c.lineTo(w-70,base);c.stroke();
-  rows.forEach((r,i)=>{const x=left+i*groupW+groupW/2, bw=Math.min(42,groupW/5); const p=(r.planned||0)/max*chartH,d=(r.done||0)/max*chartH,pe=(r.pending||0)/max*chartH;
-    c.fillStyle="#7891ad";c.fillRect(x-bw,base-p,bw,p); c.fillStyle="#12a66a";c.fillRect(x,base-d,bw,d); c.fillStyle="#f59e0b";c.fillRect(x+bw,base-pe,bw,pe);
-    c.fillStyle="#334155";c.font="600 16px Arial";c.textAlign="center";c.fillText(r.label,x,base+30);
-  });
-  c.textAlign="left"; c.fillStyle="#334155";c.font="700 18px Arial";c.fillText("Previsto",80,570);c.fillText("Realizado",220,570);c.fillText("Pendente",390,570); c.fillStyle="#7891ad";c.fillRect(55,555,18,18);c.fillStyle="#12a66a";c.fillRect(195,555,18,18);c.fillStyle="#f59e0b";c.fillRect(365,555,18,18);
-  c.fillStyle="#172334";c.font="700 24px Arial";c.fillText("Relação quantitativa",56,630); c.font="18px Arial"; let y=670; rows.forEach(r=>{c.fillText(`${r.label}: ${r.done||0} executados • ${r.pending||0} pendentes • ${r.planned||0} previstos`,56,y);y+=38;});
-  const a=document.createElement("a");a.download=filename;a.href=canvas.toDataURL("image/jpeg",0.94);a.click();
-}
-function exportDashboardJPEG(){
-  const d=dashboardData(), f=d.filters; const rows=d.chart.map(x=>({label:x.week,planned:x.planned,done:x.done,pending:Math.max(0,x.planned-x.done)}));
-  downloadCanvasJPEG("CONTROLE DE PONTO A PONTO",`Dashboard • ${f.week||"Todas as semanas"} • ${nowBR()}`,rows,`dashboard-ponto-a-ponto-${f.week||"todas"}.jpg`);
-}
-function exportTechReportJPEG(){
-  const rows=state.rows.filter(r=>String(r.Week||"").toUpperCase()===currentWeek()); const planned=rows.length,done=rows.filter(hasLog).length;
-  downloadCanvasJPEG("CONTROLE DE PONTO A PONTO",`Relatório de campo • ${currentWeek()} • ${nowBR()}`,[{label:currentWeek(),planned,done,pending:planned-done}],`tecnico-${currentWeek()}-grafico.jpg`);
-}
 function exportTechReportPDF(){
-  const rows=state.rows.filter(r=>String(r.Week||"").toUpperCase()===currentWeek()), done=rows.filter(hasLog).length, pending=rows.length-done;
-  if(window.jspdf?.jsPDF){const {jsPDF}=window.jspdf,doc=new jsPDF({unit:"mm",format:"a4"});doc.setFont("helvetica","bold");doc.setFontSize(16);doc.text("CONTROLE DE PONTO A PONTO",15,15);doc.setFontSize(10);doc.setFont("helvetica","normal");doc.text(`Relatório de campo — ${currentWeek()}`,15,22);doc.text(`Gerado em ${nowBR()}`,15,28);doc.setFont("helvetica","bold");doc.setFontSize(12);doc.text("Relação de execução",15,40);doc.setFont("helvetica","normal");doc.text(`Itens programados: ${rows.length}`,15,50);doc.text(`Itens executados: ${done}`,15,58);doc.text(`Itens pendentes: ${pending}`,15,66);doc.text(`Percentual executado: ${rows.length?Math.round(done/rows.length*100):0}%`,15,74);doc.setFont("helvetica","bold");doc.text("Itens pendentes",15,88);let y=96;rows.filter(r=>!hasLog).slice(0,38).forEach(r=>{doc.setFont("helvetica","normal");doc.setFontSize(8);doc.text(`${String(r.TAG||"—")} — ${String(r.DESCRIÇÃO||"").slice(0,75)}`,15,y);y+=5;});doc.save(`relatorio-tecnico-${currentWeek()}.pdf`);}else window.print();
+ const rows=state.rows.filter(r=>String(r.Week||"").toUpperCase()===currentWeek()),done=rows.filter(hasLog).length,pending=rows.length-done;exportStyledPDF(`Relatório de campo • ${currentWeek()}`,[{label:"Total da semana",planned:rows.length,done,pending,pct:rows.length?Math.round(done/rows.length*100):0}],`relatorio-tecnico-${currentWeek()}.pdf`);
+}
+function exportStyledPDF(subtitle,rows,filename){
+ if(!window.jspdf?.jsPDF){window.print();return;} const {jsPDF}=window.jspdf,doc=new jsPDF({unit:"mm",format:"a4"}),st=currentSettings();
+ doc.setFillColor(st.header);doc.rect(0,0,210,31,"F");doc.setFillColor(st.primary);doc.rect(0,28,210,3,"F");doc.setTextColor(255,255,255);doc.setFont("helvetica","bold");doc.setFontSize(15);doc.text("CONTROLE DE PONTO A PONTO",28,13);doc.setFontSize(9);doc.setFont("helvetica","normal");doc.text(subtitle,28,20);doc.text(`Responsável: ${currentUserLabel()}`,28,26);
+ if(st.logo){try{const fmt=st.logo.startsWith("data:image/jpeg")?"JPEG":st.logo.startsWith("data:image/webp")?"WEBP":"PNG";doc.addImage(st.logo,fmt,8,5,16,16,undefined,"FAST");}catch{}}
+ const planned=rows.reduce((a,r)=>a+r.planned,0),done=rows.reduce((a,r)=>a+r.done,0),pending=rows.reduce((a,r)=>a+r.pending,0),pct=planned?Math.round(done/planned*100):0;doc.setTextColor(15,30,48);doc.setFillColor(248,250,252);doc.roundedRect(10,39,190,23,3,3,"F");const cards=[["PREVISTO",planned,st.primary],["EXECUTADO",done,st.accent],["PENDENTE",pending,"#d97706"],["EXECUÇÃO",`${pct}%`,st.header]];cards.forEach((q,i)=>{const xx=15+i*47;doc.setTextColor(q[2]);doc.setFont("helvetica","bold");doc.setFontSize(7);doc.text(q[0],xx,46);doc.setTextColor(15,30,48);doc.setFontSize(13);doc.text(String(q[1]),xx,56);});
+ let y=72;doc.setFillColor(st.header);doc.rect(10,y,190,9,"F");doc.setTextColor(255,255,255);doc.setFontSize(7);doc.text("ATIVIDADE",14,y+6);doc.text("PREVISTO",125,y+6);doc.text("EXECUTADO",153,y+6);doc.text("PENDENTE",180,y+6);y+=9;
+ rows.forEach((r,i)=>{doc.setFillColor(i%2?248:255,i%2?250:255,i%2?252:255);doc.rect(10,y,190,8,"F");doc.setTextColor(35,48,65);doc.setFontSize(7);doc.text(String(r.label).slice(0,48),14,y+5.3);doc.text(String(r.planned),129,y+5.3);doc.setTextColor(st.accent);doc.text(String(r.done),158,y+5.3);doc.setTextColor("#d97706");doc.text(String(r.pending),185,y+5.3);y+=8;});
+ doc.setTextColor(100,116,139);doc.setFontSize(6.5);doc.text(`Gerado em ${nowBR()} • Responsável: ${currentUserLabel()}`,10,286);doc.text("Documento gerado pelo Controle de Ponto a Ponto.",10,290);doc.save(filename);
 }
 
-function exportDashboardPDF(){
-  const d=dashboardData(), f=d.filters, now=new Date(), responsible=currentUserLabel();
-  const activityName=f.activity?state.moduleCatalog.find(m=>m.id===f.activity)?.name||f.activity:"Todas";
-  const safeDate=now.toISOString().slice(0,10);
-  if(window.jspdf?.jsPDF){
-    const {jsPDF}=window.jspdf; const doc=new jsPDF({unit:"mm",format:"a4"});
-    let y=18;
-    const line=(text,size=10,bold=false)=>{doc.setFont("helvetica",bold?"bold":"normal");doc.setFontSize(size);doc.text(String(text),15,y);y+=size*.55+3;};
-    doc.setFillColor(7,17,31);doc.rect(0,0,210,28,"F");doc.setTextColor(255,255,255);doc.setFont("helvetica","bold");doc.setFontSize(16);doc.text("CONTROLE DE PONTO A PONTO",15,12);doc.setFontSize(9);doc.setFont("helvetica","normal");doc.text("Relatório gerencial — Dashboard",15,19);doc.text(`Gerado em ${nowBR()}`,15,25);doc.setTextColor(11,23,39);y=38;
-    line("FILTROS",8,true); line(`Semana: ${f.week||"Todas"}   |   Atividade: ${activityName}   |   Equipe: ${f.team||"Todas"}`,9); line(`Responsável pela exportação: ${responsible}`,9); y+=3;
-    line("RESUMO",8,true); line(`Previsto: ${d.planned}    Realizado: ${d.done}    Pendente: ${d.balance}    Realização: ${Math.round(d.rate*100)}%`,11,true); y+=4;
-    line("GRÁFICO — PREVISTO X REALIZADO",8,true);
-    const chartX=22, chartY=y+6, chartW=166, chartH=62, max=Math.max(...d.chart.flatMap(x=>[x.planned,x.done]),1); doc.setDrawColor(210,218,228);doc.line(chartX,chartY+chartH,chartX+chartW,chartY+chartH); const bw=Math.min(10,chartW/Math.max(d.chart.length,1)/3);
-    d.chart.forEach((item,i)=>{const gx=chartX+(i+.5)*(chartW/d.chart.length||chartW);const ph=item.planned/max*chartH,dh=item.done/max*chartH;doc.setFillColor(120,145,175);doc.rect(gx-bw,chartY+chartH-ph,bw,ph,"F");doc.setFillColor(18,166,106);doc.rect(gx,chartY+chartH-dh,bw,dh,"F");doc.setTextColor(60,73,90);doc.setFontSize(7);doc.text(item.week,gx,chartY+chartH+7,{align:"center"});doc.text(String(item.planned),gx-bw/2,chartY+chartH-ph-2,{align:"center"});doc.text(String(item.done),gx+bw/2,chartY+chartH-dh-2,{align:"center"});});
-    y=chartY+chartH+18; line("POR ATIVIDADE",8,true); d.breakdown.forEach(item=>line(`${item.name}: ${item.done}/${item.planned} (${item.pct}%)`,9));
-    doc.setTextColor(120,132,145);doc.setFontSize(7);doc.text("Documento gerado pelo Controle de Ponto a Ponto.",15,285);doc.save(`dashboard-ponto-a-ponto-${f.week||"todas"}-${safeDate}.pdf`);
-  } else {
-    const printWindow=window.open("","_blank","width=1000,height=800");
-    if(!printWindow){toast("Permita pop-ups para gerar o PDF.");return;}
-    const rows=d.chart.map(x=>`<tr><td>${escapeHTML(x.week)}</td><td>${x.planned}</td><td>${x.done}</td></tr>`).join("");
-    printWindow.document.write(`<!doctype html><html lang="pt-BR"><head><title>Dashboard Ponto a Ponto</title><style>body{font-family:Arial,sans-serif;padding:30px;color:#172334}h1{margin:0 0 4px}small{color:#6b7788}.box{display:inline-block;border:1px solid #ddd;padding:12px;margin:8px 8px 8px 0;border-radius:8px}.box b{display:block;font-size:22px}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border-bottom:1px solid #ddd;padding:8px;text-align:left}</style></head><body><h1>CONTROLE DE PONTO A PONTO</h1><small>Gerado em ${escapeHTML(nowBR())} • Responsável: ${escapeHTML(responsible)}</small><p>Semana: ${escapeHTML(f.week||"Todas")} • Atividade: ${escapeHTML(activityName)} • Equipe: ${escapeHTML(f.team||"Todas")}</p><div class="box">Previsto<b>${d.planned}</b></div><div class="box">Realizado<b>${d.done}</b></div><div class="box">Pendente<b>${d.balance}</b></div><div class="box">Realização<b>${Math.round(d.rate*100)}%</b></div><h2>Gráfico — Previsto x Realizado</h2><table><thead><tr><th>Semana</th><th>Previsto</th><th>Realizado</th></tr></thead><tbody>${rows}</tbody></table><h2>Por atividade</h2><table><thead><tr><th>Atividade</th><th>Realizado</th><th>Previsto</th><th>%</th></tr></thead><tbody>${d.breakdown.map(x=>`<tr><td>${escapeHTML(x.name)}</td><td>${x.done}</td><td>${x.planned}</td><td>${x.pct}%</td></tr>`).join("")}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`);printWindow.document.close();
-  }
-}
-
-/* =========================
-   PROGRAMMING
-   ========================= */
-function loadProgramacoes() {
-  const saved = localStorage.getItem("ppaProgramacoes");
-  if (saved) {
-    try {
-      state.programacoes = JSON.parse(saved);
-      return;
-    } catch {}
-  }
-  state.programacoes = state.mockProgramacoes.map(x=>({...x}));
-}
-
-function persistProgramacoes() {
-  localStorage.setItem("ppaProgramacoes", JSON.stringify(state.programacoes));
-}
+function exportDashboardPDF(){const f=dashboardData().filters;exportStyledPDF(`Relatório gerencial • ${f.week||"Todas as semanas"}`,reportRowsForDashboard(),`dashboard-ponto-a-ponto-${f.week||"todas"}.pdf`);}
 
 function setupProgrammingSelectors() {
   const weeks = weekOptions();
@@ -1056,7 +993,7 @@ function showAppForRole(role){
 }
 
 function nav(screen){
-  const allowedAdmin=["dashboard","programacao","program-history","atividades","acessos","profile"];
+  const allowedAdmin=["dashboard","programacao","program-history","atividades","acessos","configuracoes","profile"];
   const allowedTech=["home","history","profile"];
   const allowed=state.role==="admin"?allowedAdmin:allowedTech;
   if(!allowed.includes(screen)) screen=state.role==="admin"?"dashboard":"home";
@@ -1068,6 +1005,7 @@ function nav(screen){
   if(screen==="program-history") renderProgramHistory();
   if(screen==="atividades") renderModules();
   if(screen==="acessos") renderAccesses();
+  if(screen==="configuracoes") setupSettings();
   if(screen==="history") renderHistory();
   if(screen==="program-history") renderProgramHistory();
 }
@@ -1416,6 +1354,7 @@ setInterval(()=>{$("currentDateTime").textContent=nowBR();$("currentWeek").textC
 
 (async function init(){
   setupSidebar();
+  loadSettings();
   loadModuleCatalog(); loadProgramacoes(); loadProgramHistory(); $("currentDateTime").textContent=nowBR(); $("currentWeek").textContent=currentWeek(); setColumnViewMode(state.columnViewMode);
   const saved=sessionStorage.getItem("ppaSession");
   if(saved){try{const session=JSON.parse(saved);if(session?.role&&ROLE_LABELS[session.role]){state.currentUser=session;showAppForRole(session.role);syncAll();return;}}catch{}}

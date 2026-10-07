@@ -113,6 +113,9 @@
       <button class="nav-item" data-screen="program-history" title="Histórico de Programações">
         <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 5h16v15H4z"/><path d="M8 9h8M8 13h6M8 17h4"/><path d="M17 3v4"/></svg></span><span class="nav-label">Histórico de Programações</span>
       </button>
+      <button class="nav-item" data-screen="configuracoes" title="Configurações">
+        <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19 13.5 1.5 1.2-1.7 3-1.8-.7a7.7 7.7 0 0 1-1.8 1l-.3 1.9h-3.4l-.3-1.9a7.7 7.7 0 0 1-1.8-1l-1.8.7-1.7-3L7 13.5a7.4 7.4 0 0 1 0-3L5.5 9.3l1.7-3 1.8.7a7.7 7.7 0 0 1 1.8-1l.3-1.9h3.4l.3 1.9a7.7 7.7 0 0 1 1.8 1l1.8-.7 1.7 3L19 10.5a7.4 7.4 0 0 1 0 3Z"/></svg></span><span class="nav-label">Configurações</span>
+      </button>
       <button class="nav-item" data-screen="acessos" title="Pessoas & Acessos">
         <span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0M16 11a3 3 0 1 0 0-6M15.5 14.5a5.5 5.5 0 0 1 5 5.5"/></svg></span><span class="nav-label">Pessoas & Acessos</span>
       </button>
@@ -492,6 +495,36 @@
         <section class="card access-table-card">
           <div class="list-header"><div><span class="section-kicker">CADASTRO</span><h3>Usuários de campo</h3></div><div class="access-search"><input id="accessSearch" type="search" placeholder="Buscar nome, e-mail ou equipe..."></div></div>
           <div class="table-wrap large-table"><table><thead><tr><th>NOME</th><th>FUNÇÃO</th><th>E-MAIL</th><th>CÓDIGO</th><th>EQUIPE</th><th>PERFIL</th><th>STATUS</th><th></th></tr></thead><tbody id="accessTableBody"></tbody></table><div id="accessEmpty" class="empty-state hidden"><div>◎</div><strong>Nenhum usuário encontrado</strong><span>Cadastre a primeira pessoa para liberar acesso.</span></div></div>
+        </section>
+      </div>
+    </section>
+
+    <!-- =========================
+         ADMIN: CONFIGURAÇÕES
+         ========================= -->
+    <section id="screen-configuracoes" class="screen">
+      <div class="page-title-row">
+        <div><span class="section-kicker">IDENTIDADE DO SISTEMA</span><h2>Configurações</h2><p>Personalize a identidade visual dos documentos e do sistema. Apenas Administradores podem alterar estas opções.</p></div>
+      </div>
+      <div class="settings-grid">
+        <section class="card settings-card">
+          <div class="list-header"><div><span class="section-kicker">PAPEL TIMBRADO</span><h3>Logo e identidade</h3></div><span class="tag-badge">ADMIN</span></div>
+          <label>Logo da empresa
+            <input id="settingsLogoInput" type="file" accept="image/png,image/jpeg,image/webp">
+          </label>
+          <div class="settings-logo-preview"><div class="logo-preview-paper"><img id="settingsLogoPreview" alt="Logo" class="hidden"><div id="settingsLogoPlaceholder">LOGO</div></div><div><strong>Pré-visualização</strong><small>PNG, JPG ou WebP. A logo será usada no cabeçalho dos PDFs e JPEGs.</small><button id="removeSettingsLogoBtn" type="button" class="ghost-btn">Remover logo</button></div></div>
+          <div class="settings-color-grid">
+            <label>Cor principal<input id="settingsPrimaryColor" type="color"></label>
+            <label>Cor de destaque<input id="settingsAccentColor" type="color"></label>
+            <label>Cor do cabeçalho<input id="settingsHeaderColor" type="color"></label>
+            <label>Cor de fundo<input id="settingsBgColor" type="color"></label>
+          </div>
+          <div class="settings-actions"><button id="resetSettingsBtn" type="button" class="secondary-btn">Restaurar padrão</button><button id="saveSettingsBtn" type="button" class="primary-btn">Salvar configurações</button></div>
+          <p id="settingsMessage" class="form-message"></p>
+        </section>
+        <section class="card settings-card">
+          <div><span class="section-kicker">MODELO</span><h3>Prévia do documento</h3><p>O mesmo padrão visual será aplicado ao PDF e ao JPEG.</p></div>
+          <div id="stationeryPreview" class="stationery-preview"><div class="stationery-head"><div class="stationery-logo-box">LOGO</div><div><strong>CONTROLE DE PONTO A PONTO</strong><span>Relatório gerencial</span></div></div><div class="stationery-meta"><span>Semana W136</span><span>Responsável: Administrador</span></div><div class="stationery-summary"><div><small>PREVISTO</small><b>60</b></div><div><small>EXECUTADO</small><b>35</b></div><div><small>PENDENTE</small><b>25</b></div><div><small>EXECUÇÃO</small><b>58%</b></div></div><div class="stationery-table"><span>Atividade</span><span>Prev.</span><span>Exec.</span><span>Pend.</span><b>Ponto a Ponto</b><b>32</b><b>21</b><b>11</b><b>Loop Teste</b><b>16</b><b>10</b><b>6</b></div><footer>Documento gerado pelo Controle de Ponto a Ponto</footer></div>
         </section>
       </div>
     </section>
