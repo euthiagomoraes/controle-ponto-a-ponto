@@ -30,6 +30,7 @@ const state = {
   columnViewMode: localStorage.getItem("ppaColumnViewMode") || "stacked",
   selectedTags: new Set(),
   pendingImport: null,
+  pendingProgramImport: null,
   mockRows: [
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA401",LOOP:"XV-20GHA10AA401",TAG:"ZSH-20GHA10AA401-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",Week:"W136",Logs:""},
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA402",LOOP:"XV-20GHA10AA402",TAG:"ZSL-20GHA10AA402-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",Week:"W136",Logs:""},
@@ -467,6 +468,168 @@ function createProgramacao() {
   renderProgramacao();
   renderDashboard();
   toast("Programação cadastrada com sucesso.");
+}
+
+/* ---------- PROGRAMAÇÃO / EXCEL ---------- */
+const PROGRAM_FIXED_COLUMNS = [
+  {key:"week", label:"SEMANA", required:true},
+  {key:"date", label:"DATA", required:true},
+  {key:"activity", label:"ATIVIDADE", required:true},
+  {key:"team", label:"EQUIPE", required:true},
+  {key:"responsible", label:"RESPONSÁVEL", required:true},
+  {key:"qty", label:"QTD.", required:true},
+  {key:"note", label:"OBSERVAÇÃO", required:false}
+];
+
+function programColumnsForModule(mod){
+  const custom = (mod?.columns||[]).filter(c=>!["week","date","activity","team","responsible","qty","note"].includes(c.key));
+  return [...PROGRAM_FIXED_COLUMNS, ...custom.map(c=>({key:c.key,label:c.label,required:!!c.required,type:c.type,options:c.options||[]}))];
+}
+
+function downloadProgramTemplate(){
+  const activityId=$("programActivityFilter").value;
+  const mod=activityId?moduleById(activityId):null;
+  if(!mod){
+    toast("Selecione uma atividade no filtro ATIVIDADE para gerar o template.");
+    return;
+  }
+  const columns=programColumnsForModule(mod);
+  const headers=columns.map(c=>c.label);
+  const blank=columns.map(c=>c.key==="activity"?mod.name:"");
+  const info=[
+    ["Atividade",mod.name],
+    ["Instruções","Não altere os cabeçalhos. Preencha uma linha por programação."],
+    ["Importação","A importação é cumulativa e acrescenta as linhas às programações existentes."],
+    ["Campos configurados",mod.columns.map(c=>`${c.label}: ${columnTypeLabel(c.type)}${c.required?" (obrigatório)":""}`).join(" | ")]
+  ];
+  if(window.XLSX){
+    const ws=XLSX.utils.aoa_to_sheet([headers,blank]);
+    ws["!cols"]=columns.map(c=>({wch:Math.max(12,Math.min(32,String(c.label).length+4))}));
+    const infoWs=XLSX.utils.aoa_to_sheet(info);
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Programação");
+    XLSX.utils.book_append_sheet(wb,infoWs,"Leia-me");
+    XLSX.writeFile(wb,`template_programacao_${makeKey(mod.name)}.xlsx`);
+  } else {
+    exportCSV({name:`programacao_${mod.name}`},headers,blank);
+  }
+  toast(`Template de ${mod.name} gerado com as colunas configuradas.`);
+}
+
+function normalizeImportedProgramDate(value){
+  const s=String(value??"").trim();
+  if(!s)return "";
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;
+  const br=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  if(br)return `${br[3]}-${String(br[2]).padStart(2,"0")}-${String(br[1]).padStart(2,"0")}`;
+  return s;
+}
+
+function validateAndMapProgramImport(rows,mod){
+  if(!rows.length)throw new Error("Arquivo sem dados.");
+  const headers=rows[0].map(h=>String(h??"").trim());
+  if(!headers.some(Boolean))throw new Error("A primeira linha não contém cabeçalhos.");
+  const normalized=headers.map(h=>makeKey(h));
+  const columns=programColumnsForModule(mod);
+  const missing=columns.filter(c=>c.required&&!normalized.includes(makeKey(c.label))&&!normalized.includes(makeKey(c.key)));
+  if(missing.length)throw new Error(`Colunas obrigatórias ausentes: ${missing.map(c=>c.label).join(", ")}.`);
+  const getValue=(row,col)=>{
+    const idx=normalized.findIndex(h=>h===makeKey(col.label)||h===makeKey(col.key));
+    return idx>=0?(row[idx]??""):"";
+  };
+  const imported=[];
+  const errors=[];
+  rows.slice(1).forEach((row,index)=>{
+    if(!row.some(v=>String(v??"").trim()!==""))return;
+    const line=index+2;
+    const values={};
+    columns.forEach(c=>values[c.key]=String(getValue(row,c)).trim());
+    if(!values.activity)values.activity=mod.name;
+    if(values.activity && makeKey(values.activity)!==makeKey(mod.name))errors.push(`Linha ${line}: ATIVIDADE diferente de “${mod.name}”.`);
+    values.week=values.week.toUpperCase();
+    values.date=normalizeImportedProgramDate(values.date);
+    values.qty=Number(String(values.qty).replace(",","."));
+    const missingRow=columns.filter(c=>c.required && (values[c.key]==="" || (c.key==="qty" && (!Number.isFinite(values.qty)||values.qty<1))));
+    if(missingRow.length)errors.push(`Linha ${line}: preencha ${missingRow.map(c=>c.label).join(", ")}.`);
+    const customData={};
+    mod.columns.filter(c=>!["week","date","activity","team","responsible","qty","note"].includes(c.key)).forEach(c=>{
+      customData[c.key]=values[c.key]??"";
+      if(c.required && !String(customData[c.key]).trim())errors.push(`Linha ${line}: coluna ${c.label} é obrigatória.`);
+    });
+    imported.push({
+      id:`p-${Date.now()}-${index}-${Math.random().toString(36).slice(2,7)}`,
+      week:values.week,
+      date:values.date,
+      activity:mod.id,
+      team:values.team,
+      responsible:values.responsible,
+      qty:values.qty,
+      note:values.note,
+      customData
+    });
+  });
+  if(!imported.length)throw new Error("O arquivo não possui linhas de dados para importar.");
+  if(errors.length)throw new Error(errors.slice(0,8).join(" ") + (errors.length>8?` E mais ${errors.length-8} erro(s).`:""));
+  return {headers,imported};
+}
+
+async function importProgramFile(file){
+  const activityId=$("programActivityFilter").value;
+  const mod=activityId?moduleById(activityId):null;
+  if(!mod){toast("Selecione uma atividade no filtro ATIVIDADE antes de importar.");return;}
+  if(!file)return;
+  try{
+    const rows=await readModuleFile(file);
+    const mapped=validateAndMapProgramImport(rows,mod);
+    state.pendingProgramImport={fileName:file.name,modId:mod.id,records:mapped.imported};
+    $("programImportFileName").textContent=file.name;
+    $("programImportCount").textContent=mapped.imported.length;
+    $("programImportDescription").textContent=`${mapped.imported.length} programação(ões) válida(s) para “${mod.name}”. As linhas serão acrescentadas à base atual.`;
+    $("programImportMessage").textContent="";
+    $("programImportMessage").classList.remove("ok");
+    $("programImportModal").classList.remove("hidden");
+  }catch(e){
+    toast(e.message||"Não foi possível validar o Excel.");
+  }
+}
+
+function closeProgramImportModal(){
+  $("programImportModal").classList.add("hidden");
+  state.pendingProgramImport=null;
+}
+
+function confirmProgramImport(){
+  const pending=state.pendingProgramImport;
+  if(!pending)return;
+  try{
+    const before=state.programacoes.length;
+    state.programacoes.push(...pending.records);
+    persistProgramacoes();
+    closeProgramImportModal();
+    renderProgramacao();
+    renderDashboard();
+    toast(`${pending.records.length} programação(ões) importada(s). Base anterior preservada: ${before} registro(s).`);
+  }catch(e){
+    $("programImportMessage").textContent=e.message||"Não foi possível gravar a importação.";
+  }
+}
+
+function setupSidebar(){
+  const sidebar=$("appSidebar"), shell=$("appShell"), toggle=$("sidebarToggle");
+  if(!sidebar||!shell||!toggle)return;
+  const collapsed=localStorage.getItem("ppaSidebarCollapsed")==="1";
+  sidebar.classList.toggle("collapsed",collapsed);
+  shell.classList.toggle("sidebar-collapsed",collapsed);
+  toggle.setAttribute("aria-label",collapsed?"Expandir menu":"Recolher menu");
+  toggle.title=collapsed?"Expandir menu":"Recolher menu";
+  toggle.onclick=()=>{
+    const next=!sidebar.classList.contains("collapsed");
+    sidebar.classList.toggle("collapsed",next);
+    shell.classList.toggle("sidebar-collapsed",next);
+    localStorage.setItem("ppaSidebarCollapsed",next?"1":"0");
+    toggle.setAttribute("aria-label",next?"Expandir menu":"Recolher menu");
+    toggle.title=next?"Expandir menu":"Recolher menu";
+  };
 }
 
 /* =========================
@@ -1145,7 +1308,15 @@ $("adminLoginForm").addEventListener("submit",e=>{e.preventDefault();const email
 $("technicianLoginForm").addEventListener("submit",e=>{e.preventDefault();const code=$("techAccessCode").value.trim();$("techLoginMessage").classList.remove("ok");if(!code){$("techLoginMessage").textContent="Informe o código de acesso.";return;}loginTechnician(code);});
 document.querySelectorAll(".nav-item").forEach(b=>b.onclick=()=>nav(b.dataset.screen));
 
-$("newProgramacaoBtn").onclick=openProgramModal; $("closeProgramModal").onclick=closeProgramModal; $("cancelProgramModal").onclick=closeProgramModal; $("programModal").querySelector(".modal-backdrop").onclick=closeProgramModal; $("programForm").addEventListener("submit",e=>{e.preventDefault();createProgramacao();});
+$("newProgramacaoBtn").onclick=openProgramModal;
+$("downloadProgramTemplateBtn").onclick=downloadProgramTemplate;
+$("importProgramExcelBtn").onclick=()=>{ $("programExcelInput").value=""; $("programExcelInput").click(); };
+$("programExcelInput").addEventListener("change",e=>importProgramFile(e.target.files[0]));
+$("closeProgramImportModal").onclick=closeProgramImportModal;
+$("cancelProgramImport").onclick=closeProgramImportModal;
+$("programImportModal").querySelector(".modal-backdrop").onclick=closeProgramImportModal;
+$("confirmProgramImport").onclick=confirmProgramImport;
+$("closeProgramModal").onclick=closeProgramModal; $("cancelProgramModal").onclick=closeProgramModal; $("programModal").querySelector(".modal-backdrop").onclick=closeProgramModal; $("programForm").addEventListener("submit",e=>{e.preventDefault();createProgramacao();});
 $("programWeekFilter").onchange=renderProgramacao; $("programActivityFilter").onchange=renderProgramacao; $("programTeamFilter").onchange=renderProgramacao; $("programActivity").onchange=()=>renderProgramCustomFields($("programActivity").value);
 $("refreshDashboard").onclick=()=>{renderDashboard();toast("Dashboard atualizado.");};
 $("tagSearch").addEventListener("input",()=>{$("clearSearch").style.display=$("tagSearch").value?"block":"none";renderTable();}); $("selectAllTags").onchange=toggleSelectAllTags; $("registerSelectedBtn").onclick=registerSelectedPontos; $("clearSearch").onclick=()=>{$("tagSearch").value="";$("clearSearch").style.display="none";renderTable();}; $("sysFilter").onchange=renderTable;$("subsysFilter").onchange=renderTable; $("registerBtn").onclick=registerPonto; $("repeatBtn").onclick=()=>$("confirmModal").classList.remove("hidden"); ["closeModal","cancelModal"].forEach(id=>$(id).onclick=()=>$("confirmModal").classList.add("hidden")); $("confirmModal").querySelector(".modal-backdrop").onclick=()=>$("confirmModal").classList.add("hidden"); $("confirmRepeat").onclick=()=>{$("confirmModal").classList.add("hidden");registerPonto();}; $("refreshHistory").onclick=async()=>{await loadData();populateFilters();renderTable();renderHistory();toast("Dados atualizados.");}; $("logoutBtn").onclick=logout;
@@ -1164,6 +1335,7 @@ $("newAccessBtn").onclick=()=>openAccessModal(); $("closeAccessModal").onclick=c
 setInterval(()=>{$("currentDateTime").textContent=nowBR();$("currentWeek").textContent=currentWeek();},1000);
 
 (async function init(){
+  setupSidebar();
   loadModuleCatalog(); loadProgramacoes(); $("currentDateTime").textContent=nowBR(); $("currentWeek").textContent=currentWeek(); setColumnViewMode(state.columnViewMode);
   const saved=sessionStorage.getItem("ppaSession");
   if(saved){try{const session=JSON.parse(saved);if(session?.role&&ROLE_LABELS[session.role]){state.currentUser=session;showAppForRole(session.role);syncAll();return;}}catch{}}

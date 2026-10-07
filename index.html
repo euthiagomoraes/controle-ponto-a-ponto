@@ -91,24 +91,43 @@
      APP SHELL
      ========================= -->
 <div id="appShell" class="app-shell hidden">
-  <aside class="sidebar">
+  <aside class="sidebar" id="appSidebar">
     <div class="brand">
       <div class="brand-mark">PP</div>
-      <div><strong>CONTROLE</strong><span>Ponto a Ponto</span></div>
+      <div class="brand-copy"><strong>CONTROLE</strong><span>Ponto a Ponto</span></div>
+      <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="Recolher menu" title="Recolher menu">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6 9 12l6 6"/></svg>
+      </button>
     </div>
 
     <nav id="adminNav" class="side-nav hidden">
-      <button class="nav-item active" data-screen="dashboard"><span class="nav-icon">▦</span><span>Dashboard</span></button>
-      <button class="nav-item" data-screen="programacao"><span class="nav-icon">□</span><span>Programação</span></button>
-      <button class="nav-item" data-screen="atividades"><span class="nav-icon">◇</span><span>Atividades</span></button>
-      <button class="nav-item" data-screen="acessos"><span class="nav-icon">◎</span><span>Pessoas & Acessos</span></button>
-      <button class="nav-item" data-screen="profile"><span class="nav-icon">◯</span><span>Perfil</span></button>
+      <button class="nav-item active" data-screen="dashboard" title="Dashboard">
+        <span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span><span class="nav-label">Dashboard</span>
+      </button>
+      <button class="nav-item" data-screen="programacao" title="Programação">
+        <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M7 3v3M17 3v3M4 9h16M6 5h12a2 2 0 0 1 2 2v12H4V7a2 2 0 0 1 2-2Z"/><path d="M8 13h3M8 17h3M14 13h3M14 17h3"/></svg></span><span class="nav-label">Programação</span>
+      </button>
+      <button class="nav-item" data-screen="atividades" title="Atividades">
+        <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5v-15Z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20M8 7h8M8 11h6"/></svg></span><span class="nav-label">Atividades</span>
+      </button>
+      <button class="nav-item" data-screen="acessos" title="Pessoas & Acessos">
+        <span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0M16 11a3 3 0 1 0 0-6M15.5 14.5a5.5 5.5 0 0 1 5 5.5"/></svg></span><span class="nav-label">Pessoas & Acessos</span>
+      </button>
+      <button class="nav-item" data-screen="profile" title="Perfil">
+        <span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 21a7 7 0 0 1 14 0"/></svg></span><span class="nav-label">Perfil</span>
+      </button>
     </nav>
 
     <nav id="techNav" class="side-nav hidden">
-      <button class="nav-item active" data-screen="home"><span class="nav-icon">⌂</span><span>Início</span></button>
-      <button class="nav-item" data-screen="history"><span class="nav-icon">▥</span><span>Histórico</span></button>
-      <button class="nav-item" data-screen="profile"><span class="nav-icon">◯</span><span>Perfil</span></button>
+      <button class="nav-item active" data-screen="home" title="Início">
+        <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="m3 11 9-8 9 8v9H5a2 2 0 0 1-2-2v-7Z"/><path d="M9 20v-6h6v6"/></svg></span><span class="nav-label">Início</span>
+      </button>
+      <button class="nav-item" data-screen="history" title="Histórico">
+        <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 5h16v15H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg></span><span class="nav-label">Histórico</span>
+      </button>
+      <button class="nav-item" data-screen="profile" title="Perfil">
+        <span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 21a7 7 0 0 1 14 0"/></svg></span><span class="nav-label">Perfil</span>
+      </button>
     </nav>
 
     <div class="sidebar-footer"><span class="online-dot"></span><span id="sidebarRoleText">Sistema online</span></div>
@@ -245,7 +264,12 @@
           <h2>Programação de atividades</h2>
           <p>Cadastre o que deverá ser executado em cada semana e equipe.</p>
         </div>
-        <button id="newProgramacaoBtn" class="primary-btn">＋ Nova programação</button>
+        <div class="page-actions">
+          <button id="downloadProgramTemplateBtn" class="ghost-btn">⇩ Baixar template Excel</button>
+          <button id="importProgramExcelBtn" class="secondary-btn">⇧ Importar Excel</button>
+          <button id="newProgramacaoBtn" class="primary-btn">＋ Nova programação</button>
+          <input id="programExcelInput" type="file" accept=".xlsx,.xls,.csv" class="hidden">
+        </div>
       </div>
 
       <div class="filters card programming-filters">
@@ -262,6 +286,10 @@
           <span><b id="programCount">0</b> programações</span>
           <span><b id="programQuantity">0</b> atividades previstas</span>
         </div>
+      </div>
+      <div class="program-import-hint">
+        <span>Excel vinculado à atividade selecionada no filtro <strong>ATIVIDADE</strong>.</span>
+        <span>O template usa os campos fixos da programação + as colunas configuradas em <strong>Atividades</strong>. As importações são cumulativas.</span>
       </div>
 
       <section class="card program-table-card">
@@ -578,6 +606,26 @@
       <p id="columnFormMessage" class="form-message"></p>
       <div class="modal-actions"><button type="button" id="cancelColumnModal" class="secondary-btn">Cancelar</button><button type="submit" class="primary-btn">Salvar coluna</button></div>
     </form>
+  </div>
+</div>
+
+<div id="programImportModal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box import-choice-modal">
+    <button id="closeProgramImportModal" class="modal-close">×</button>
+    <span class="section-kicker">IMPORTAÇÃO DE PROGRAMAÇÃO</span>
+    <h3>Validar arquivo Excel</h3>
+    <p id="programImportDescription">—</p>
+    <div class="import-mode-summary">
+      <span>Arquivo: <b id="programImportFileName">—</b></span>
+      <span>Linhas válidas: <b id="programImportCount">0</b></span>
+      <span>Modo: <b>Inclusão cumulativa</b></span>
+    </div>
+    <p id="programImportMessage" class="form-message"></p>
+    <div class="modal-actions">
+      <button type="button" id="cancelProgramImport" class="secondary-btn">Cancelar</button>
+      <button type="button" id="confirmProgramImport" class="primary-btn">Importar programações</button>
+    </div>
   </div>
 </div>
 

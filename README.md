@@ -146,3 +146,23 @@ git push origin main
 ## Observação de segurança
 
 A separação Administrador x Técnico no frontend é apenas de interface. Em produção, a autorização real deve ser garantida por Supabase Auth, RLS e permissões no backend.
+
+
+## Rev. 8 — Ajustes de navegação e importação da Programação
+
+### 11. Barra lateral desktop
+- Ícones da navegação substituídos por SVGs vetoriais.
+- Botão no cabeçalho da barra lateral permite expandir/recolher o menu.
+- O estado expandido/recolhido fica salvo em `localStorage` (`ppaSidebarCollapsed`).
+- Ao recolher, os textos somem e os ícones permanecem centralizados; o conteúdo principal ocupa o espaço liberado.
+
+### 12. Importação Excel na Programação
+A tela **Programação de atividades** agora possui:
+- **Baixar template Excel**;
+- **Importar Excel**;
+- importação vinculada à atividade selecionada no filtro **ATIVIDADE**;
+- template composto pelos campos fixos da programação e pelas colunas personalizadas configuradas na atividade em **Atividades**;
+- validação dos cabeçalhos e dos campos obrigatórios;
+- importação **cumulativa**, acrescentando novas linhas sem apagar as programações existentes.
+
+O template gera as planilhas `Programação` e `Leia-me`. A atividade selecionada é identificada no template e usada como referência durante a importação.
