@@ -266,8 +266,7 @@
         </div>
         <div class="page-actions">
           <button id="downloadProgramTemplateBtn" class="ghost-btn">⇩ Baixar template Excel</button>
-          <button id="importProgramExcelBtn" class="secondary-btn">⇧ Importar Excel</button>
-          <button id="newProgramacaoBtn" class="primary-btn">＋ Nova programação</button>
+          <button id="importProgramExcelBtn" class="primary-btn">⇧ Importar Excel</button>
           <input id="programExcelInput" type="file" accept=".xlsx,.xls,.csv" class="hidden">
         </div>
       </div>
@@ -614,17 +613,27 @@
   <div class="modal-box import-choice-modal">
     <button id="closeProgramImportModal" class="modal-close">×</button>
     <span class="section-kicker">IMPORTAÇÃO DE PROGRAMAÇÃO</span>
-    <h3>Validar arquivo Excel</h3>
+    <h3>Como deseja aplicar esta programação?</h3>
     <p id="programImportDescription">—</p>
     <div class="import-mode-summary">
       <span>Arquivo: <b id="programImportFileName">—</b></span>
       <span>Linhas válidas: <b id="programImportCount">0</b></span>
-      <span>Modo: <b>Inclusão cumulativa</b></span>
+    </div>
+    <div class="program-import-choice-grid">
+      <button type="button" class="program-import-choice" data-program-import-mode="new">
+        <span class="program-import-choice-icon">↻</span>
+        <strong>Nova programação</strong>
+        <small>Substitui a programação atual e inicia uma nova carga a partir deste Excel.</small>
+      </button>
+      <button type="button" class="program-import-choice" data-program-import-mode="append">
+        <span class="program-import-choice-icon">＋</span>
+        <strong>Incluir na Programação</strong>
+        <small>Acrescenta as linhas do Excel à programação já existente, sem apagar registros.</small>
+      </button>
     </div>
     <p id="programImportMessage" class="form-message"></p>
     <div class="modal-actions">
       <button type="button" id="cancelProgramImport" class="secondary-btn">Cancelar</button>
-      <button type="button" id="confirmProgramImport" class="primary-btn">Importar programações</button>
     </div>
   </div>
 </div>

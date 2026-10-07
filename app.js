@@ -290,13 +290,19 @@ function dashboardData() {
   } else {
     const ppa=activityMap.get("ppa"); if(ppa) ppa.done=executionRowsForWeek(filters.week||currentWeek(),"ppa",filters.team).length || ((!filters.team)?(state.dashboardSeed.find(x=>x.week===currentWeek())?.done||0):0);
   }
-  const breakdown=[...activityMap.values()].filter(x=>x.planned||x.done).map(x=>({...x,pct:x.planned?Math.round(x.done/x.planned*100):0}));
+  const breakdown=[...activityMap.entries()].filter(([,x])=>x.planned||x.done).map(([id,x])=>({...x,id,pct:x.planned?Math.round(x.done/x.planned*100):0}));
   return {filters,weeks:selectedWeeks,chart,planned,done,balance,rate,breakdown};
 }
 
 function dashboardMetrics() {
   const d = dashboardData();
   return {planned:d.planned,done:d.done,balance:d.balance,rate:d.rate,week:d.filters.week||currentWeek()};
+}
+
+const DASHBOARD_ACTIVITY_COLORS = ["#0b5cff","#12a66a","#f59e0b","#8b5cf6","#ef4444","#06b6d4","#ec4899","#64748b"];
+function activityColor(activityId, index=0){
+  const modIndex=state.moduleCatalog.findIndex(m=>m.id===activityId);
+  return DASHBOARD_ACTIVITY_COLORS[(modIndex>=0?modIndex:index)%DASHBOARD_ACTIVITY_COLORS.length];
 }
 
 function renderDashboard() {
@@ -322,7 +328,10 @@ function renderDashboard() {
     return `<div class="week-group"><div class="bar-pair" aria-label="${escapeHTML(item.week)}"><div class="bar planned" style="height:${plannedH}px"><span class="bar-value">${item.planned}</span></div><div class="bar done" style="height:${doneH}px"><span class="bar-value">${item.done}</span></div></div><span class="week-label">${escapeHTML(item.week)}</span></div>`;
   }).join("") || `<div class="empty-state inline"><strong>Nenhum dado para os filtros selecionados.</strong></div>`;
 
-  $("activityBreakdownRows").innerHTML = d.breakdown.map(item=>`<div class="breakdown-row"><div class="activity-name">${escapeHTML(item.name)}<small>${item.done} de ${item.planned}</small></div><div class="bar-track"><i style="width:${Math.min(item.pct,100)}%"></i></div><div class="breakdown-value">${item.pct}%</div></div>`).join("") || `<div class="empty-state inline"><strong>Nenhuma atividade encontrada.</strong></div>`;
+  $("activityBreakdownRows").innerHTML = d.breakdown.map((item,index)=>{
+    const color=activityColor(item.id,index);
+    return `<div class="breakdown-row"><div class="activity-name"><span class="activity-color-dot" style="background:${color}"></span>${escapeHTML(item.name)}<small>${item.done} de ${item.planned}</small></div><div class="bar-track"><i style="width:${Math.min(item.pct,100)}%;background:${color}"></i></div><div class="breakdown-value" style="color:${color}">${item.pct}%</div></div>`;
+  }).join("") || `<div class="empty-state inline"><strong>Nenhuma atividade encontrada.</strong></div>`;
 
   const weekForLogs = d.filters.week || currentWeek();
   const logs = executionRowsForWeek(weekForLogs,d.filters.activity,d.filters.team).map(x=>({tag:x.row.TAG,log:x.log,meta:x.meta})).reverse();
@@ -598,17 +607,19 @@ function closeProgramImportModal(){
   state.pendingProgramImport=null;
 }
 
-function confirmProgramImport(){
+function confirmProgramImport(mode){
   const pending=state.pendingProgramImport;
-  if(!pending)return;
+  if(!pending||!mode)return;
   try{
     const before=state.programacoes.length;
-    state.programacoes.push(...pending.records);
+    if(mode==="append") state.programacoes.push(...pending.records);
+    else state.programacoes=[...pending.records];
     persistProgramacoes();
     closeProgramImportModal();
     renderProgramacao();
     renderDashboard();
-    toast(`${pending.records.length} programação(ões) importada(s). Base anterior preservada: ${before} registro(s).`);
+    if(mode==="append") toast(`${pending.records.length} programação(ões) incluída(s). Base anterior preservada: ${before} registro(s).`);
+    else toast(`Nova programação criada com ${pending.records.length} registro(s). A programação anterior foi substituída.`);
   }catch(e){
     $("programImportMessage").textContent=e.message||"Não foi possível gravar a importação.";
   }
@@ -1308,14 +1319,13 @@ $("adminLoginForm").addEventListener("submit",e=>{e.preventDefault();const email
 $("technicianLoginForm").addEventListener("submit",e=>{e.preventDefault();const code=$("techAccessCode").value.trim();$("techLoginMessage").classList.remove("ok");if(!code){$("techLoginMessage").textContent="Informe o código de acesso.";return;}loginTechnician(code);});
 document.querySelectorAll(".nav-item").forEach(b=>b.onclick=()=>nav(b.dataset.screen));
 
-$("newProgramacaoBtn").onclick=openProgramModal;
 $("downloadProgramTemplateBtn").onclick=downloadProgramTemplate;
 $("importProgramExcelBtn").onclick=()=>{ $("programExcelInput").value=""; $("programExcelInput").click(); };
 $("programExcelInput").addEventListener("change",e=>importProgramFile(e.target.files[0]));
 $("closeProgramImportModal").onclick=closeProgramImportModal;
 $("cancelProgramImport").onclick=closeProgramImportModal;
 $("programImportModal").querySelector(".modal-backdrop").onclick=closeProgramImportModal;
-$("confirmProgramImport").onclick=confirmProgramImport;
+document.querySelectorAll("[data-program-import-mode]").forEach(btn=>btn.onclick=()=>confirmProgramImport(btn.dataset.programImportMode));
 $("closeProgramModal").onclick=closeProgramModal; $("cancelProgramModal").onclick=closeProgramModal; $("programModal").querySelector(".modal-backdrop").onclick=closeProgramModal; $("programForm").addEventListener("submit",e=>{e.preventDefault();createProgramacao();});
 $("programWeekFilter").onchange=renderProgramacao; $("programActivityFilter").onchange=renderProgramacao; $("programTeamFilter").onchange=renderProgramacao; $("programActivity").onchange=()=>renderProgramCustomFields($("programActivity").value);
 $("refreshDashboard").onclick=()=>{renderDashboard();toast("Dashboard atualizado.");};
