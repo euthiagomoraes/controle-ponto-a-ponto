@@ -330,6 +330,29 @@ function drawStationeryCanvas(title,subtitle,rows,filename){
   }
 }
 
+function exportDashboardJPEG(){
+  const d=dashboardData(), f=d.filters;
+  const rows=reportRowsForDashboard();
+  drawStationeryCanvas(
+    "CONTROLE DE PONTO A PONTO",
+    `Relatório gerencial • ${f.week||"Todas as semanas"} • ${nowBR()}`,
+    rows,
+    `dashboard-ponto-a-ponto-${f.week||"todas"}.jpg`
+  );
+}
+
+function exportTechReportJPEG(){
+  const rows=state.rows.filter(r=>String(r.Week||"").toUpperCase()===currentWeek());
+  const done=rows.filter(hasLog).length;
+  const pending=Math.max(0,rows.length-done);
+  drawStationeryCanvas(
+    "CONTROLE DE PONTO A PONTO",
+    `Relatório de campo • ${currentWeek()} • ${nowBR()}`,
+    [{label:"Total da semana",planned:rows.length,done,pending,pct:rows.length?Math.round(done/rows.length*100):0}],
+    `tecnico-${currentWeek()}-relatorio.jpg`
+  );
+}
+
 function exportTechReportPDF(){
  const rows=state.rows.filter(r=>String(r.Week||"").toUpperCase()===currentWeek()),done=rows.filter(hasLog).length,pending=rows.length-done;exportStyledPDF(`Relatório de campo • ${currentWeek()}`,[{label:"Total da semana",planned:rows.length,done,pending,pct:rows.length?Math.round(done/rows.length*100):0}],`relatorio-tecnico-${currentWeek()}.pdf`);
 }
@@ -994,7 +1017,7 @@ function showAppForRole(role){
 
 function nav(screen){
   const allowedAdmin=["dashboard","programacao","program-history","atividades","acessos","configuracoes","profile"];
-  const allowedTech=["home","history","profile"];
+  const allowedTech=["home","dashboard","history","profile"];
   const allowed=state.role==="admin"?allowedAdmin:allowedTech;
   if(!allowed.includes(screen)) screen=state.role==="admin"?"dashboard":"home";
   document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active-screen"));
@@ -1311,7 +1334,7 @@ async function appendLog(row){
 
 function syncAll(){
   loadModuleCatalog(); loadProgramacoes(); loadProgramHistory(); $("currentDateTime").textContent=nowBR(); $("currentWeek").textContent=currentWeek();
-  if(state.role==="technician") loadData().then(()=>{populateFilters();renderTable();renderHistory();}).catch(e=>toast(e.message||"Não foi possível sincronizar."));
+  if(state.role==="technician") loadData().then(()=>{populateFilters();renderTable();renderHistory();renderDashboard();}).catch(e=>toast(e.message||"Não foi possível sincronizar."));
   if(state.role==="admin"){renderDashboard();renderProgramacao();renderModules();renderAccesses();}
 }
 
