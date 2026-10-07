@@ -110,6 +110,9 @@
       <button class="nav-item" data-screen="atividades" title="Atividades">
         <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5v-15Z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20M8 7h8M8 11h6"/></svg></span><span class="nav-label">Atividades</span>
       </button>
+      <button class="nav-item" data-screen="program-history" title="Histórico de Programações">
+        <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 5h16v15H4z"/><path d="M8 9h8M8 13h6M8 17h4"/><path d="M17 3v4"/></svg></span><span class="nav-label">Histórico de Programações</span>
+      </button>
       <button class="nav-item" data-screen="acessos" title="Pessoas & Acessos">
         <span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0M16 11a3 3 0 1 0 0-6M15.5 14.5a5.5 5.5 0 0 1 5 5.5"/></svg></span><span class="nav-label">Pessoas & Acessos</span>
       </button>
@@ -159,7 +162,7 @@
         </div>
         <div class="page-actions">
           <span class="current-week-chip">Semana <strong id="dashboardWeek">W---</strong></span>
-          <button id="exportDashboardPdfBtn" class="primary-btn">⇩ Exportar PDF</button>
+          <button id="exportDashboardJpegBtn" class="ghost-btn">▣ Exportar JPEG</button><button id="exportDashboardPdfBtn" class="primary-btn">⇩ Exportar PDF</button>
           <button id="refreshDashboard" class="ghost-btn">↻ Atualizar</button>
         </div>
       </div>
@@ -327,7 +330,7 @@
           <strong>SEMANA ATUAL: <b id="currentWeek">W---</b></strong>
           <p>Somente equipamentos programados para esta semana são exibidos.</p>
         </div>
-        <div class="week-rule"><span class="online-dot"></span> Programação ativa</div>
+        <div class="page-actions tech-report-actions"><button id="exportTechJpegBtn" class="ghost-btn">▣ Exportar gráfico JPEG</button><button id="exportTechPdfBtn" class="primary-btn">⇩ Exportar relatório PDF</button></div>
       </div>
 
       <div class="filters card">
@@ -413,6 +416,16 @@
         <div class="list-header"><div><span class="section-kicker">LOGS</span><h3>Últimos registros</h3></div></div>
         <div id="historyLog" class="history-log"></div>
       </section>
+    </section>
+
+    <!-- =========================
+         ADMIN: HISTÓRICO DE PROGRAMAÇÕES
+         ========================= -->
+    <section id="screen-program-history" class="screen">
+      <div class="page-title-row">
+        <div><span class="section-kicker">AUDITORIA DE PLANEJAMENTO</span><h2>Histórico de programações</h2><p>Registro das cargas de Excel, separando novas programações das inclusões.</p></div>
+      </div>
+      <div id="programHistoryList" class="program-history-list"></div>
     </section>
 
     <!-- =========================

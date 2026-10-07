@@ -31,6 +31,7 @@ const state = {
   selectedTags: new Set(),
   pendingImport: null,
   pendingProgramImport: null,
+  programHistory: [],
   mockRows: [
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA401",LOOP:"XV-20GHA10AA401",TAG:"ZSH-20GHA10AA401-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",Week:"W136",Logs:""},
     {FORN:"FORN-01",SYS:"20GHA",SUBSYS:"AA402",LOOP:"XV-20GHA10AA402",TAG:"ZSL-20GHA10AA402-S12",SERVICE:"WATER SERVICE TO TANK",TIPE:"AA - VÁLVULA",DESCRIÇÃO:"VÁLVULA ON/OFF",Week:"W136",Logs:""},
@@ -338,6 +339,33 @@ function renderDashboard() {
   $("recentExecutions").innerHTML = logs.length ? logs.slice(0,5).map(item=>`<div class="execution-item"><div class="exec-icon">✓</div><div><strong>${escapeHTML(item.tag)}</strong><span>${escapeHTML(item.meta.user)}${item.meta.team?` • ${escapeHTML(item.meta.team)}`:""}</span></div><span class="exec-time">${escapeHTML(item.meta.time)}</span></div>`).join("") : `<div class="empty-state inline"><strong>Nenhuma execução registrada.</strong></div>`;
 }
 
+function downloadCanvasJPEG(title,subtitle,rows,filename){
+  const canvas=document.createElement("canvas"), w=1400, h=Math.max(760,460+rows.length*58); canvas.width=w;canvas.height=h;
+  const c=canvas.getContext("2d"); c.fillStyle="#f6f8fb";c.fillRect(0,0,w,h); c.fillStyle="#07111f";c.fillRect(0,0,w,112);
+  c.fillStyle="#fff";c.font="700 34px Arial";c.fillText(title,56,48);c.font="18px Arial";c.fillText(subtitle,56,82);
+  const max=Math.max(...rows.flatMap(r=>[r.planned||0,r.done||0,r.pending||0]),1); const base=500; const chartH=300; const left=100; const usable=w-170; const groupW=usable/Math.max(rows.length,1);
+  c.strokeStyle="#d8e0e9";c.beginPath();c.moveTo(left,base);c.lineTo(w-70,base);c.stroke();
+  rows.forEach((r,i)=>{const x=left+i*groupW+groupW/2, bw=Math.min(42,groupW/5); const p=(r.planned||0)/max*chartH,d=(r.done||0)/max*chartH,pe=(r.pending||0)/max*chartH;
+    c.fillStyle="#7891ad";c.fillRect(x-bw,base-p,bw,p); c.fillStyle="#12a66a";c.fillRect(x,base-d,bw,d); c.fillStyle="#f59e0b";c.fillRect(x+bw,base-pe,bw,pe);
+    c.fillStyle="#334155";c.font="600 16px Arial";c.textAlign="center";c.fillText(r.label,x,base+30);
+  });
+  c.textAlign="left"; c.fillStyle="#334155";c.font="700 18px Arial";c.fillText("Previsto",80,570);c.fillText("Realizado",220,570);c.fillText("Pendente",390,570); c.fillStyle="#7891ad";c.fillRect(55,555,18,18);c.fillStyle="#12a66a";c.fillRect(195,555,18,18);c.fillStyle="#f59e0b";c.fillRect(365,555,18,18);
+  c.fillStyle="#172334";c.font="700 24px Arial";c.fillText("Relação quantitativa",56,630); c.font="18px Arial"; let y=670; rows.forEach(r=>{c.fillText(`${r.label}: ${r.done||0} executados • ${r.pending||0} pendentes • ${r.planned||0} previstos`,56,y);y+=38;});
+  const a=document.createElement("a");a.download=filename;a.href=canvas.toDataURL("image/jpeg",0.94);a.click();
+}
+function exportDashboardJPEG(){
+  const d=dashboardData(), f=d.filters; const rows=d.chart.map(x=>({label:x.week,planned:x.planned,done:x.done,pending:Math.max(0,x.planned-x.done)}));
+  downloadCanvasJPEG("CONTROLE DE PONTO A PONTO",`Dashboard • ${f.week||"Todas as semanas"} • ${nowBR()}`,rows,`dashboard-ponto-a-ponto-${f.week||"todas"}.jpg`);
+}
+function exportTechReportJPEG(){
+  const rows=state.rows.filter(r=>String(r.Week||"").toUpperCase()===currentWeek()); const planned=rows.length,done=rows.filter(hasLog).length;
+  downloadCanvasJPEG("CONTROLE DE PONTO A PONTO",`Relatório de campo • ${currentWeek()} • ${nowBR()}`,[{label:currentWeek(),planned,done,pending:planned-done}],`tecnico-${currentWeek()}-grafico.jpg`);
+}
+function exportTechReportPDF(){
+  const rows=state.rows.filter(r=>String(r.Week||"").toUpperCase()===currentWeek()), done=rows.filter(hasLog).length, pending=rows.length-done;
+  if(window.jspdf?.jsPDF){const {jsPDF}=window.jspdf,doc=new jsPDF({unit:"mm",format:"a4"});doc.setFont("helvetica","bold");doc.setFontSize(16);doc.text("CONTROLE DE PONTO A PONTO",15,15);doc.setFontSize(10);doc.setFont("helvetica","normal");doc.text(`Relatório de campo — ${currentWeek()}`,15,22);doc.text(`Gerado em ${nowBR()}`,15,28);doc.setFont("helvetica","bold");doc.setFontSize(12);doc.text("Relação de execução",15,40);doc.setFont("helvetica","normal");doc.text(`Itens programados: ${rows.length}`,15,50);doc.text(`Itens executados: ${done}`,15,58);doc.text(`Itens pendentes: ${pending}`,15,66);doc.text(`Percentual executado: ${rows.length?Math.round(done/rows.length*100):0}%`,15,74);doc.setFont("helvetica","bold");doc.text("Itens pendentes",15,88);let y=96;rows.filter(r=>!hasLog).slice(0,38).forEach(r=>{doc.setFont("helvetica","normal");doc.setFontSize(8);doc.text(`${String(r.TAG||"—")} — ${String(r.DESCRIÇÃO||"").slice(0,75)}`,15,y);y+=5;});doc.save(`relatorio-tecnico-${currentWeek()}.pdf`);}else window.print();
+}
+
 function exportDashboardPDF(){
   const d=dashboardData(), f=d.filters, now=new Date(), responsible=currentUserLabel();
   const activityName=f.activity?state.moduleCatalog.find(m=>m.id===f.activity)?.name||f.activity:"Todas";
@@ -582,6 +610,41 @@ function validateAndMapProgramImport(rows,mod){
   return {headers,imported};
 }
 
+function loadProgramHistory(){
+  try{
+    const saved=localStorage.getItem("ppaProgramHistory");
+    state.programHistory=Array.isArray(JSON.parse(saved||"[]"))?JSON.parse(saved||"[]"):[];
+  }catch{state.programHistory=[];}
+}
+function persistProgramHistory(){localStorage.setItem("ppaProgramHistory",JSON.stringify(state.programHistory));}
+function recordProgramImport(mode,pending){
+  const byWeek={};
+  pending.records.forEach(r=>{(byWeek[r.week] ||= []).push(r);});
+  Object.entries(byWeek).forEach(([week,records])=>{
+    state.programHistory.unshift({
+      id:`imp-${Date.now()}-${week}-${Math.random().toString(36).slice(2,6)}`,
+      week, mode, fileName:pending.fileName, createdAt:nowBR(), count:records.length,
+      items:records.map(r=>({date:r.date,activity:r.activity,team:r.team,responsible:r.responsible,qty:r.qty,note:r.note,customData:r.customData||{}}))
+    });
+  });
+  persistProgramHistory();
+}
+function renderProgramHistory(){
+  const box=$("programHistoryList"); if(!box)return;
+  if(!state.programHistory.length){box.innerHTML=`<div class="empty-state card"><strong>Nenhuma importação registrada.</strong><span>As cargas de Excel aparecerão aqui após a importação.</span></div>`;return;}
+  const grouped={};
+  state.programHistory.forEach(batch=>(grouped[batch.week] ||= []).push(batch));
+  const weeks=Object.keys(grouped).sort((a,b)=>Number(b.slice(1))-Number(a.slice(1)));
+  box.innerHTML=weeks.map(week=>{
+    const batches=grouped[week];
+    return `<section class="card program-history-week"><div class="program-history-week-head"><div><span class="section-kicker">SEMANA</span><h3>${escapeHTML(week)}</h3></div><span class="tag-badge">${batches.reduce((n,b)=>n+b.count,0)} itens</span></div><div class="program-history-batches">${batches.map((b,i)=>{
+      const activityCounts={}; b.items.forEach(x=>activityCounts[x.activity]=(activityCounts[x.activity]||0)+1);
+      const summary=Object.entries(activityCounts).map(([id,n])=>`${escapeHTML(moduleById(id)?.name||id)} (${n})`).join(" • ");
+      return `<details class="program-history-batch" ${i===0?"open":""}><summary><span class="history-mode ${b.mode==="new"?"new":"append"}">${b.mode==="new"?"NOVA PROGRAMAÇÃO":"INCLUSÃO"}</span><strong>${b.count} itens</strong><span>${escapeHTML(b.createdAt)}</span><span class="history-file">${escapeHTML(b.fileName)}</span></summary><div class="history-batch-body"><div><b>${b.mode==="new"?"Origem":"Incluída em"}:</b> ${escapeHTML(week)} • ${escapeHTML(summary||"Sem atividade")}</div><div class="compact-items">${b.items.map(x=>`<span>${escapeHTML(x.date||"—")} · ${escapeHTML(moduleById(x.activity)?.name||x.activity)} · ${escapeHTML(x.team||"—")} · Qtd. ${escapeHTML(x.qty)}</span>`).join("")}</div></div></details>`;
+    }).join("")}</div></section>`;
+  }).join("");
+}
+
 async function importProgramFile(file){
   const activityId=$("programActivityFilter").value;
   const mod=activityId?moduleById(activityId):null;
@@ -615,6 +678,7 @@ function confirmProgramImport(mode){
     if(mode==="append") state.programacoes.push(...pending.records);
     else state.programacoes=[...pending.records];
     persistProgramacoes();
+    recordProgramImport(mode,pending);
     closeProgramImportModal();
     renderProgramacao();
     renderDashboard();
@@ -992,7 +1056,7 @@ function showAppForRole(role){
 }
 
 function nav(screen){
-  const allowedAdmin=["dashboard","programacao","atividades","acessos","profile"];
+  const allowedAdmin=["dashboard","programacao","program-history","atividades","acessos","profile"];
   const allowedTech=["home","history","profile"];
   const allowed=state.role==="admin"?allowedAdmin:allowedTech;
   if(!allowed.includes(screen)) screen=state.role==="admin"?"dashboard":"home";
@@ -1001,9 +1065,11 @@ function nav(screen){
   document.querySelectorAll(".nav-item").forEach(b=>b.classList.toggle("active",b.dataset.screen===screen));
   if(screen==="dashboard") renderDashboard();
   if(screen==="programacao") renderProgramacao();
+  if(screen==="program-history") renderProgramHistory();
   if(screen==="atividades") renderModules();
   if(screen==="acessos") renderAccesses();
   if(screen==="history") renderHistory();
+  if(screen==="program-history") renderProgramHistory();
 }
 
 function loginAdmin(email){
@@ -1306,7 +1372,7 @@ async function appendLog(row){
 }
 
 function syncAll(){
-  loadModuleCatalog(); loadProgramacoes(); $("currentDateTime").textContent=nowBR(); $("currentWeek").textContent=currentWeek();
+  loadModuleCatalog(); loadProgramacoes(); loadProgramHistory(); $("currentDateTime").textContent=nowBR(); $("currentWeek").textContent=currentWeek();
   if(state.role==="technician") loadData().then(()=>{populateFilters();renderTable();renderHistory();}).catch(e=>toast(e.message||"Não foi possível sincronizar."));
   if(state.role==="admin"){renderDashboard();renderProgramacao();renderModules();renderAccesses();}
 }
@@ -1329,6 +1395,10 @@ document.querySelectorAll("[data-program-import-mode]").forEach(btn=>btn.onclick
 $("closeProgramModal").onclick=closeProgramModal; $("cancelProgramModal").onclick=closeProgramModal; $("programModal").querySelector(".modal-backdrop").onclick=closeProgramModal; $("programForm").addEventListener("submit",e=>{e.preventDefault();createProgramacao();});
 $("programWeekFilter").onchange=renderProgramacao; $("programActivityFilter").onchange=renderProgramacao; $("programTeamFilter").onchange=renderProgramacao; $("programActivity").onchange=()=>renderProgramCustomFields($("programActivity").value);
 $("refreshDashboard").onclick=()=>{renderDashboard();toast("Dashboard atualizado.");};
+$("exportDashboardPdfBtn").onclick=exportDashboardPDF;
+$("exportDashboardJpegBtn").onclick=exportDashboardJPEG;
+$("exportTechJpegBtn").onclick=exportTechReportJPEG;
+$("exportTechPdfBtn").onclick=exportTechReportPDF;
 $("tagSearch").addEventListener("input",()=>{$("clearSearch").style.display=$("tagSearch").value?"block":"none";renderTable();}); $("selectAllTags").onchange=toggleSelectAllTags; $("registerSelectedBtn").onclick=registerSelectedPontos; $("clearSearch").onclick=()=>{$("tagSearch").value="";$("clearSearch").style.display="none";renderTable();}; $("sysFilter").onchange=renderTable;$("subsysFilter").onchange=renderTable; $("registerBtn").onclick=registerPonto; $("repeatBtn").onclick=()=>$("confirmModal").classList.remove("hidden"); ["closeModal","cancelModal"].forEach(id=>$(id).onclick=()=>$("confirmModal").classList.add("hidden")); $("confirmModal").querySelector(".modal-backdrop").onclick=()=>$("confirmModal").classList.add("hidden"); $("confirmRepeat").onclick=()=>{$("confirmModal").classList.add("hidden");registerPonto();}; $("refreshHistory").onclick=async()=>{await loadData();populateFilters();renderTable();renderHistory();toast("Dados atualizados.");}; $("logoutBtn").onclick=logout;
 
 /* módulos */
@@ -1346,7 +1416,7 @@ setInterval(()=>{$("currentDateTime").textContent=nowBR();$("currentWeek").textC
 
 (async function init(){
   setupSidebar();
-  loadModuleCatalog(); loadProgramacoes(); $("currentDateTime").textContent=nowBR(); $("currentWeek").textContent=currentWeek(); setColumnViewMode(state.columnViewMode);
+  loadModuleCatalog(); loadProgramacoes(); loadProgramHistory(); $("currentDateTime").textContent=nowBR(); $("currentWeek").textContent=currentWeek(); setColumnViewMode(state.columnViewMode);
   const saved=sessionStorage.getItem("ppaSession");
   if(saved){try{const session=JSON.parse(saved);if(session?.role&&ROLE_LABELS[session.role]){state.currentUser=session;showAppForRole(session.role);syncAll();return;}}catch{}}
   backToAccessChooser();
