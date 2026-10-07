@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#07111f">
-  <title>Controle Ponto a Ponto</title>
+  <title>Planning Pro</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -22,19 +22,24 @@
     <div class="login-brand">
       <div class="brand-mark large">PP</div>
       <div>
-        <strong>CONTROLE</strong>
-        <span>Ponto a Ponto</span>
+        <strong>Planning Pro</strong>
+        <span>Controle de Atividades</span>
       </div>
     </div>
 
     <div id="accessChooser" class="login-card access-card">
       <p class="eyebrow">ACESSO AO SISTEMA</p>
-      <h1>Como você deseja entrar?</h1>
+      <h1>Bem Vindo</h1>
       <p class="login-subtitle">Escolha o ambiente correspondente ao seu perfil de acesso.</p>
 
       <div class="access-grid">
         <button class="access-option" data-role="admin">
-          <span class="access-icon">⌘</span>
+          <span class="access-icon">
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3Z"/>
+    <path d="M9 12l2 2 4-4"/>
+  </svg>
+</span>
           <span class="access-copy">
             <strong>Administrador</strong>
             <small>Dashboard, programação e gestão do sistema</small>
@@ -42,7 +47,13 @@
           <span class="access-arrow">→</span>
         </button>
         <button class="access-option" data-role="technician">
-          <span class="access-icon">◉</span>
+          <span class="access-icon">
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M6 3h12v5a6 6 0 0 1-12 0V3Z"/>
+    <path d="M8 14v7h8v-7"/>
+    <path d="M9 18h6"/>
+  </svg>
+</span>
           <span class="access-copy">
             <strong>Técnico de campo</strong>
             <small>Atividades, ponto a ponto e histórico</small>
@@ -69,7 +80,7 @@
         <button class="primary-btn full" type="submit">Entrar no painel</button>
         <p id="adminLoginMessage" class="form-message"></p>
       </form>
-      <small class="login-footnote">Demo local: use qualquer e-mail e senha com 4+ caracteres.</small>
+      <small class="login-footnote"></small>
     </div>
 
     <div id="technicianLoginCard" class="login-card role-login hidden">
@@ -148,7 +159,7 @@
     <header class="topbar">
       <div>
         <p id="topbarEyebrow" class="eyebrow">CONTROLE OPERACIONAL</p>
-        <h1 id="topbarTitle">CONTROLE DE PONTO A PONTO</h1>
+        <h1 id="topbarTitle">DASHBOARD DE ATIVIDADES</h1>
         <p id="topbarSubtitle" class="subtitle">Acompanhamento da operação em campo</p>
       </div>
       <div class="topbar-meta">
@@ -215,7 +226,7 @@
           <div class="list-header">
             <div>
               <span class="section-kicker">EVOLUÇÃO SEMANAL</span>
-              <h3>Volume previsto x realizado</h3>
+              <h3>Previsto x Realizado</h3>
             </div>
             <span class="legend">
               <span><i class="legend-dot planned"></i>Previsto</span>
@@ -228,7 +239,7 @@
         <section class="card progress-card">
           <div>
             <span class="section-kicker">EXECUÇÃO DA SEMANA</span>
-            <h3>Andamento geral</h3>
+            <h3>Geral</h3>
           </div>
           <div class="progress-ring" id="progressRing">
             <div class="progress-ring-inner">
@@ -432,7 +443,7 @@
          ========================= -->
     <section id="screen-program-history" class="screen">
       <div class="page-title-row">
-        <div><span class="section-kicker">AUDITORIA DE PLANEJAMENTO</span><h2>Histórico de programações</h2><p>Registro das cargas de Excel, separando novas programações das inclusões.</p></div>
+        <div><span class="section-kicker">AUDITORIA DE PLANEJAMENTO</span><h2>Histórico </h2><p>Registro das cargas de Excel, separando novas programações das inclusões.</p></div>
       </div>
       <div id="programHistoryList" class="program-history-list"></div>
     </section>
@@ -514,7 +525,7 @@
       </div>
       <div class="settings-grid">
         <section class="card settings-card">
-          <div class="list-header"><div><span class="section-kicker">PAPEL TIMBRADO</span><h3>Logo e identidade</h3></div><span class="tag-badge">ADMIN</span></div>
+          <div class="list-header"><div><span class="section-kicker"></span><h3>Identidade Visual</h3></div><span class="tag-badge">ADMIN</span></div>
           <label>Logo da empresa
             <input id="settingsLogoInput" type="file" accept="image/png,image/jpeg,image/webp">
           </label>
@@ -530,7 +541,7 @@
         </section>
         <section class="card settings-card">
           <div><span class="section-kicker">MODELO</span><h3>Prévia do documento</h3><p>O mesmo padrão visual será aplicado ao PDF e ao JPEG.</p></div>
-          <div id="stationeryPreview" class="stationery-preview"><div class="stationery-head"><div class="stationery-logo-box">LOGO</div><div><strong>CONTROLE DE PONTO A PONTO</strong><span>Relatório gerencial</span></div></div><div class="stationery-meta"><span>Semana W136</span><span>Responsável: Administrador</span></div><div class="stationery-summary"><div><small>PREVISTO</small><b>60</b></div><div><small>EXECUTADO</small><b>35</b></div><div><small>PENDENTE</small><b>25</b></div><div><small>EXECUÇÃO</small><b>58%</b></div></div><div class="stationery-table"><span>Atividade</span><span>Prev.</span><span>Exec.</span><span>Pend.</span><b>Ponto a Ponto</b><b>32</b><b>21</b><b>11</b><b>Loop Teste</b><b>16</b><b>10</b><b>6</b></div><footer>Documento gerado pelo Controle de Ponto a Ponto</footer></div>
+          <div id="stationeryPreview" class="stationery-preview"><div class="stationery-head"><div class="stationery-logo-box">LOGO</div><div><strong>PLANNING PRO</strong><span>Relatório gerencial</span></div></div><div class="stationery-meta"><span>Semana W136</span><span>Responsável: Administrador</span></div><div class="stationery-summary"><div><small>PREVISTO</small><b>60</b></div><div><small>EXECUTADO</small><b>35</b></div><div><small>PENDENTE</small><b>25</b></div><div><small>EXECUÇÃO</small><b>58%</b></div></div><div class="stationery-table"><span>Atividade</span><span>Prev.</span><span>Exec.</span><span>Pend.</span><b>Ponto a Ponto</b><b>32</b><b>21</b><b>11</b><b>Loop Teste</b><b>16</b><b>10</b><b>6</b></div><footer>Documento gerado pelo Planejamento</footer></div>
         </section>
       </div>
     </section>

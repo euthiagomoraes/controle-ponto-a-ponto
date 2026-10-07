@@ -180,13 +180,27 @@ function loginTechnician(code) {
   syncAll();
 }
 
-function logout() {
+async function logout() {
+  try {
+    const sb = getSupabaseClient();
+
+    if (sb) {
+      await sb.auth.signOut();
+    }
+  } catch (error) {
+    console.error("Erro ao sair:", error);
+  }
+
   sessionStorage.removeItem("ppaSession");
+
   state.currentUser = null;
   state.role = null;
+
   $("appShell").classList.add("hidden");
   $("loginScreen").classList.remove("hidden");
+
   backToAccessChooser();
+
   $("adminLoginForm").reset();
   $("technicianLoginForm").reset();
 }
@@ -308,6 +322,136 @@ function dashboardData() {
 function dashboardMetrics() {
   const d = dashboardData();
   return {planned:d.planned,done:d.done,balance:d.balance,rate:d.rate,week:d.filters.week||currentWeek()};
+}
+
+function renderDashboard() {
+  setupDashboardFilters();
+
+  const d = dashboardData();
+  const pct = Math.round(d.rate * 100);
+
+  $("dashboardWeek").textContent = d.filters.week || currentWeek();
+
+  $("metricPlanned").textContent = d.planned;
+  $("metricDone").textContent = d.done;
+  $("metricBalance").textContent = d.balance;
+  $("metricRate").textContent = `${pct}%`;
+
+  $("ringRate").textContent = `${pct}%`;
+  $("ringPlanned").textContent = d.planned;
+  $("ringDone").textContent = d.done;
+  $("ringPending").textContent = d.balance;
+
+  $("progressRing").style.background =
+    `conic-gradient(var(--sys-accent) ${pct * 3.6}deg, #e7edf4 0deg)`;
+
+  const maxValue = Math.max(
+    1,
+    ...d.chart.flatMap(x => [x.planned, x.done])
+  );
+
+  $("weeklyBars").innerHTML = d.chart.length
+    ? d.chart.map(x => {
+        const plannedH = Math.max(
+          4,
+          Math.round((x.planned / maxValue) * 150)
+        );
+
+        const doneH = Math.max(
+          4,
+          Math.round((x.done / maxValue) * 150)
+        );
+
+        return `
+          <div class="week-bar-group">
+            <div class="week-bar-values">
+              <span>${x.planned}</span>
+              <span>${x.done}</span>
+            </div>
+
+            <div class="week-bar-track">
+              <i
+                class="week-bar planned"
+                style="height:${plannedH}px"
+              ></i>
+
+              <i
+                class="week-bar done"
+                style="height:${doneH}px"
+              ></i>
+            </div>
+
+            <small>${escapeHTML(x.week)}</small>
+          </div>
+        `;
+      }).join("")
+    : `
+      <div class="empty-state inline">
+        <strong>Sem dados para os filtros.</strong>
+      </div>
+    `;
+
+  $("activityBreakdownRows").innerHTML = d.breakdown.length
+    ? d.breakdown.map(x => `
+        <div class="breakdown-row">
+          <div class="breakdown-main">
+            <span class="activity-color-dot"></span>
+            <strong>${escapeHTML(x.name)}</strong>
+          </div>
+
+          <div class="breakdown-numbers">
+            <span>${x.done}/${x.planned}</span>
+            <strong>${x.pct}%</strong>
+          </div>
+
+          <div class="breakdown-progress">
+            <i style="width:${Math.min(x.pct, 100)}%"></i>
+          </div>
+        </div>
+      `).join("")
+    : `
+      <div class="empty-state inline">
+        <strong>Nenhuma atividade encontrada.</strong>
+        <span>Ajuste os filtros ou importe uma programação.</span>
+      </div>
+    `;
+
+  const executions = executionRowsForWeek(
+    d.filters.week || currentWeek(),
+    d.filters.activity,
+    d.filters.team
+  )
+    .slice(-8)
+    .reverse();
+
+  $("recentExecutions").innerHTML = executions.length
+    ? executions.map(x => {
+        const team = x.meta.team
+          ? ` • ${escapeHTML(x.meta.team)}`
+          : "";
+
+        return `
+          <div class="execution-item">
+            <div>
+              <strong>${escapeHTML(x.row.TAG || "—")}</strong>
+              <span>
+                ${escapeHTML(x.meta.user)}
+                ${team}
+              </span>
+            </div>
+
+            <time>
+              ${escapeHTML(x.meta.time)}
+            </time>
+          </div>
+        `;
+      }).join("")
+    : `
+      <div class="empty-state inline">
+        <strong>Nenhuma execução registrada.</strong>
+        <span>Os registros de campo aparecerão aqui.</span>
+      </div>
+    `;
 }
 
 const DEFAULT_SETTINGS={primary:"#0b5cff",accent:"#12a66a",header:"#07111f",background:"#f6f8fb",logo:""};
@@ -1037,9 +1181,95 @@ function nav(screen){
   if(screen==="program-history") renderProgramHistory();
 }
 
-function loginAdmin(email){
-  state.currentUser={nome:"Administrador",email,identificador:email,role:"admin"};
-  sessionStorage.setItem("ppaSession",JSON.stringify(state.currentUser)); showAppForRole("admin"); syncAll();
+async function loginAdmin(email, password) {
+  const sb = getSupabaseClient();
+
+  if (!sb) {
+    $("adminLoginMessage").textContent =
+      "Supabase não está configurado.";
+    return;
+  }
+
+  try {
+    $("adminLoginMessage").textContent = "Entrando...";
+
+    const { data, error } = await sb.auth.signInWithPassword({
+      email,
+      password
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    const user = data.user;
+
+    if (!user) {
+      throw new Error("Usuário autenticado não encontrado.");
+    }
+
+    const { data: pessoa, error: pessoaError } = await sb
+      .from("tb_pessoas")
+      .select(`
+        id,
+        nome,
+        cracha,
+        perfil,
+        ativo,
+        auth_user_id,
+        equipe_id,
+        disciplina
+      `)
+      .eq("auth_user_id", user.id)
+      .eq("ativo", true)
+      .single();
+
+    if (pessoaError) {
+      throw pessoaError;
+    }
+
+    if (!pessoa) {
+      throw new Error(
+        "Usuário autenticado não possui cadastro em tb_pessoas."
+      );
+    }
+
+    if (pessoa.perfil !== "ADMINISTRADOR") {
+      await sb.auth.signOut();
+      throw new Error(
+        "Esta conta não possui perfil de Administrador."
+      );
+    }
+
+    state.currentUser = {
+      id: pessoa.id,
+      authUserId: pessoa.auth_user_id,
+      nome: pessoa.nome,
+      identificador: pessoa.cracha,
+      perfil: pessoa.perfil,
+      disciplina: pessoa.disciplina,
+      equipeId: pessoa.equipe_id,
+      email: user.email,
+      role: "admin"
+    };
+
+    sessionStorage.setItem(
+      "ppaSession",
+      JSON.stringify(state.currentUser)
+    );
+
+    $("adminLoginMessage").textContent = "";
+
+    showAppForRole("admin");
+    await syncAll();
+
+  } catch (error) {
+    console.error("Erro no login administrativo:", error);
+
+    $("adminLoginMessage").textContent =
+      error?.message ||
+      "Não foi possível realizar o login.";
+  }
 }
 
 function setupProgrammingSelectors(){
@@ -1334,9 +1564,41 @@ function saveAccess(){
 function deleteAccess(id){ const u=state.accesses.find(x=>x.id===id); if(!u)return; if(!confirm(`Excluir o usuário “${u.nome}”?`))return; state.accesses=state.accesses.filter(x=>x.id!==id); persistAccesses(); renderAccesses(); setupProgrammingSelectors(); toast("Usuário excluído."); }
 
 /* ---------- PROFILE / SYNC ---------- */
-function setupProfile(){
-  const u=state.currentUser;if(!u)return; const initials=String(u.nome||"Usuário").trim().split(/\s+/).slice(0,2).map(x=>x[0]).join("").toUpperCase(); $("profileAvatar").textContent=initials||"US"; $("profileName").textContent=u.nome||"Usuário"; $("profileName2").textContent=u.nome||"—"; $("profileBadge").textContent=u.role==="admin"?(u.email||"Administrador"):`Código: ${u.identificador||"—"}`; $("profileBadge2").textContent=u.role==="admin"?(u.email||"—"):(u.identificador||"—"); $("profileRole2").textContent=ROLE_LABELS[u.role]||"—"; $("profileWeek").textContent=currentWeek();
+
+function setupProfile() {
+  const u = state.currentUser;
+
+  if (!u) return;
+
+  const initials = String(u.nome || "Usuário")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map(x => x[0])
+    .join("")
+    .toUpperCase();
+
+  $("profileAvatar").textContent = initials || "US";
+
+  $("profileName").textContent =
+    u.nome || "Usuário";
+
+  $("profileName2").textContent =
+    u.nome || "—";
+
+  $("profileBadge").textContent =
+    u.email || u.identificador || "—";
+
+  $("profileBadge2").textContent =
+    u.identificador || u.email || "—";
+
+  $("profileRole2").textContent =
+    u.perfil || ROLE_LABELS[u.role] || "—";
+
+  $("profileWeek").textContent =
+    currentWeek();
 }
+
 function loadData(){
   const imported=localStorage.getItem("ppaImportedRows"); if(imported){try{const parsed=JSON.parse(imported);if(Array.isArray(parsed)&&parsed.length){state.rows=parsed;return;}}catch{}}
   if(!CONFIG.DATA_URL){
@@ -1352,6 +1614,136 @@ async function appendLog(row){
   row.Logs=newLogs; localStorage.setItem("ppaImportedRows",JSON.stringify(state.rows)); return entry;
 }
 
+function renderDashboard() {
+  setupDashboardFilters();
+
+  const d = dashboardData();
+  const pct = Math.round(d.rate * 100);
+
+  $("dashboardWeek").textContent = d.filters.week || currentWeek();
+
+  $("metricPlanned").textContent = d.planned;
+  $("metricDone").textContent = d.done;
+  $("metricBalance").textContent = d.balance;
+  $("metricRate").textContent = `${pct}%`;
+
+  $("ringRate").textContent = `${pct}%`;
+  $("ringPlanned").textContent = d.planned;
+  $("ringDone").textContent = d.done;
+  $("ringPending").textContent = d.balance;
+
+  $("progressRing").style.background =
+    `conic-gradient(var(--sys-accent) ${pct * 3.6}deg, #e7edf4 0deg)`;
+
+  const maxValue = Math.max(
+    1,
+    ...d.chart.flatMap(x => [x.planned, x.done])
+  );
+
+  $("weeklyBars").innerHTML = d.chart.length
+    ? d.chart.map(x => {
+        const plannedH = Math.max(
+          4,
+          Math.round((x.planned / maxValue) * 150)
+        );
+
+        const doneH = Math.max(
+          4,
+          Math.round((x.done / maxValue) * 150)
+        );
+
+        return `
+          <div class="week-bar-group">
+            <div class="week-bar-values">
+              <span>${x.planned}</span>
+              <span>${x.done}</span>
+            </div>
+
+            <div class="week-bar-track">
+              <i
+                class="week-bar planned"
+                style="height:${plannedH}px"
+              ></i>
+
+              <i
+                class="week-bar done"
+                style="height:${doneH}px"
+              ></i>
+            </div>
+
+            <small>${escapeHTML(x.week)}</small>
+          </div>
+        `;
+      }).join("")
+    : `
+      <div class="empty-state inline">
+        <strong>Sem dados para os filtros.</strong>
+      </div>
+    `;
+
+  $("activityBreakdownRows").innerHTML = d.breakdown.length
+    ? d.breakdown.map(x => `
+        <div class="breakdown-row">
+          <div class="breakdown-main">
+            <span class="activity-color-dot"></span>
+            <strong>${escapeHTML(x.name)}</strong>
+          </div>
+
+          <div class="breakdown-numbers">
+            <span>${x.done}/${x.planned}</span>
+            <strong>${x.pct}%</strong>
+          </div>
+
+          <div class="breakdown-progress">
+            <i style="width:${Math.min(x.pct, 100)}%"></i>
+          </div>
+        </div>
+      `).join("")
+    : `
+      <div class="empty-state inline">
+        <strong>Nenhuma atividade encontrada.</strong>
+        <span>Ajuste os filtros ou importe uma programação.</span>
+      </div>
+    `;
+
+  const executions = executionRowsForWeek(
+    d.filters.week || currentWeek(),
+    d.filters.activity,
+    d.filters.team
+  )
+    .slice(-8)
+    .reverse();
+
+  $("recentExecutions").innerHTML = executions.length
+    ? executions.map(x => {
+        const team = x.meta.team
+          ? ` • ${escapeHTML(x.meta.team)}`
+          : "";
+
+        return `
+          <div class="execution-item">
+            <div>
+              <strong>${escapeHTML(x.row.TAG || "—")}</strong>
+              <span>
+                ${escapeHTML(x.meta.user)}
+                ${team}
+              </span>
+            </div>
+
+            <time>
+              ${escapeHTML(x.meta.time)}
+            </time>
+          </div>
+        `;
+      }).join("")
+    : `
+      <div class="empty-state inline">
+        <strong>Nenhuma execução registrada.</strong>
+        <span>Os registros de campo aparecerão aqui.</span>
+      </div>
+    `;
+}
+
 async function syncAll(){
   loadModuleCatalog(); loadProgramHistory(); await loadModulesFromDB(); if(getSupabaseClient()) await syncModulesToDB(); await loadProgramacoes(); $("currentDateTime").textContent=nowBR(); $("currentWeek").textContent=currentWeek();
   if(state.role==="technician"){await loadData();populateFilters();renderTable();renderHistory();renderDashboard();}
@@ -1362,7 +1754,28 @@ async function syncAll(){
 
 document.querySelectorAll(".access-option").forEach(btn=>btn.addEventListener("click",()=>showLogin(btn.dataset.role)));
 document.querySelectorAll("[data-back-login]").forEach(btn=>btn.addEventListener("click",backToAccessChooser));
-$("adminLoginForm").addEventListener("submit",e=>{e.preventDefault();const email=$("adminEmail").value.trim(),password=$("adminPassword").value;$("adminLoginMessage").classList.remove("ok");if(!email||password.length<4){$("adminLoginMessage").textContent="Informe um e-mail e uma senha válida.";return;}loginAdmin(email);});
+$("adminLoginForm").addEventListener("submit", async e => {
+  e.preventDefault();
+
+  const email = $("adminEmail").value.trim();
+  const password = $("adminPassword").value;
+
+  $("adminLoginMessage").classList.remove("ok");
+
+  if (!email || !password) {
+    $("adminLoginMessage").textContent =
+      "Informe e-mail e senha.";
+    return;
+  }
+
+  if (email.toLowerCase() !== "thiagomoraes.projetos@gmail.com") {
+    $("adminLoginMessage").textContent =
+      "Esta conta não possui acesso administrativo.";
+    return;
+  }
+
+  await loginAdmin(email, password);
+});
 $("technicianLoginForm").addEventListener("submit",e=>{e.preventDefault();const code=$("techAccessCode").value.trim();$("techLoginMessage").classList.remove("ok");if(!code){$("techLoginMessage").textContent="Informe o código de acesso.";return;}loginTechnician(code);});
 document.querySelectorAll(".nav-item").forEach(b=>b.onclick=()=>nav(b.dataset.screen));
 
@@ -1395,11 +1808,26 @@ $("newAccessBtn").onclick=()=>openAccessModal(); $("closeAccessModal").onclick=c
 
 setInterval(()=>{$("currentDateTime").textContent=nowBR();$("currentWeek").textContent=currentWeek();},1000);
 
-(async function init(){
+(async function init() {
   setupSidebar();
   loadSettings();
-  loadModuleCatalog(); loadProgramacoes(); loadProgramHistory(); $("currentDateTime").textContent=nowBR(); $("currentWeek").textContent=currentWeek(); setColumnViewMode(state.columnViewMode);
-  const saved=sessionStorage.getItem("ppaSession");
-  if(saved){try{const session=JSON.parse(saved);if(session?.role&&ROLE_LABELS[session.role]){state.currentUser=session;showAppForRole(session.role);syncAll();return;}}catch{}}
+  loadModuleCatalog();
+  await loadProgramacoes();
+  loadProgramHistory();
+
+  $("currentDateTime").textContent = nowBR();
+  $("currentWeek").textContent = currentWeek();
+
+  setColumnViewMode(state.columnViewMode);
+
+  const authenticated = await loadAuthenticatedProfile();
+
+  if (authenticated && state.currentUser) {
+    showAppForRole(state.currentUser.role);
+    await syncAll();
+    return;
+  }
+
+  sessionStorage.removeItem("ppaSession");
   backToAccessChooser();
 })();
