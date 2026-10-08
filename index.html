@@ -129,6 +129,9 @@
       <button class="nav-item" data-screen="acessos" title="Pessoas & Acessos">
         <span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0M16 11a3 3 0 1 0 0-6M15.5 14.5a5.5 5.5 0 0 1 5 5.5"/></svg></span><span class="nav-label">Pessoas & Acessos</span>
       </button>
+      <button class="nav-item" data-screen="relatorios" title="Relatórios">
+        <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20V7"/><path d="M2 20h21"/></svg></span><span class="nav-label">Relatórios</span>
+      </button>
       <button class="nav-item" data-screen="profile" title="Perfil">
         <span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 21a7 7 0 0 1 14 0"/></svg></span><span class="nav-label">Perfil</span>
       </button>
@@ -267,15 +270,7 @@
           <div id="activityBreakdownRows" class="breakdown-list"></div>
         </section>
 
-        <section class="card recent-executions">
-          <div class="list-header">
-            <div>
-              <span class="section-kicker">ÚLTIMAS EXECUÇÕES</span>
-              <h3>Registros recentes</h3>
-            </div>
-          </div>
-          <div id="recentExecutions" class="execution-list"></div>
-        </section>
+
       </div>
     </section>
 
@@ -551,6 +546,32 @@
           <div class="list-header"><div><span class="section-kicker">CADASTRO</span><h3>Usuários de campo</h3></div><div class="access-search"><input id="accessSearch" type="search" placeholder="Buscar nome, e-mail ou equipe..."></div></div>
           <div class="table-wrap large-table"><table><thead><tr><th>NOME</th><th>FUNÇÃO</th><th>E-MAIL</th><th>CÓDIGO</th><th>EQUIPE</th><th>PERFIL</th><th>STATUS</th><th></th></tr></thead><tbody id="accessTableBody"></tbody></table><div id="accessEmpty" class="empty-state hidden"><div>◎</div><strong>Nenhum usuário encontrado</strong><span>Cadastre a primeira pessoa para liberar acesso.</span></div></div>
         </section>
+      </div>
+    </section>
+
+    <!-- =========================
+         ADMIN: RELATÓRIOS
+         ========================= -->
+    <section id="screen-relatorios" class="screen">
+      <div class="page-title-row">
+        <div><span class="section-kicker">ANÁLISE GERENCIAL</span><h2>Relatórios</h2><p>Filtros do Dashboard com análises complementares de execução, equipes e atividades.</p></div>
+        <div class="page-actions"><button id="refreshReports" class="ghost-btn">↻ Atualizar</button><button id="exportReportsPdf" class="primary-btn">⇩ Exportar PDF</button></div>
+      </div>
+      <div class="filters card report-filters">
+        <label class="select-field">SEMANA<select id="reportWeekFilter"><option value="">Todas</option></select></label>
+        <label class="select-field">ATIVIDADE<select id="reportActivityFilter"><option value="">Todas</option></select></label>
+        <label class="select-field">EQUIPE<select id="reportTeamFilter"><option value="">Todas</option></select></label>
+      </div>
+      <div class="metrics-grid report-metrics">
+        <div class="metric-card card"><span>PREVISTO</span><strong id="reportPlanned">0</strong><small>atividades no recorte</small></div>
+        <div class="metric-card card"><span>REALIZADO</span><strong id="reportDone">0</strong><small>execuções registradas</small></div>
+        <div class="metric-card card"><span>EFICIÊNCIA</span><strong id="reportRate">0%</strong><small>realizado sobre previsto</small></div>
+        <div class="metric-card card"><span>TEAMS</span><strong id="reportTeams">0</strong><small>equipes com atividade</small></div>
+      </div>
+      <div class="reports-grid">
+        <section class="card report-chart-card"><div class="list-header"><div><span class="section-kicker">POR EQUIPE</span><h3>Previsto x realizado</h3></div></div><div id="reportTeamBars" class="report-bars"></div></section>
+        <section class="card report-chart-card"><div class="list-header"><div><span class="section-kicker">POR ATIVIDADE</span><h3>Desempenho</h3></div></div><div id="reportActivityRows" class="breakdown-list"></div></section>
+        <section class="card report-chart-card report-wide"><div class="list-header"><div><span class="section-kicker">EVOLUÇÃO</span><h3>Programado x executado por semana</h3></div></div><div id="reportWeekBars" class="report-bars report-week-bars"></div></section>
       </div>
     </section>
 

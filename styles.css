@@ -323,3 +323,27 @@ tbody td{padding:10px 9px;border-bottom:1px solid #eef2f6;vertical-align:middle;
   input[type="checkbox"], input[type="radio"], input[type="file"], input[type="color"]{font-size:inherit;}
   .sidebar-settings-btn{font-size:16px;}
 }
+
+/* REV. 7 — login geométrico + relatórios */
+.login-screen{position:relative;overflow:hidden;background:var(--sys-bg,#f6f8fb)}
+.login-screen::before,.login-screen::after{content:"";position:absolute;inset:auto;pointer-events:none;z-index:0;border:1px solid color-mix(in srgb,var(--sys-primary,#0b5cff) 20%,transparent);transform:rotate(45deg);animation:loginGeomFloat 14s ease-in-out infinite}
+.login-screen::before{width:42vw;height:42vw;left:-16vw;top:-15vw;border-radius:26%;box-shadow:0 0 0 70px color-mix(in srgb,var(--sys-primary,#0b5cff) 3%,transparent),0 0 0 140px color-mix(in srgb,var(--sys-accent,#12a66a) 3%,transparent)}
+.login-screen::after{width:34vw;height:34vw;right:-12vw;bottom:-12vw;border-radius:18%;animation-delay:-7s;border-color:color-mix(in srgb,var(--sys-accent,#12a66a) 20%,transparent)}
+.login-screen .login-shell{position:relative;z-index:2}
+.login-screen .login-shell::before{content:"";position:absolute;width:10px;height:10px;border-radius:2px;background:var(--sys-primary,#0b5cff);box-shadow:160px 80px 0 var(--sys-accent,#12a66a),-180px 160px 0 color-mix(in srgb,var(--sys-primary,#0b5cff) 50%,transparent),220px -130px 0 color-mix(in srgb,var(--sys-accent,#12a66a) 55%,transparent);animation:loginDots 8s linear infinite;opacity:.45}
+@keyframes loginGeomFloat{0%,100%{transform:rotate(45deg) translate3d(0,0,0)}50%{transform:rotate(51deg) translate3d(18px,-16px,0)}}
+@keyframes loginDots{0%,100%{transform:translate(0,0) rotate(0)}50%{transform:translate(12px,18px) rotate(90deg)}}
+.login-card{backdrop-filter:blur(10px);background:color-mix(in srgb,#fff 92%,transparent)}
+.login-card input,.login-card textarea,.login-card select{font-size:16px}
+.report-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.reports-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px}
+.report-wide{grid-column:1/-1}
+.report-bars{display:flex;flex-direction:column;gap:15px}
+.report-bar-row>div:first-child{display:flex;justify-content:space-between;gap:12px;font-size:11px;margin-bottom:7px}
+.report-bar-row span{color:var(--muted)}
+.report-bar-track{height:10px;border-radius:999px;background:#edf2f7;position:relative;overflow:hidden}
+.report-bar-track i,.report-bar-track b{position:absolute;left:0;top:0;height:100%;border-radius:999px;display:block}
+.report-bar-track i{background:color-mix(in srgb,var(--sys-primary,#0b5cff) 28%,#fff)}
+.report-bar-track b{background:var(--sys-primary,#0b5cff);opacity:.9}
+@media(max-width:800px){.report-filters{grid-template-columns:1fr}.reports-grid{grid-template-columns:1fr}.report-wide{grid-column:auto}.report-metrics{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.report-metrics{grid-template-columns:1fr}.login-screen::before{width:70vw;height:70vw}.login-screen::after{width:60vw;height:60vw}}

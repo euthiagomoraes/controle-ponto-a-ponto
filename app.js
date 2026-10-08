@@ -428,29 +428,23 @@ async function loginTechnician(code) {
   if (dbEnabled()) {
     try {
       const sb = getSupabaseClient();
-      const { data: pessoa, error } = await sb
-        .from("tb_pessoas")
-        .select("id,nome,cracha,perfil,ativo,auth_user_id,equipe_id,disciplina")
-        .eq("cracha", normalizedCode)
-        .eq("ativo", true)
-        .limit(1)
-        .maybeSingle();
-
+      const { data: pessoa, error } = await sb.rpc("login_tecnico_por_cracha", { p_cracha: normalizedCode });
       if (error) throw error;
+      const pessoaRecord = Array.isArray(pessoa) ? pessoa[0] : pessoa;
 
-      if (!pessoa || pessoa.perfil === "ADMINISTRADOR") {
+      if (!pessoaRecord || pessoaRecord.perfil === "ADMINISTRADOR") {
         throw new Error("Código não encontrado, inativo ou sem permissão de técnico.");
       }
 
-      const team = state.teams.find(t => t.id === pessoa.equipe_id);
+      const team = state.teams.find(t => t.id === pessoaRecord.equipe_id);
       state.currentUser = {
-        id: pessoa.id,
-        authUserId: pessoa.auth_user_id,
-        nome: pessoa.nome,
-        identificador: pessoa.cracha,
-        perfil: pessoa.perfil,
-        disciplina: pessoa.disciplina,
-        equipeId: pessoa.equipe_id,
+        id: pessoaRecord.id,
+        authUserId: pessoaRecord.auth_user_id,
+        nome: pessoaRecord.nome,
+        identificador: pessoaRecord.cracha,
+        perfil: pessoaRecord.perfil,
+        disciplina: pessoaRecord.disciplina,
+        equipeId: pessoaRecord.equipe_id,
         team: team?.nome || "",
         role: "technician"
       };
@@ -497,6 +491,7 @@ function nav(screen) {
     "program-history",
     "atividades",
     "acessos",
+    "relatorios",
     "configuracoes",
     "profile"
   ];
@@ -517,6 +512,7 @@ function nav(screen) {
   if (screen === "program-history") renderProgramHistory();
   if (screen === "atividades") renderModules();
   if (screen === "acessos") renderAccesses();
+  if (screen === "relatorios") renderReports();
   if (screen === "configuracoes") setupSettings();
   if (screen === "profile") hydrateProfileUI();
   if (screen === "history") renderHistory();
@@ -2927,15 +2923,60 @@ function renderDashboard() {
       : `<div class="empty-state inline"><strong>Nenhuma atividade encontrada.</strong><span>Ajuste os filtros ou importe uma programação.</span></div>`;
   }
 
-  const executions = executionRowsForWeek(data.filters.week || currentWeek(), data.filters.activity, data.filters.team).slice(-8).reverse();
-  if ($("recentExecutions")) {
-    $("recentExecutions").innerHTML = executions.length
-      ? executions.map(item => `<div class="execution-item">
-          <div><strong>${escapeHTML(item.row.TAG || "—")}</strong><span>${escapeHTML(item.meta.user)}${item.meta.team ? ` • ${escapeHTML(item.meta.team)}` : ""}</span></div>
-          <time>${escapeHTML(item.meta.time)}</time>
-        </div>`).join("")
-      : `<div class="empty-state inline"><strong>Nenhuma execução registrada.</strong><span>Os registros de campo aparecerão aqui.</span></div>`;
-  }
+}
+
+function setupReportFilters() {
+  const current = { week: $("reportWeekFilter")?.value || "", activity: $("reportActivityFilter")?.value || "", team: $("reportTeamFilter")?.value || "" };
+  const weeks = [...new Set([...(state.weeks || []).map(item => normalizeWeek(item.semana)), ...state.dashboardSeed.map(item => normalizeWeek(item.week)), ...state.programacoes.map(item => normalizeWeek(item.semana))])].filter(Boolean).sort((a,b)=>weekToNumber(a)-weekToNumber(b));
+  if ($("reportWeekFilter")) { $("reportWeekFilter").innerHTML = `<option value="">Todas</option>` + weeks.map(w=>`<option value="${escapeHTML(w)}">${escapeHTML(w)}</option>`).join(""); $("reportWeekFilter").value = weeks.includes(current.week) ? current.week : ""; }
+  if ($("reportActivityFilter")) { $("reportActivityFilter").innerHTML = `<option value="">Todas</option>` + state.moduleCatalog.map(m=>`<option value="${escapeHTML(m.id)}">${escapeHTML(m.name)}</option>`).join(""); $("reportActivityFilter").value = moduleById(current.activity) ? current.activity : ""; }
+  const teams = [...state.teams].sort((a,b)=>String(a.nome||"").localeCompare(String(b.nome||""),"pt-BR",{numeric:true,sensitivity:"base"}));
+  if ($("reportTeamFilter")) { $("reportTeamFilter").innerHTML = `<option value="">Todas</option>` + teams.map(t=>`<option value="${escapeHTML(t.nome)}">${escapeHTML(t.nome)}</option>`).join(""); $("reportTeamFilter").value = teams.some(t=>t.nome===current.team) ? current.team : ""; }
+}
+
+function reportAnalysis() {
+  const filters = { week: $("reportWeekFilter")?.value || "", activity: $("reportActivityFilter")?.value || "", team: $("reportTeamFilter")?.value || "" };
+  const programs = state.programacoes.filter(p =>
+    (!filters.week || normalizeWeek(p.week) === filters.week) &&
+    (!filters.activity || p.activity === filters.activity) &&
+    (!filters.team || p.team === filters.team)
+  );
+  const weeks = [...new Set([
+    ...programs.map(p => normalizeWeek(p.week)),
+    ...state.rows.map(r => normalizeWeek(r.Week)).filter(Boolean)
+  ])].filter(Boolean).sort((a,b)=>weekToNumber(a)-weekToNumber(b));
+  const sourceWeeks = weeks.length ? weeks : (filters.week ? [filters.week] : state.dashboardSeed.map(x=>normalizeWeek(x.week)));
+  const weekRows = sourceWeeks.map(week => {
+    const weekPrograms = programs.filter(p => normalizeWeek(p.week) === week);
+    const seed = state.dashboardSeed.find(x=>normalizeWeek(x.week)===week);
+    const planned = weekPrograms.length ? weekPrograms.reduce((n,p)=>n+Number(p.qty||1),0) : (!state.programacoes.length && !filters.activity && !filters.team ? Number(seed?.planned||0) : 0);
+    const done = executionRowsForWeek(week, filters.activity, filters.team).length || (!state.rows.length && !filters.activity && !filters.team ? Number(seed?.done||0) : 0);
+    return {week,planned,done};
+  });
+  const planned = weekRows.reduce((n,x)=>n+x.planned,0);
+  const done = weekRows.reduce((n,x)=>n+x.done,0);
+  const teamMap = new Map();
+  programs.forEach(p => { const name=p.team || "Sem equipe"; const x=teamMap.get(name)||{name,planned:0,done:0}; x.planned += Number(p.qty||1); teamMap.set(name,x); });
+  teamMap.forEach(x => { x.done = executionRowsForWeek(filters.week || currentWeek(), filters.activity, x.name).length; x.pct=x.planned?Math.round(x.done/x.planned*100):0; });
+  const activityMap = new Map();
+  programs.forEach(p => { const name=moduleById(p.activity)?.name || p.activity || "Sem atividade"; const x=activityMap.get(p.activity)||{name,planned:0,done:0}; x.planned += Number(p.qty||1); activityMap.set(p.activity,x); });
+  activityMap.forEach((x,id)=>{ x.done=executionRowsForWeek(filters.week || currentWeek(), id, filters.team).length; x.pct=x.planned?Math.round(x.done/x.planned*100):0; });
+  if (!programs.length && !state.programacoes.length) state.dashboardSeed.forEach(seed=>{ const x=activityMap.get("ppa")||{name:"Ponto a Ponto",planned:0,done:0}; if(!filters.activity||filters.activity==="ppa"){x.planned+=seed.planned;x.done+=seed.done;} activityMap.set("ppa",x); });
+  return {filters,planned,done,rate:planned?Math.min(done/planned,1):0,teams:[...teamMap.values()],activities:[...activityMap.values()],weeks:weekRows};
+}
+
+function renderReports() {
+  setupReportFilters();
+  const r=reportAnalysis();
+  $("reportPlanned") && ($("reportPlanned").textContent=r.planned);
+  $("reportDone") && ($("reportDone").textContent=r.done);
+  $("reportRate") && ($("reportRate").textContent=`${Math.round(r.rate*100)}%`);
+  $("reportTeams") && ($("reportTeams").textContent=r.teams.filter(x=>x.planned).length);
+  const maxTeam=Math.max(1,...r.teams.map(x=>x.planned));
+  if ($("reportTeamBars")) $("reportTeamBars").innerHTML=r.teams.length?r.teams.map(x=>`<div class="report-bar-row"><div><strong>${escapeHTML(x.name)}</strong><span>${x.done}/${x.planned} • ${x.pct}%</span></div><div class="report-bar-track"><i style="width:${Math.min(100,Math.max(3,Math.round(x.planned/maxTeam*100)))}%"></i><b style="width:${Math.min(100,Math.round(x.done/Math.max(1,x.planned)*100))}%"></b></div></div>`).join(""):`<div class="empty-state inline"><strong>Sem dados por equipe.</strong></div>`;
+  if ($("reportActivityRows")) $("reportActivityRows").innerHTML=r.activities.length?r.activities.map(x=>`<div class="breakdown-row"><div class="breakdown-main"><span class="activity-color-dot"></span><strong>${escapeHTML(x.name)}</strong></div><div class="breakdown-numbers"><span>${x.done}/${x.planned}</span><strong>${x.pct}%</strong></div><div class="breakdown-progress"><i style="width:${Math.min(100,x.pct)}%"></i></div></div>`).join(""):`<div class="empty-state inline"><strong>Sem dados por atividade.</strong></div>`;
+  const maxWeek=Math.max(1,...r.weeks.map(x=>Math.max(x.planned,x.done)));
+  if ($("reportWeekBars")) $("reportWeekBars").innerHTML=r.weeks.length?r.weeks.map(x=>`<div class="week-bar-group"><div class="week-bar-values"><span>${x.planned}</span><span>${x.done}</span></div><div class="week-bar-track"><i class="week-bar planned" style="height:${Math.max(4,Math.round(x.planned/maxWeek*150))}px"></i><i class="week-bar done" style="height:${Math.max(4,Math.round(x.done/maxWeek*150))}px"></i></div><small>${escapeHTML(x.week)}</small></div>`).join(""):`<div class="empty-state inline"><strong>Sem dados semanais.</strong></div>`;
 }
 
 function reportRowsForDashboard() {
@@ -3299,7 +3340,14 @@ async function syncAll() {
       await loadModulesFromDB();
     }
 
-    await loadTeamsAndPeople();
+    if (state.role === "technician") {
+      const sb = getSupabaseClient();
+      const { data: teamsData, error: teamsError } = await sb.from("tb_equipes").select("id,nome,disciplina,ativo").eq("ativo", true).order("nome");
+      if (teamsError) throw teamsError;
+      state.teams = (teamsData || []).map(team => ({ id: team.id, dbId: team.id, name: team.nome, nome: team.nome, disciplina: team.disciplina, ativo: team.ativo }));
+    } else {
+      await loadTeamsAndPeople();
+    }
     await loadWeeks();
     await loadProgramacoes();
 
@@ -3458,6 +3506,11 @@ function bindEvents() {
   $("dashboardWeekFilter") && ($("dashboardWeekFilter").onchange = renderDashboard);
   $("dashboardActivityFilter") && ($("dashboardActivityFilter").onchange = renderDashboard);
   $("dashboardTeamFilter") && ($("dashboardTeamFilter").onchange = renderDashboard);
+  $("reportWeekFilter") && ($("reportWeekFilter").onchange = renderReports);
+  $("reportActivityFilter") && ($("reportActivityFilter").onchange = renderReports);
+  $("reportTeamFilter") && ($("reportTeamFilter").onchange = renderReports);
+  $("refreshReports") && ($("refreshReports").onclick = async () => { await syncAll(); renderReports(); });
+  $("exportReportsPdf") && ($("exportReportsPdf").onclick = () => exportStyledPDF(`Relatório analítico • ${$("reportWeekFilter")?.value || "Todas as semanas"}`, reportRowsForDashboard(), `relatorios-${currentWeek()}.pdf`));
 }
 
 /* =========================
