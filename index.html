@@ -153,7 +153,7 @@
     </nav>
 
     <div class="sidebar-footer">
-      <button class="nav-item sidebar-settings-btn" data-screen="configuracoes" title="Configurações" type="button">
+      <button class="nav-item sidebar-settings-btn admin-only" data-screen="configuracoes" title="Configurações" type="button">
         <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19 13.5 1.5 1.2-1.7 3-1.8-.7-.3 1.9a7.7 7.7 0 0 1-1.8 1l-1.8-.7-1.7-3L7 13.5a7.4 7.4 0 0 1 0-3L5.5 9.3l1.7-3 1.8.7a7.7 7.7 0 0 1 1.8-1l.3-1.9h3.4l.3 1.9a7.7 7.7 0 0 1 1.8 1l1.8-.7 1.7 3L19 10.5a7.4 7.4 0 0 1 0 3Z"/></svg></span><span class="nav-label">Configurações</span>
       </button>
       <div class="sidebar-status"><span class="online-dot"></span><span id="sidebarRoleText">Sistema online</span></div>
@@ -216,8 +216,8 @@
         </div>
       </div>
 
-      <div class="dashboard-grid">
-        <section class="card chart-card">
+      <div class="dashboard-grid dashboard-grid-main">
+        <section class="card chart-card dashboard-main-chart">
           <div class="list-header">
             <div>
               <span class="section-kicker">EVOLUÇÃO SEMANAL</span>
@@ -249,17 +249,16 @@
           </div>
         </section>
 
-        <section class="card activity-breakdown">
-          <div class="list-header">
-            <div>
-              <span class="section-kicker">POR ATIVIDADE</span>
-              <h3>Previsto x realizado</h3>
-            </div>
-          </div>
+      </div>
+      <div class="dashboard-grid dashboard-grid-secondary">
+        <section class="card chart-card dashboard-detail-card">
+          <div class="list-header"><div><span class="section-kicker">ATIVIDADES</span><h3>Desempenho por atividade</h3></div></div>
           <div id="activityBreakdownRows" class="breakdown-list"></div>
         </section>
-
-
+        <section class="card chart-card dashboard-detail-card">
+          <div class="list-header"><div><span class="section-kicker">EQUIPES</span><h3>Execução por equipe</h3></div></div>
+          <div id="dashboardTeamRows" class="breakdown-list"></div>
+        </section>
       </div>
     </section>
 
@@ -515,8 +514,6 @@
           </div>
         </section>
       </div>
-    </section>
-
     <!-- =========================
          ADMIN: PESSOAS & ACESSOS
          ========================= -->
@@ -543,7 +540,7 @@
          ========================= -->
     <section id="screen-relatorios" class="screen">
       <div class="page-title-row">
-        <div><span class="section-kicker">ANÁLISE GERENCIAL</span><h2>Relatórios</h2><p>Filtros do Dashboard com análises complementares de execução, equipes e atividades.</p></div>
+        <div><span class="section-kicker">ANÁLISE GERENCIAL</span><h2>Relatórios</h2><p>Explore a programação por semana, atividade e equipe com indicadores consolidados.</p></div>
         <div class="page-actions"><button id="refreshReports" class="ghost-btn">↻ Atualizar</button><button id="exportReportsPdf" class="primary-btn">⇩ Exportar PDF</button></div>
       </div>
       <div class="filters card report-filters">
@@ -583,6 +580,8 @@
             <label>Cor de destaque<input id="settingsAccentColor" type="color"></label>
             <label>Cor do cabeçalho<input id="settingsHeaderColor" type="color"></label>
             <label>Cor de fundo<input id="settingsBgColor" type="color"></label>
+            <label>Gráfico — previsto<input id="settingsChartPlanned" type="color"></label>
+            <label>Gráfico — realizado<input id="settingsChartDone" type="color"></label>
           </div>
           <div class="settings-actions"><button id="resetSettingsBtn" type="button" class="secondary-btn">Restaurar padrão</button><button id="saveSettingsBtn" type="button" class="primary-btn">Salvar configurações</button></div>
           <p id="settingsMessage" class="form-message"></p>
@@ -611,7 +610,7 @@
           <div class="info-row"><span>Nome</span><strong id="profileName2">—</strong></div>
           <div class="info-row"><span>Identificador</span><strong id="profileBadge2">—</strong></div>
           <div class="info-row"><span>Perfil de acesso</span><strong id="profileRole2">—</strong></div>
-          <div class="info-row profile-week-row"><span>Semana atual</span><label class="profile-week-control"><select id="profileWeekSelect" aria-label="Semana atual"></select><small>Esta semana será usada no Dashboard.</small></label></div>
+          <div class="info-row profile-week-row"><span>Semana atual</span><label class="profile-week-control"><input id="profileWeekInput" type="text" inputmode="text" maxlength="5" placeholder="W136" aria-label="Semana atual"><small id="profileWeekHelp">Defina a semana atual no padrão W###. Ela será usada no Dashboard.</small></label></div>
           <button id="logoutBtn" class="logout-btn">Sair da conta</button>
         </section>
       </div>

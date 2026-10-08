@@ -352,3 +352,33 @@ tbody td{padding:10px 9px;border-bottom:1px solid #eef2f6;vertical-align:middle;
 .profile-week-control { display:flex; flex-direction:column; gap:5px; min-width:180px; }
 .profile-week-control select { width:100%; min-height:40px; border:1px solid var(--sys-border,#dce4ed); border-radius:10px; padding:0 12px; background:#fff; color:var(--sys-text,#142033); font:inherit; }
 .profile-week-control small { color:#718096; font-size:11px; line-height:1.35; }
+
+/* PLANNING PRO — dashboard/report refresh */
+.dashboard-grid-main{grid-template-columns:minmax(0,1.7fr) minmax(280px,.75fr);align-items:stretch}
+.dashboard-grid-secondary{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:14px}
+.dashboard-main-chart,.dashboard-detail-card{min-height:280px}
+.dashboard-detail-card{padding:17px}
+.week-bar{border-radius:7px 7px 2px 2px;transform-origin:bottom;animation:barRise .7s cubic-bezier(.2,.8,.2,1) both;box-shadow:0 5px 12px rgba(15,35,60,.10)}
+.week-bar.done{animation-delay:.12s}
+.progress-ring{animation:ringIn .8s ease-out both}
+.breakdown-row{animation:fadeSlide .45s ease both}
+.breakdown-row:nth-child(2){animation-delay:.06s}.breakdown-row:nth-child(3){animation-delay:.12s}.breakdown-row:nth-child(4){animation-delay:.18s}
+.breakdown-progress{position:relative;overflow:hidden}.breakdown-progress i,.breakdown-progress b{display:block;height:100%;border-radius:99px;transition:width .7s cubic-bezier(.2,.8,.2,1)}
+.team-breakdown-row .breakdown-progress{background:#edf1f5}.team-breakdown-row .breakdown-progress b{position:absolute;left:0;top:0}
+.report-filters{padding:14px;box-shadow:var(--shadow);background:linear-gradient(180deg,#fff,#fbfcfe)}
+.report-filters .select-field{min-width:0}
+.reports-grid{grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:14px}
+.report-chart-card{padding:17px;min-height:260px}
+.report-wide{grid-column:1/-1;min-height:300px}
+.report-bars{display:flex;flex-direction:column;gap:12px;margin-top:12px}
+.report-bar-row,.breakdown-row{border:1px solid #edf1f5;border-radius:12px;padding:11px;background:#fbfcfe}
+.report-bar-track{height:9px;background:#edf1f5;border-radius:99px;position:relative;overflow:hidden;margin-top:8px}.report-bar-track i,.report-bar-track b{position:absolute;left:0;top:0;height:100%;border-radius:99px;transition:width .8s cubic-bezier(.2,.8,.2,1)}
+.report-bar-track i{background:var(--sys-primary)}.report-bar-track b{background:var(--sys-accent)}
+.settings-color-grid{grid-template-columns:repeat(3,1fr)}
+.profile-week-control input{display:block;width:150px;margin-top:6px;border:1px solid #d9e2ec;border-radius:10px;padding:10px 11px;background:#fff;font-size:11px;color:var(--text);outline:none;text-transform:uppercase}
+.profile-week-control input:disabled{background:#f3f6fa;color:#657489;cursor:not-allowed}
+@keyframes barRise{from{transform:scaleY(0);opacity:.25}to{transform:scaleY(1);opacity:1}}
+@keyframes ringIn{from{transform:scale(.84);opacity:.2}to{transform:scale(1);opacity:1}}
+@keyframes fadeSlide{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:900px){.dashboard-grid-main,.dashboard-grid-secondary,.reports-grid{grid-template-columns:1fr}.report-wide{grid-column:auto}.settings-color-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:560px){.settings-color-grid{grid-template-columns:1fr}.dashboard-main-chart,.dashboard-detail-card{min-height:240px}}

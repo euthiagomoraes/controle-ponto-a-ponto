@@ -60,6 +60,8 @@ const state = {
     accent: "#12a66a",
     header: "#07111f",
     background: "#f6f8fb",
+    chartPlanned: "#0b5cff",
+    chartDone: "#12a66a",
     logo: ""
   },
   dashboardSeed: [
@@ -364,6 +366,7 @@ function showAppForRole(role) {
   $("appShell")?.classList.remove("hidden");
   $("adminNav")?.classList.toggle("hidden", role !== "admin");
   $("techNav")?.classList.toggle("hidden", role !== "technician");
+  document.querySelectorAll(".admin-only").forEach(el => el.classList.toggle("hidden", role !== "admin"));
 
   if ($("roleBadge")) $("roleBadge").textContent = ROLE_LABELS[role] || role;
   if ($("sidebarRoleText")) $("sidebarRoleText").textContent = role === "admin" ? "Painel administrativo" : "Operação de campo";
@@ -643,24 +646,32 @@ function setupProfile() {
   $("profileRole2") && ($("profileRole2").textContent = user.perfil || ROLE_LABELS[user.role] || "—");
   const activeWeek = activeDashboardWeek();
   $("profileWeek") && ($("profileWeek").textContent = activeWeek);
-  const weekSelect = $("profileWeekSelect");
-  if (weekSelect) {
-    const weeks = [...new Set([
-      activeWeek,
-      currentWeek(),
-      ...state.weeks.map(w => normalizeWeek(w.semana || w.week || w)),
-      ...state.programacoes.map(p => normalizeWeek(p.week)).filter(Boolean),
-      ...state.rows.map(r => normalizeWeek(r.Week)).filter(Boolean)
-    ])].filter(Boolean).sort((a,b) => weekToNumber(a)-weekToNumber(b));
-    weekSelect.innerHTML = weeks.map(w => `<option value="${escapeHTML(w)}">${escapeHTML(w)}</option>`).join("");
-    weekSelect.value = activeWeek;
-    weekSelect.onchange = () => {
-      setActiveDashboardWeek(weekSelect.value);
-      $("profileWeek") && ($("profileWeek").textContent = activeDashboardWeek());
-      if (state.role === "admin") renderDashboard();
-      else if ($("currentWeek")) $("currentWeek").textContent = activeDashboardWeek();
-      toast(`Semana atual definida como ${activeDashboardWeek()}.`);
-    };
+  const weekInput = $("profileWeekInput");
+  if (weekInput) {
+    weekInput.value = activeWeek;
+    const admin = state.role === "admin";
+    weekInput.readOnly = !admin;
+    weekInput.disabled = !admin;
+    $("profileWeekHelp") && ($("profileWeekHelp").textContent = admin ? "Informe manualmente no padrão W###. Ex.: W136." : "Semana atual definida pelo Administrador.");
+    if (!weekInput.dataset.bound) {
+      weekInput.dataset.bound = "1";
+      weekInput.addEventListener("input", () => {
+        if (state.role !== "admin") return;
+        let value = String(weekInput.value || "").toUpperCase().replace(/[^W0-9]/g, "");
+        if (value && !value.startsWith("W")) value = "W" + value;
+        value = value.slice(0, 5);
+        weekInput.value = value;
+      });
+      weekInput.addEventListener("change", () => {
+        if (state.role !== "admin") return;
+        const normalized = normalizeWeek(weekInput.value);
+        if (!/^W\d{3}$/.test(normalized)) { weekInput.value = activeDashboardWeek(); toast("Informe a semana no formato W###."); return; }
+        setActiveDashboardWeek(normalized);
+        $("profileWeek") && ($("profileWeek").textContent = normalized);
+        renderDashboard();
+        toast(`Semana atual definida como ${normalized}.`);
+      });
+    }
   }
   $("roleBadge") && ($("roleBadge").textContent = ROLE_LABELS[user.role] || user.role || "—");
   $("sidebarRoleText") && ($("sidebarRoleText").textContent = user.role === "admin" ? "Painel administrativo" : "Operação de campo");
@@ -718,7 +729,9 @@ function setupSettings() {
     settingsPrimaryColor: "primary",
     settingsAccentColor: "accent",
     settingsHeaderColor: "header",
-    settingsBgColor: "background"
+    settingsBgColor: "background",
+    settingsChartPlanned: "chartPlanned",
+    settingsChartDone: "chartDone"
   };
 
   Object.entries(colorMap).forEach(([id, key]) => {
@@ -768,7 +781,9 @@ function setupSettings() {
         primary: $("settingsPrimaryColor")?.value || state.settings.primary,
         accent: $("settingsAccentColor")?.value || state.settings.accent,
         header: $("settingsHeaderColor")?.value || state.settings.header,
-        background: $("settingsBgColor")?.value || state.settings.background
+        background: $("settingsBgColor")?.value || state.settings.background,
+        chartPlanned: $("settingsChartPlanned")?.value || state.settings.chartPlanned,
+        chartDone: $("settingsChartDone")?.value || state.settings.chartDone
       };
       persistSettings();
       if ($("settingsMessage")) {
@@ -2896,6 +2911,15 @@ function dashboardData() {
     activityMap.get("ppa").done = executionRowsForWeek(filters.week || activeDashboardWeek(), "ppa", filters.team).length;
   }
 
+  const teamMap = new Map();
+  state.programacoes.filter(p => normalizeWeek(p.week) === activeDashboardWeek()).forEach(p => {
+    const name = p.team || "Sem equipe";
+    const x = teamMap.get(name) || { name, planned: 0, done: 0 };
+    x.planned += Number(p.qty || 1);
+    teamMap.set(name, x);
+  });
+  teamMap.forEach((x, name) => { x.done = executionRowsForWeek(activeDashboardWeek(), "", name).length; x.pct = x.planned ? Math.round(x.done / x.planned * 100) : 0; });
+
   return {
     filters,
     weeks: selectedWeeks,
@@ -2906,7 +2930,8 @@ function dashboardData() {
     rate,
     breakdown: [...activityMap.entries()]
       .filter(([, value]) => value.planned || value.done)
-      .map(([id, value]) => ({ id, ...value, pct: value.planned ? Math.round(value.done / value.planned * 100) : 0 }))
+      .map(([id, value]) => ({ id, ...value, pct: value.planned ? Math.round(value.done / value.planned * 100) : 0 })),
+    teams: [...teamMap.values()].sort((a,b) => b.planned - a.planned)
   };
 }
 
@@ -2926,7 +2951,7 @@ function renderDashboard() {
   setText("ringDone", data.done);
   setText("ringPending", data.balance);
 
-  if ($("progressRing")) $("progressRing").style.background = `conic-gradient(var(--sys-accent) ${pct * 3.6}deg, #e7edf4 0deg)`;
+  if ($("progressRing")) $("progressRing").style.background = `conic-gradient(${currentSettings().chartDone} ${pct * 3.6}deg, #e7edf4 0deg)`;
 
   const maxValue = Math.max(1, ...data.chart.flatMap(item => [item.planned, item.done]));
   if ($("weeklyBars")) {
@@ -2936,7 +2961,7 @@ function renderDashboard() {
           const doneHeight = Math.max(4, Math.round(item.done / maxValue * 150));
           return `<div class="week-bar-group">
             <div class="week-bar-values"><span>${item.planned}</span><span>${item.done}</span></div>
-            <div class="week-bar-track"><i class="week-bar planned" style="height:${plannedHeight}px"></i><i class="week-bar done" style="height:${doneHeight}px"></i></div>
+            <div class="week-bar-track"><i class="week-bar planned" style="height:${plannedHeight}px;background:${currentSettings().chartPlanned}"></i><i class="week-bar done" style="height:${doneHeight}px;background:${currentSettings().chartDone}"></i></div>
             <small>${escapeHTML(item.week)}</small>
           </div>`;
         }).join("")
@@ -2951,6 +2976,11 @@ function renderDashboard() {
           <div class="breakdown-progress"><i style="width:${Math.min(item.pct, 100)}%"></i></div>
         </div>`).join("")
       : `<div class="empty-state inline"><strong>Nenhuma atividade encontrada.</strong><span>Ajuste os filtros ou importe uma programação.</span></div>`;
+  }
+
+  if ($("dashboardTeamRows")) {
+    const maxTeam = Math.max(1, ...data.teams.map(x => x.planned));
+    $("dashboardTeamRows").innerHTML = data.teams.length ? data.teams.map(x => `<div class="breakdown-row team-breakdown-row"><div class="breakdown-main"><span class="activity-color-dot team-dot"></span><strong>${escapeHTML(x.name)}</strong></div><div class="breakdown-numbers"><span>${x.done}/${x.planned}</span><strong>${x.pct}%</strong></div><div class="breakdown-progress"><i style="width:${Math.min(100, Math.round(x.planned / maxTeam * 100))}%;background:${currentSettings().chartPlanned}"></i><b style="width:${Math.min(100, x.pct)}%;background:${currentSettings().chartDone}"></b></div></div>`).join("") : `<div class="empty-state inline"><strong>Nenhuma equipe encontrada.</strong></div>`;
   }
 
 }
