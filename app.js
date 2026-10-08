@@ -3439,6 +3439,17 @@ async function syncAll() {
    ========================= */
 
 function bindEvents() {
+  // Navegação principal — mantém telas, perfil e configurações acessíveis por perfil.
+  document.querySelectorAll("[data-screen]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      const screen = button.dataset.screen;
+      if (screen) nav(screen);
+      const sidebar = $("appSidebar");
+      if (sidebar && window.innerWidth <= 900) sidebar.classList.remove("mobile-open");
+    });
+  });
+
   document.querySelectorAll(".access-option").forEach(button => {
     button.addEventListener("click", () => showLogin(button.dataset.role));
   });
