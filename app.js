@@ -1325,23 +1325,62 @@ function nextWeekNumber() {
   return Math.max(currentWeekNumber(), ...(nums.length ? nums : [0])) + 1;
 }
 
-async function createWeek() {
+function openWeekModal() {
+  const modal = $("weekModal");
+  if (!modal) return;
+  const input = $("weekNumberInput");
+  const message = $("weekFormMessage");
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  if (input) {
+    input.value = nextWeekNumber();
+    window.setTimeout(() => input.focus(), 40);
+    input.select();
+  }
+  if (message) message.textContent = "";
+}
+
+function closeWeekModal() {
+  const modal = $("weekModal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+  $("weekForm")?.reset();
+  if ($("weekFormMessage")) $("weekFormMessage").textContent = "";
+}
+
+async function createWeek(event) {
+  event?.preventDefault?.();
   const sb = getSupabaseClient();
-  if (!sb) return toast("Supabase não está configurado.");
-  const raw = prompt("Número da semana. Exemplo: 137 ou W137", String(nextWeekNumber()));
-  if (raw === null) return;
-  const number = weekToNumber(raw);
-  if (!Number.isInteger(number) || number <= 0) return toast("Informe uma semana válida, por exemplo W137.");
+  if (!sb) {
+    if ($("weekFormMessage")) $("weekFormMessage").textContent = "Supabase não está configurado.";
+    return;
+  }
+  const number = Number($("weekNumberInput")?.value);
+  if (!Number.isInteger(number) || number <= 0 || number > 999) {
+    if ($("weekFormMessage")) $("weekFormMessage").textContent = "Informe um número de semana válido, entre 1 e 999.";
+    return;
+  }
   const semana = `W${number}`;
+  const existing = state.weeks.some(item => normalizeWeek(item.semana) === semana);
+  if (existing) {
+    if ($("weekFormMessage")) $("weekFormMessage").textContent = `${semana} já está cadastrada.`;
+    return;
+  }
   const { error } = await sb.from("tb_semanas").insert({ semana, ativa: true });
   if (error) {
-    if (String(error.code) === "23505") return toast(`${semana} já existe.`);
+    if (String(error.code) === "23505") {
+      if ($("weekFormMessage")) $("weekFormMessage").textContent = `${semana} já existe.`;
+      return;
+    }
     console.error(error);
-    return toast(error.message || "Não foi possível criar a semana.");
+    if ($("weekFormMessage")) $("weekFormMessage").textContent = error.message || "Não foi possível criar a semana.";
+    return;
   }
   await loadWeeks();
   setupProgrammingSelectors();
   if ($("programWeek")) $("programWeek").value = semana;
+  closeWeekModal();
   toast(`${semana} criada com sucesso.`);
 }
 
@@ -3404,7 +3443,11 @@ function bindEvents() {
   $("confirmDeleteModule") && ($("confirmDeleteModule").onclick = confirmDeleteActivity);
 
   $("newAccessBtn") && ($("newAccessBtn").onclick = () => openAccessModal());
-  $("newWeekBtn") && ($("newWeekBtn").onclick = createWeek);
+  $("newWeekBtn") && ($("newWeekBtn").onclick = openWeekModal);
+  $("closeWeekModal") && ($("closeWeekModal").onclick = closeWeekModal);
+  $("cancelWeekModal") && ($("cancelWeekModal").onclick = closeWeekModal);
+  $("weekModal .modal-backdrop") && ($("weekModal .modal-backdrop").onclick = closeWeekModal);
+  $("weekForm")?.addEventListener("submit", createWeek);
   $("closeAccessModal") && ($("closeAccessModal").onclick = closeAccessModal);
   $("cancelAccessModal") && ($("cancelAccessModal").onclick = closeAccessModal);
   $("accessModal .modal-backdrop") && ($("accessModal .modal-backdrop").onclick = closeAccessModal);
@@ -3438,10 +3481,23 @@ function ensurePlanningSidebarBehavior() {
   toggle.onclick = event => {
     event.preventDefault();
     event.stopPropagation();
+    if (window.innerWidth <= 900) {
+      sidebar.classList.remove("mobile-open");
+      return;
+    }
     const next = !sidebar.classList.contains("collapsed");
     apply(next);
     localStorage.setItem("ppaSidebarCollapsed", next ? "1" : "0");
   };
+
+  const mobileBtn = $("mobileMenuBtn");
+  mobileBtn?.addEventListener("click", () => sidebar.classList.toggle("mobile-open"));
+  document.querySelectorAll(".nav-item").forEach(item => item.addEventListener("click", () => {
+    if (window.innerWidth <= 900) sidebar.classList.remove("mobile-open");
+  }));
+  window.addEventListener("resize", () => {
+    if (window.innerWidth > 900) sidebar.classList.remove("mobile-open");
+  });
 }
 
 function ensureNewProgrammingButton() {

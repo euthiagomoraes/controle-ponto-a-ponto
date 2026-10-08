@@ -124,10 +124,7 @@
         <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5v-15Z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20M8 7h8M8 11h6"/></svg></span><span class="nav-label">Atividades</span>
       </button>
       <button class="nav-item" data-screen="program-history" title="Histórico">
-        <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 5h16v15H4z"/><path d="M8 9h8M8 13h6M8 17h4"/><path d="M17 3v4"/></svg></span><span class="nav-label">Histórico de Programações</span>
-      </button>
-      <button class="nav-item" data-screen="configuracoes" title="Configurações">
-        <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19 13.5 1.5 1.2-1.7 3-1.8-.7a7.7 7.7 0 0 1-1.8 1l-.3 1.9h-3.4l-.3-1.9a7.7 7.7 0 0 1-1.8-1l-1.8.7-1.7-3L7 13.5a7.4 7.4 0 0 1 0-3L5.5 9.3l1.7-3 1.8.7a7.7 7.7 0 0 1 1.8-1l.3-1.9h3.4l.3 1.9a7.7 7.7 0 0 1 1.8 1l1.8-.7 1.7 3L19 10.5a7.4 7.4 0 0 1 0 3Z"/></svg></span><span class="nav-label">Configurações</span>
+        <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 5h16v15H4z"/><path d="M8 9h8M8 13h6M8 17h4"/><path d="M17 3v4"/></svg></span><span class="nav-label">Histórico</span>
       </button>
       <button class="nav-item" data-screen="acessos" title="Pessoas & Acessos">
         <span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0M16 11a3 3 0 1 0 0-6M15.5 14.5a5.5 5.5 0 0 1 5 5.5"/></svg></span><span class="nav-label">Pessoas & Acessos</span>
@@ -152,11 +149,17 @@
       </button>
     </nav>
 
-    <div class="sidebar-footer"><span class="online-dot"></span><span id="sidebarRoleText">Sistema online</span></div>
+    <div class="sidebar-footer">
+      <button class="nav-item sidebar-settings-btn" data-screen="configuracoes" title="Configurações" type="button">
+        <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19 13.5 1.5 1.2-1.7 3-1.8-.7-.3 1.9a7.7 7.7 0 0 1-1.8 1l-1.8-.7-1.7-3L7 13.5a7.4 7.4 0 0 1 0-3L5.5 9.3l1.7-3 1.8.7a7.7 7.7 0 0 1 1.8-1l.3-1.9h3.4l.3 1.9a7.7 7.7 0 0 1 1.8 1l1.8-.7 1.7 3L19 10.5a7.4 7.4 0 0 1 0 3Z"/></svg></span><span class="nav-label">Configurações</span>
+      </button>
+      <div class="sidebar-status"><span class="online-dot"></span><span id="sidebarRoleText">Sistema online</span></div>
+    </div>
   </aside>
 
   <main class="main-content">
     <header class="topbar">
+      <button id="mobileMenuBtn" class="mobile-menu-btn ghost-btn" type="button" aria-label="Abrir menu" title="Abrir menu">☰</button>
       <div>
         <p id="topbarEyebrow" class="eyebrow">CONTROLE OPERACIONAL</p>
         <h1 id="topbarTitle">DASHBOARD DE ATIVIDADES</h1>
@@ -802,6 +805,30 @@
       </label>
       <p id="accessFormMessage" class="form-message"></p>
       <div class="modal-actions"><button type="button" id="cancelAccessModal" class="secondary-btn">Cancelar</button><button type="submit" class="primary-btn">Salvar usuário</button></div>
+    </form>
+  </div>
+</div>
+
+<div id="weekModal" class="modal hidden" aria-hidden="true">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box program-modal week-modal">
+    <button id="closeWeekModal" class="modal-close" type="button" aria-label="Fechar">×</button>
+    <span class="section-kicker">PLANEJAMENTO & PROGRAMAÇÃO</span>
+    <h3 id="weekModalTitle">Nova semana</h3>
+    <p>Cadastre a semana que ficará disponível para lançamento de programações.</p>
+    <form id="weekForm" class="program-form">
+      <label>Semana
+        <div class="week-input-shell">
+          <span>W</span>
+          <input id="weekNumberInput" type="number" min="1" max="999" inputmode="numeric" placeholder="137" required autocomplete="off">
+        </div>
+        <small class="field-hint">Use somente o número. O sistema grava automaticamente no padrão W###.</small>
+      </label>
+      <div id="weekFormMessage" class="form-message"></div>
+      <div class="modal-actions">
+        <button type="button" id="cancelWeekModal" class="secondary-btn">Cancelar</button>
+        <button type="submit" class="primary-btn">Criar semana</button>
+      </div>
     </form>
   </div>
 </div>
