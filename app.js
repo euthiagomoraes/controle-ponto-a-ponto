@@ -239,6 +239,17 @@ function currentWeek() {
   return `W${currentWeekNumber()}`;
 }
 
+function activeDashboardWeek() {
+  const saved = normalizeWeek(localStorage.getItem("ppaCurrentWeek") || "");
+  return saved || currentWeek();
+}
+
+function setActiveDashboardWeek(value) {
+  const week = normalizeWeek(value);
+  if (!week || !/^W\d+$/.test(week)) return;
+  localStorage.setItem("ppaCurrentWeek", week);
+}
+
 function weekToNumber(value) {
   const match = String(value || "").trim().toUpperCase().match(/^W?(\d+)$/);
   return match ? Number(match[1]) : null;
@@ -630,7 +641,27 @@ function setupProfile() {
   $("profileBadge") && ($("profileBadge").textContent = user.email || user.identificador || "—");
   $("profileBadge2") && ($("profileBadge2").textContent = user.identificador || user.email || "—");
   $("profileRole2") && ($("profileRole2").textContent = user.perfil || ROLE_LABELS[user.role] || "—");
-  $("profileWeek") && ($("profileWeek").textContent = currentWeek());
+  const activeWeek = activeDashboardWeek();
+  $("profileWeek") && ($("profileWeek").textContent = activeWeek);
+  const weekSelect = $("profileWeekSelect");
+  if (weekSelect) {
+    const weeks = [...new Set([
+      activeWeek,
+      currentWeek(),
+      ...state.weeks.map(w => normalizeWeek(w.semana || w.week || w)),
+      ...state.programacoes.map(p => normalizeWeek(p.week)).filter(Boolean),
+      ...state.rows.map(r => normalizeWeek(r.Week)).filter(Boolean)
+    ])].filter(Boolean).sort((a,b) => weekToNumber(a)-weekToNumber(b));
+    weekSelect.innerHTML = weeks.map(w => `<option value="${escapeHTML(w)}">${escapeHTML(w)}</option>`).join("");
+    weekSelect.value = activeWeek;
+    weekSelect.onchange = () => {
+      setActiveDashboardWeek(weekSelect.value);
+      $("profileWeek") && ($("profileWeek").textContent = activeDashboardWeek());
+      if (state.role === "admin") renderDashboard();
+      else if ($("currentWeek")) $("currentWeek").textContent = activeDashboardWeek();
+      toast(`Semana atual definida como ${activeDashboardWeek()}.`);
+    };
+  }
   $("roleBadge") && ($("roleBadge").textContent = ROLE_LABELS[user.role] || user.role || "—");
   $("sidebarRoleText") && ($("sidebarRoleText").textContent = user.role === "admin" ? "Painel administrativo" : "Operação de campo");
 }
@@ -1626,10 +1657,11 @@ function programColumnsForModule(module) {
   const fixed = [
     { key: "week", label: "SEMANA", required: true },
     { key: "activity", label: "ATIVIDADE", required: true },
-    { key: "team", label: "EQUIPE", required: true },
-    { key: "note", label: "OBSERVAÇÃO", required: false }
+    { key: "team", label: "EQUIPE", required: true }
   ];
-  const custom = (module?.columns || []).filter(column => !["week", "date", "activity", "team", "responsible", "qty", "note"].includes(column.key));
+  const custom = (module?.columns || []).filter(column =>
+    !["week", "date", "activity", "team", "responsible", "qty", "note"].includes(column.key)
+  );
   return [...fixed, ...custom];
 }
 
@@ -2165,6 +2197,8 @@ function downloadProgramTemplate() {
   if (window.XLSX) {
     const sheet = XLSX.utils.aoa_to_sheet([headers, blank]);
     styleExcelTable(sheet, headers, 1);
+    sheet["!autofilter"] = { ref: `A1:${XLSX.utils.encode_col(headers.length - 1)}2` };
+    sheet["!ref"] = `A1:${XLSX.utils.encode_col(headers.length - 1)}2`;
     const info = XLSX.utils.aoa_to_sheet([
       ["Atividade", module.name],
       ["Instruções", "Não altere os cabeçalhos. Campos com * são obrigatórios."],
@@ -2471,7 +2505,7 @@ async function loadData() {
 }
 
 function populateFilters() {
-  const rows = state.rows.filter(row => normalizeWeek(row.Week) === currentWeek());
+  const rows = state.rows.filter(row => normalizeWeek(row.Week) === activeDashboardWeek());
   const sys = [...new Set(rows.map(row => String(row.SYS || "").trim()).filter(Boolean))].sort();
   const subsys = [...new Set(rows.map(row => String(row.SUBSYS || "").trim()).filter(Boolean))].sort();
 
@@ -2743,7 +2777,7 @@ async function registerSelectedPontos() {
 }
 
 function renderHistory() {
-  const rows = state.rows.filter(row => normalizeWeek(row.Week) === currentWeek());
+  const rows = state.rows.filter(row => normalizeWeek(row.Week) === activeDashboardWeek());
   const done = rows.filter(hasLog);
   $("historyDone") && ($("historyDone").textContent = done.length);
   $("historyPending") && ($("historyPending").textContent = rows.length - done.length);
@@ -2771,11 +2805,7 @@ function renderHistory() {
    ========================= */
 
 function dashboardFilterState() {
-  return {
-    week: $("dashboardWeekFilter")?.value || "",
-    activity: $("dashboardActivityFilter")?.value || "",
-    team: $("dashboardTeamFilter")?.value || ""
-  };
+  return { week: activeDashboardWeek(), activity: "", team: "" };
 }
 
 function setupDashboardFilters() {
@@ -2825,7 +2855,7 @@ function dashboardData() {
     ...state.dashboardSeed.map(item => normalizeWeek(item.week)),
     ...state.programacoes.map(item => normalizeWeek(item.week)),
     ...state.rows.map(item => normalizeWeek(item.Week)).filter(Boolean),
-    currentWeek()
+    activeDashboardWeek()
   ])].sort((a, b) => weekToNumber(a) - weekToNumber(b));
 
   const selectedWeeks = filters.week ? weeks.filter(week => week === filters.week) : weeks;
@@ -2863,7 +2893,7 @@ function dashboardData() {
     const item = activityMap.get(filters.activity);
     if (item) item.done = done;
   } else if (activityMap.has("ppa")) {
-    activityMap.get("ppa").done = executionRowsForWeek(filters.week || currentWeek(), "ppa", filters.team).length;
+    activityMap.get("ppa").done = executionRowsForWeek(filters.week || activeDashboardWeek(), "ppa", filters.team).length;
   }
 
   return {
@@ -2995,7 +3025,7 @@ function exportDashboardJPEG() {
 }
 
 function exportTechReportJPEG() {
-  const rows = state.rows.filter(row => normalizeWeek(row.Week) === currentWeek());
+  const rows = state.rows.filter(row => normalizeWeek(row.Week) === activeDashboardWeek());
   const done = rows.filter(hasLog).length;
   drawStationeryCanvas("PLANNING PRO", `Relatório de campo • ${currentWeek()}`, [{ label: "Total da semana", planned: rows.length, done, pending: Math.max(rows.length - done, 0), pct: rows.length ? Math.round(done / rows.length * 100) : 0 }], `campo-${currentWeek()}.jpg`);
 }
@@ -3134,9 +3164,9 @@ function exportDashboardPDF() {
 }
 
 function exportTechReportPDF() {
-  const rows = state.rows.filter(row => normalizeWeek(row.Week) === currentWeek());
+  const rows = state.rows.filter(row => normalizeWeek(row.Week) === activeDashboardWeek());
   const done = rows.filter(hasLog).length;
-  exportStyledPDF(`Relatório de campo • ${currentWeek()}`, [{ label: "Total da semana", planned: rows.length, done, pending: Math.max(rows.length - done, 0), pct: rows.length ? Math.round(done / rows.length * 100) : 0 }], `campo-${currentWeek()}.pdf`);
+  exportStyledPDF(`Relatório de campo • ${currentWeek()}`, [{ label: "Total da semana", planned: rows.length, done, pending: Math.max(rows.length - done, 0), pct: rows.length ? Math.round(done / rows.length * 100) : 0 }], `campo-${activeDashboardWeek()}.pdf`);
 }
 
 /* =========================
@@ -3367,7 +3397,7 @@ async function syncAll() {
     }
 
     if ($("currentDateTime")) $("currentDateTime").textContent = nowBR();
-    if ($("currentWeek")) $("currentWeek").textContent = currentWeek();
+    if ($("currentWeek")) $("currentWeek").textContent = activeDashboardWeek();
   } catch (error) {
     console.error("Erro na sincronização:", error);
     toast(error?.message || "Não foi possível sincronizar todos os dados.");
@@ -3461,9 +3491,6 @@ function bindEvents() {
   $("editActivityBtn") && ($("editActivityBtn").onclick = () => openActivityModal(state.selectedModuleId));
   $("deleteActivityBtn") && ($("deleteActivityBtn").onclick = deleteActivity);
   $("newColumnBtn") && ($("newColumnBtn").onclick = () => openColumnModal());
-  $("exportModuleMaskBtn") && ($("exportModuleMaskBtn").onclick = exportModuleMask);
-  $("importModuleMaskBtn") && ($("importModuleMaskBtn").onclick = triggerModuleImport);
-  $("moduleExcelInput")?.addEventListener("change", event => importModuleFile(event.target.files?.[0]));
 
   $("closeActivityModal") && ($("closeActivityModal").onclick = closeActivityModal);
   $("cancelActivityModal") && ($("cancelActivityModal").onclick = closeActivityModal);
@@ -3503,9 +3530,6 @@ function bindEvents() {
   $("generateAccessCodeBtn") && ($("generateAccessCodeBtn").onclick = () => { if ($("accessCodeInput")) $("accessCodeInput").value = randomAccessCode(); });
   $("accessSearch")?.addEventListener("input", renderAccesses);
 
-  $("dashboardWeekFilter") && ($("dashboardWeekFilter").onchange = renderDashboard);
-  $("dashboardActivityFilter") && ($("dashboardActivityFilter").onchange = renderDashboard);
-  $("dashboardTeamFilter") && ($("dashboardTeamFilter").onchange = renderDashboard);
   $("reportWeekFilter") && ($("reportWeekFilter").onchange = renderReports);
   $("reportActivityFilter") && ($("reportActivityFilter").onchange = renderReports);
   $("reportTeamFilter") && ($("reportTeamFilter").onchange = renderReports);
@@ -3641,7 +3665,7 @@ async function init() {
   bindEvents();
 
   if ($("currentDateTime")) $("currentDateTime").textContent = nowBR();
-  if ($("currentWeek")) $("currentWeek").textContent = currentWeek();
+  if ($("currentWeek")) $("currentWeek").textContent = activeDashboardWeek();
   setColumnViewMode(state.columnViewMode);
 
   const sb = getSupabaseClient();
@@ -3680,7 +3704,7 @@ async function init() {
 
 setInterval(() => {
   if ($("currentDateTime")) $("currentDateTime").textContent = nowBR();
-  if ($("currentWeek")) $("currentWeek").textContent = currentWeek();
+  if ($("currentWeek")) $("currentWeek").textContent = activeDashboardWeek();
 }, 1000);
 
 init().catch(error => {

@@ -42,6 +42,7 @@ const state = {
   rows: [],
   programacoes: [],
   teams: [],
+  weeks: [],
   peopleRecords: [],
   accesses: [],
   moduleCatalog: [],
@@ -238,6 +239,17 @@ function currentWeek() {
   return `W${currentWeekNumber()}`;
 }
 
+function activeDashboardWeek() {
+  const saved = normalizeWeek(localStorage.getItem("ppaCurrentWeek") || "");
+  return saved || currentWeek();
+}
+
+function setActiveDashboardWeek(value) {
+  const week = normalizeWeek(value);
+  if (!week || !/^W\d+$/.test(week)) return;
+  localStorage.setItem("ppaCurrentWeek", week);
+}
+
 function weekToNumber(value) {
   const match = String(value || "").trim().toUpperCase().match(/^W?(\d+)$/);
   return match ? Number(match[1]) : null;
@@ -293,7 +305,7 @@ function currentTeamName() {
 }
 
 function teamByName(name) {
-  return state.teams.find(t => String(t.name || t.nome).toLowerCase() === String(name || "").toLowerCase()) || null;
+  return state.teams.find(t => String(t.nome || t.name).toLowerCase() === String(name || "").toLowerCase()) || null;
 }
 
 function personByName(name) {
@@ -369,6 +381,7 @@ function showAppForRole(role) {
   }
 
   setupProfile();
+  enhancePlanningUI();
 }
 
 async function loginAdmin(email, password) {
@@ -426,29 +439,23 @@ async function loginTechnician(code) {
   if (dbEnabled()) {
     try {
       const sb = getSupabaseClient();
-      const { data: pessoa, error } = await sb
-        .from("tb_pessoas")
-        .select("id,nome,cracha,perfil,ativo,auth_user_id,equipe_id,disciplina")
-        .eq("cracha", normalizedCode)
-        .eq("ativo", true)
-        .limit(1)
-        .maybeSingle();
-
+      const { data: pessoa, error } = await sb.rpc("login_tecnico_por_cracha", { p_cracha: normalizedCode });
       if (error) throw error;
+      const pessoaRecord = Array.isArray(pessoa) ? pessoa[0] : pessoa;
 
-      if (!pessoa || pessoa.perfil === "ADMINISTRADOR") {
+      if (!pessoaRecord || pessoaRecord.perfil === "ADMINISTRADOR") {
         throw new Error("Código não encontrado, inativo ou sem permissão de técnico.");
       }
 
-      const team = state.teams.find(t => t.id === pessoa.equipe_id);
+      const team = state.teams.find(t => t.id === pessoaRecord.equipe_id);
       state.currentUser = {
-        id: pessoa.id,
-        authUserId: pessoa.auth_user_id,
-        nome: pessoa.nome,
-        identificador: pessoa.cracha,
-        perfil: pessoa.perfil,
-        disciplina: pessoa.disciplina,
-        equipeId: pessoa.equipe_id,
+        id: pessoaRecord.id,
+        authUserId: pessoaRecord.auth_user_id,
+        nome: pessoaRecord.nome,
+        identificador: pessoaRecord.cracha,
+        perfil: pessoaRecord.perfil,
+        disciplina: pessoaRecord.disciplina,
+        equipeId: pessoaRecord.equipe_id,
         team: team?.nome || "",
         role: "technician"
       };
@@ -495,6 +502,7 @@ function nav(screen) {
     "program-history",
     "atividades",
     "acessos",
+    "relatorios",
     "configuracoes",
     "profile"
   ];
@@ -515,7 +523,9 @@ function nav(screen) {
   if (screen === "program-history") renderProgramHistory();
   if (screen === "atividades") renderModules();
   if (screen === "acessos") renderAccesses();
+  if (screen === "relatorios") renderReports();
   if (screen === "configuracoes") setupSettings();
+  if (screen === "profile") hydrateProfileUI();
   if (screen === "history") renderHistory();
 }
 
@@ -579,6 +589,40 @@ async function loadAuthenticatedProfile() {
   }
 }
 
+function hydrateProfileUI() {
+  let user = state.currentUser;
+  if (!user) {
+    try {
+      const cached = JSON.parse(sessionStorage.getItem("ppaSession") || "null");
+      if (cached) user = cached;
+    } catch {}
+  }
+  if (!user) return;
+
+  state.currentUser = user;
+  setupProfile();
+
+  const profileInfo = document.querySelector("#screen-profile .profile-info");
+  if (!profileInfo) return;
+
+  const rows = [
+    ["E-mail", user.email || "—"],
+    ["Equipe", user.team || currentTeamName() || "—"],
+    ["Disciplina", user.disciplina || "—"]
+  ];
+
+  rows.forEach(([label, value]) => {
+    let row = profileInfo.querySelector(`[data-profile-extra="${makeKey(label)}"]`);
+    if (!row) {
+      row = document.createElement("div");
+      row.className = "info-row profile-extra-row";
+      row.dataset.profileExtra = makeKey(label);
+      profileInfo.insertBefore(row, $("logoutBtn"));
+    }
+    row.innerHTML = `<span>${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong>`;
+  });
+}
+
 function setupProfile() {
   const user = state.currentUser;
   if (!user) return;
@@ -597,7 +641,29 @@ function setupProfile() {
   $("profileBadge") && ($("profileBadge").textContent = user.email || user.identificador || "—");
   $("profileBadge2") && ($("profileBadge2").textContent = user.identificador || user.email || "—");
   $("profileRole2") && ($("profileRole2").textContent = user.perfil || ROLE_LABELS[user.role] || "—");
-  $("profileWeek") && ($("profileWeek").textContent = currentWeek());
+  const activeWeek = activeDashboardWeek();
+  $("profileWeek") && ($("profileWeek").textContent = activeWeek);
+  const weekSelect = $("profileWeekSelect");
+  if (weekSelect) {
+    const weeks = [...new Set([
+      activeWeek,
+      currentWeek(),
+      ...state.weeks.map(w => normalizeWeek(w.semana || w.week || w)),
+      ...state.programacoes.map(p => normalizeWeek(p.week)).filter(Boolean),
+      ...state.rows.map(r => normalizeWeek(r.Week)).filter(Boolean)
+    ])].filter(Boolean).sort((a,b) => weekToNumber(a)-weekToNumber(b));
+    weekSelect.innerHTML = weeks.map(w => `<option value="${escapeHTML(w)}">${escapeHTML(w)}</option>`).join("");
+    weekSelect.value = activeWeek;
+    weekSelect.onchange = () => {
+      setActiveDashboardWeek(weekSelect.value);
+      $("profileWeek") && ($("profileWeek").textContent = activeDashboardWeek());
+      if (state.role === "admin") renderDashboard();
+      else if ($("currentWeek")) $("currentWeek").textContent = activeDashboardWeek();
+      toast(`Semana atual definida como ${activeDashboardWeek()}.`);
+    };
+  }
+  $("roleBadge") && ($("roleBadge").textContent = ROLE_LABELS[user.role] || user.role || "—");
+  $("sidebarRoleText") && ($("sidebarRoleText").textContent = user.role === "admin" ? "Painel administrativo" : "Operação de campo");
 }
 
 /* =========================
@@ -1269,6 +1335,83 @@ function renderMaskPreview(module) {
 }
 
 /* =========================
+   WEEKS
+   ========================= */
+
+async function loadWeeks() {
+  const sb = getSupabaseClient();
+  if (!sb) { state.weeks = []; return false; }
+  const { data, error } = await sb.from("tb_semanas").select("id,semana,ativa,created_at").eq("ativa", true).order("semana");
+  if (error) { console.error("Erro ao carregar semanas:", error); state.weeks = []; return false; }
+  state.weeks = data || [];
+  return true;
+}
+
+function nextWeekNumber() {
+  const nums = state.weeks.map(item => weekToNumber(item.semana)).filter(Number.isFinite);
+  return Math.max(currentWeekNumber(), ...(nums.length ? nums : [0])) + 1;
+}
+
+function openWeekModal() {
+  const modal = $("weekModal");
+  if (!modal) return;
+  const input = $("weekNumberInput");
+  const message = $("weekFormMessage");
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  if (input) {
+    input.value = nextWeekNumber();
+    window.setTimeout(() => input.focus(), 40);
+    input.select();
+  }
+  if (message) message.textContent = "";
+}
+
+function closeWeekModal() {
+  const modal = $("weekModal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+  $("weekForm")?.reset();
+  if ($("weekFormMessage")) $("weekFormMessage").textContent = "";
+}
+
+async function createWeek(event) {
+  event?.preventDefault?.();
+  const sb = getSupabaseClient();
+  if (!sb) {
+    if ($("weekFormMessage")) $("weekFormMessage").textContent = "Supabase não está configurado.";
+    return;
+  }
+  const number = Number($("weekNumberInput")?.value);
+  if (!Number.isInteger(number) || number <= 0 || number > 999) {
+    if ($("weekFormMessage")) $("weekFormMessage").textContent = "Informe um número de semana válido, entre 1 e 999.";
+    return;
+  }
+  const semana = `W${number}`;
+  const existing = state.weeks.some(item => normalizeWeek(item.semana) === semana);
+  if (existing) {
+    if ($("weekFormMessage")) $("weekFormMessage").textContent = `${semana} já está cadastrada.`;
+    return;
+  }
+  const { error } = await sb.from("tb_semanas").insert({ semana, ativa: true });
+  if (error) {
+    if (String(error.code) === "23505") {
+      if ($("weekFormMessage")) $("weekFormMessage").textContent = `${semana} já existe.`;
+      return;
+    }
+    console.error(error);
+    if ($("weekFormMessage")) $("weekFormMessage").textContent = error.message || "Não foi possível criar a semana.";
+    return;
+  }
+  await loadWeeks();
+  setupProgrammingSelectors();
+  if ($("programWeek")) $("programWeek").value = semana;
+  closeWeekModal();
+  toast(`${semana} criada com sucesso.`);
+}
+
+/* =========================
    TEAMS / PEOPLE
    ========================= */
 
@@ -1369,7 +1512,7 @@ function renderAccesses() {
 }
 
 function populateTeamSelectors() {
-  const teamOptions = state.teams.map(team => `<option value="${escapeHTML(team.name)}">${escapeHTML(team.name)}</option>`).join("");
+  const teamOptions = [...state.teams].sort((a,b)=>String(a.nome||"").localeCompare(String(b.nome||""),"pt-BR",{numeric:true,sensitivity:"base"})).map(team => `<option value="${escapeHTML(team.nome)}">${escapeHTML(team.nome)}</option>`).join("");
   if ($("accessTeamInput")) $("accessTeamInput").innerHTML = teamOptions;
 }
 
@@ -1463,7 +1606,8 @@ async function saveAccess() {
    ========================= */
 
 function weekOptions() {
-  const weeks = new Set([currentWeek()]);
+  const weeks = new Set(state.weeks.map(item => normalizeWeek(item.semana)));
+  weeks.add(currentWeek());
   state.dashboardSeed.forEach(item => weeks.add(normalizeWeek(item.week)));
   state.programacoes.forEach(item => weeks.add(normalizeWeek(item.week)));
   state.rows.forEach(item => {
@@ -1478,78 +1622,47 @@ function weekOptions() {
 }
 
 function setupProgrammingSelectors() {
-  const selectedWeek = $("programWeekFilter")?.value || "";
-  const selectedActivity = $("programActivityFilter")?.value || "";
-  const selectedTeam = $("programTeamFilter")?.value || "";
-  const selectedResponsible = $("programResponsible")?.value || "";
+  const currentWeekValue = normalizeWeek($("programWeek")?.value) || currentWeek();
+  const currentActivity = $("programActivity")?.value || "";
+  const currentTeam = $("programTeam")?.value || "";
   const weeks = weekOptions();
-
-  if ($("programWeekFilter")) {
-    $("programWeekFilter").innerHTML = `<option value="">Todas</option>${weeks}`;
-    if ([...$("programWeekFilter").options].some(option => option.value === selectedWeek)) $("programWeekFilter").value = selectedWeek;
-  }
 
   if ($("programWeek")) {
     $("programWeek").innerHTML = weeks;
-    $("programWeek").value = currentWeek();
-  }
-
-  if ($("programActivityFilter")) {
-    $("programActivityFilter").innerHTML = `<option value="">Todas</option>` + state.moduleCatalog.map(module => `<option value="${escapeHTML(module.id)}">${escapeHTML(module.name)}</option>`).join("");
-    if ([...$("programActivityFilter").options].some(option => option.value === selectedActivity)) $("programActivityFilter").value = selectedActivity;
+    $("programWeek").value = [...$("programWeek").options].some(o => o.value === currentWeekValue) ? currentWeekValue : currentWeek();
   }
 
   if ($("programActivity")) {
     $("programActivity").innerHTML = state.moduleCatalog.map(module => `<option value="${escapeHTML(module.id)}">${escapeHTML(module.name)}</option>`).join("");
-    if (!$("programActivity").value && state.moduleCatalog[0]) $("programActivity").value = state.moduleCatalog[0].id;
-  }
-
-  if ($("programTeamFilter")) {
-    $("programTeamFilter").innerHTML = `<option value="">Todas</option>` + state.teams.map(team => `<option value="${escapeHTML(team.nome)}">${escapeHTML(team.nome)}</option>`).join("");
-    if ([...$("programTeamFilter").options].some(option => option.value === selectedTeam)) $("programTeamFilter").value = selectedTeam;
+    if ([...$("programActivity").options].some(o => o.value === currentActivity)) $("programActivity").value = currentActivity;
+    else if (state.moduleCatalog[0]) $("programActivity").value = state.moduleCatalog[0].id;
   }
 
   if ($("programTeam")) {
-    $("programTeam").innerHTML = state.teams.map(team => `<option value="${escapeHTML(team.nome)}">${escapeHTML(team.nome)}</option>`).join("");
-    if (state.teams.length && !$("programTeam").value) $("programTeam").value = state.teams[0].nome;
-  }
-
-  if ($("programResponsible")) {
-    const technicians = state.peopleRecords.filter(person => person.ativo && person.perfil !== "ADMINISTRADOR");
-    $("programResponsible").innerHTML = technicians.map(person => `<option value="${escapeHTML(person.nome)}">${escapeHTML(person.nome)}</option>`).join("");
-    if ([...$("programResponsible").options].some(option => option.value === selectedResponsible)) $("programResponsible").value = selectedResponsible;
+    const teams = [...state.teams].sort((a, b) => String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR", { numeric: true, sensitivity: "base" }));
+    $("programTeam").innerHTML = `<option value="">Selecione a equipe</option>` + teams.map(team => `<option value="${escapeHTML(team.nome)}">${escapeHTML(team.nome)}</option>`).join("");
+    if ([...$("programTeam").options].some(o => o.value === currentTeam)) $("programTeam").value = currentTeam;
   }
 }
 
 function filteredProgramacoes() {
-  const week = $("programWeekFilter")?.value || "";
-  const activity = $("programActivityFilter")?.value || "";
-  const team = $("programTeamFilter")?.value || "";
-  return state.programacoes
-    .filter(program =>
-      (!week || normalizeWeek(program.week) === normalizeWeek(week)) &&
-      (!activity || program.activity === activity) &&
-      (!team || program.team === team)
-    )
-    .sort((a, b) => `${a.date || ""}-${a.team || ""}`.localeCompare(`${b.date || ""}-${b.team || ""}`));
+  return [...state.programacoes].sort((a, b) => {
+    const aw = weekToNumber(a.week), bw = weekToNumber(b.week);
+    if (aw !== bw) return aw - bw;
+    return `${a.activity || ""}-${a.team || ""}`.localeCompare(`${b.activity || ""}-${b.team || ""}`, "pt-BR");
+  });
 }
 
 function programColumnsForModule(module) {
   const fixed = [
     { key: "week", label: "SEMANA", required: true },
-    { key: "date", label: "DATA", required: true },
     { key: "activity", label: "ATIVIDADE", required: true },
-    { key: "team", label: "EQUIPE", required: true },
-    { key: "responsible", label: "RESPONSÁVEL", required: true },
-    { key: "qty", label: "QTD.", required: true },
-    { key: "note", label: "OBSERVAÇÃO", required: false }
+    { key: "team", label: "EQUIPE", required: true }
   ];
-  const custom = (module?.columns || []).filter(column => !["week", "date", "activity", "team", "responsible", "qty", "note"].includes(column.key));
+  const custom = (module?.columns || []).filter(column =>
+    !["week", "date", "activity", "team", "responsible", "qty", "note"].includes(column.key)
+  );
   return [...fixed, ...custom];
-}
-
-function getPlanningColumnValue(column, row) {
-  return row?.customData?.[column.key] ?? "";
 }
 
 function renderProgramCustomFields(activityId, values = {}) {
@@ -1579,17 +1692,14 @@ function renderProgramCustomFields(activityId, values = {}) {
 function renderProgramacao() {
   setupProgrammingSelectors();
   const rows = filteredProgramacoes();
-  const selectedActivity = $("programActivityFilter")?.value || "";
-  const module = selectedActivity ? moduleById(selectedActivity) : null;
+  const selectedActivity = $("programActivity")?.value || "";
+  const module = moduleById(selectedActivity);
   const customColumns = module?.columns?.filter(column => !["week", "date", "activity", "team", "responsible", "qty", "note"].includes(column.key)) || [];
 
   $("programCount") && ($("programCount").textContent = rows.length);
-  $("programQuantity") && ($("programQuantity").textContent = rows.reduce((sum, row) => sum + Number(row.qty || 0), 0));
 
   const table = $("programTableBody")?.closest("table");
-  if (table) {
-    table.querySelector("thead tr").innerHTML = `<th>SEMANA</th><th>DATA</th><th>ATIVIDADE</th><th>EQUIPE</th><th>RESPONSÁVEL</th><th>QTD.</th>${customColumns.map(column => `<th>${escapeHTML(column.label)}</th>`).join("")}<th>OBSERVAÇÃO</th><th></th>`;
-  }
+  if (table) table.querySelector("thead tr").innerHTML = `<th>SEMANA</th><th>ATIVIDADE</th><th>EQUIPE</th>${customColumns.map(column => `<th>${escapeHTML(column.label)}</th>`).join("")}<th>OBSERVAÇÃO</th><th></th>`;
 
   if ($("programTableBody")) {
     $("programTableBody").innerHTML = rows.map(row => {
@@ -1599,38 +1709,36 @@ function renderProgramacao() {
         : "";
       return `<tr>
         <td class="week-cell">${escapeHTML(row.week)}</td>
-        <td>${escapeHTML(fmtDate(row.date))}</td>
         <td class="program-activity">${escapeHTML(rowModule?.name || row.activity)}</td>
         <td class="program-team">${escapeHTML(row.team || "—")}</td>
-        <td>${escapeHTML(row.responsible || "—")}</td>
-        <td class="program-qty">${escapeHTML(row.qty)}</td>
         ${customCells}
         <td class="program-note">${escapeHTML(row.note || "—")}</td>
         <td><button class="delete-program" data-program-id="${escapeHTML(row.id)}" title="Excluir">×</button></td>
       </tr>`;
     }).join("");
-
-    $("programTableBody").querySelectorAll(".delete-program").forEach(button => {
-      button.onclick = () => deleteProgramacao(button.dataset.programId);
-    });
+    $("programTableBody").querySelectorAll(".delete-program").forEach(button => button.onclick = () => deleteProgramacao(button.dataset.programId));
   }
-
   $("programEmpty")?.classList.toggle("hidden", rows.length !== 0);
 }
 
 function openProgramModal() {
   setupProgrammingSelectors();
-  $("programModal")?.classList.remove("hidden");
   $("programFormMessage") && ($("programFormMessage").textContent = "");
-  $("programDate") && ($("programDate").value = new Date().toISOString().slice(0, 10));
   $("programWeek") && ($("programWeek").value = currentWeek());
-  $("programQtyInput") && ($("programQtyInput").value = "1");
   $("programNote") && ($("programNote").value = "");
+  state.pendingProgramDraft = null;
+  setProgramMode("incluir");
+  showProgramEditStep();
   if ($("programActivity")) renderProgramCustomFields($("programActivity").value);
+  document.querySelector("#screen-programacao")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function closeProgramModal() {
-  $("programModal")?.classList.add("hidden");
+  $("programForm")?.reset();
+  state.pendingProgramDraft = null;
+  showProgramEditStep();
+  setupProgrammingSelectors();
+  if ($("programActivity")) renderProgramCustomFields($("programActivity").value);
 }
 
 async function resolveEquipmentId(customData, module) {
@@ -1679,6 +1787,144 @@ async function resolveEquipmentId(customData, module) {
   return inserted.id;
 }
 
+function ensureProgramConfirmationUI() {
+  const modalBox = document.querySelector("#programModal .modal-box");
+  const form = $("programForm");
+  if ($("programConfirmationStep")) return;
+  if (!modalBox || !form) return;
+
+  const panel = document.createElement("section");
+  panel.id = "programConfirmationStep";
+  panel.className = "program-confirmation-step hidden";
+  panel.innerHTML = `
+    <div class="program-stepper" role="tablist" aria-label="Etapas da programação">
+      <button type="button" class="program-step active" data-program-step="edit">1. Dados</button>
+      <button type="button" class="program-step" data-program-step="confirm">2. Confirmar</button>
+    </div>
+
+    <div class="program-confirmation-head">
+      <span class="section-kicker">CONFIRMAÇÃO DA PROGRAMAÇÃO</span>
+      <h3>Confira antes de gravar</h3>
+      <p>Revise os dados abaixo. A gravação será feita somente ao clicar em <strong>Confirmar</strong>.</p>
+    </div>
+
+    <div class="program-confirmation-grid">
+      <div class="program-confirmation-card"><span>SEMANA</span><strong id="confirmProgramWeek">—</strong></div>
+      <div class="program-confirmation-card"><span>ATIVIDADE</span><strong id="confirmProgramActivity">—</strong></div>
+      <div class="program-confirmation-card"><span>EQUIPE</span><strong id="confirmProgramTeam">—</strong></div>
+      <div class="program-confirmation-card"><span>RESPONSÁVEL</span><strong id="confirmProgramResponsible">—</strong></div>
+      <div class="program-confirmation-card"><span>QUANTIDADE</span><strong id="confirmProgramQty">—</strong></div>
+      <div class="program-confirmation-card"><span>DATA PREVISTA</span><strong id="confirmProgramDate">—</strong></div>
+    </div>
+
+    <div class="program-flag-box">
+      <div>
+        <span class="section-kicker">FLAG DA PROGRAMAÇÃO</span>
+        <strong>Como esta programação deve ser registrada?</strong>
+        <small>As duas opções adicionam uma nova programação. Nenhuma delas apaga registros anteriores.</small>
+      </div>
+      <div class="program-flag-options" role="group" aria-label="Flag da programação">
+        <button type="button" class="program-flag active" data-program-mode="incluir">
+          <span>＋</span><strong>Incluir</strong><small>Adicionar ao planejamento existente</small>
+        </button>
+        <button type="button" class="program-flag" data-program-mode="nova">
+          <span>＋</span><strong>Nova Programação</strong><small>Registrar uma nova programação</small>
+        </button>
+      </div>
+    </div>
+
+    <div id="programConfirmationMessage" class="form-message"></div>
+    <div class="modal-actions program-confirmation-actions">
+      <button type="button" id="editProgramConfirmation" class="secondary-btn">Editar</button>
+      <button type="button" id="confirmProgramConfirmation" class="primary-btn">Confirmar</button>
+    </div>
+  `;
+
+  modalBox.insertBefore(panel, form);
+
+  panel.querySelectorAll("[data-program-mode]").forEach(button => {
+    button.addEventListener("click", () => setProgramMode(button.dataset.programMode));
+  });
+  $("editProgramConfirmation").onclick = showProgramEditStep;
+  $("confirmProgramConfirmation").onclick = confirmProgramacao;
+}
+
+function setProgramMode(mode) {
+  const normalized = mode === "nova" ? "nova" : "incluir";
+  if (!state.pendingProgramDraft) state.pendingProgramDraft = {};
+  state.pendingProgramDraft.mode = normalized;
+
+  document.querySelectorAll("[data-program-mode]").forEach(button => {
+    button.classList.toggle("active", button.dataset.programMode === normalized);
+  });
+}
+
+function showProgramEditStep() {
+  ensureProgramConfirmationUI();
+  $("programForm")?.classList.remove("hidden");
+  $("programConfirmationStep")?.classList.add("hidden");
+  document.querySelectorAll("[data-program-step]").forEach(button => {
+    button.classList.toggle("active", button.dataset.programStep === "edit");
+  });
+}
+
+function showProgramConfirmationStep(draft) {
+  ensureProgramConfirmationUI();
+  $("programForm")?.classList.add("hidden");
+  $("programConfirmationStep")?.classList.remove("hidden");
+  document.querySelectorAll("[data-program-step]").forEach(button => {
+    button.classList.toggle("active", button.dataset.programStep === "confirm");
+  });
+
+  $("confirmProgramWeek").textContent = draft.week;
+  $("confirmProgramActivity").textContent = draft.module?.name || draft.activity;
+  $("confirmProgramTeam").textContent = draft.team;
+  $("programConfirmationMessage").textContent = "";
+  setProgramMode(draft.mode || "incluir");
+}
+
+function collectProgramDraftForConfirmation() {
+  const { data: customData, invalid } = collectCustomData();
+  const week = normalizeWeek($("programWeek")?.value);
+  const activity = $("programActivity")?.value || "";
+  const team = $("programTeam")?.value || "";
+  const note = $("programNote")?.value.trim() || "";
+  const module = moduleById(activity);
+
+  if (!week || !activity || !team || invalid) {
+    $("programFormMessage") && ($("programFormMessage").textContent = "Preencha os campos obrigatórios: Semana, Atividade e Equipe.");
+    return null;
+  }
+
+  const currentMode = state.pendingProgramDraft?.mode || "incluir";
+  return { week, activity, team, note, customData, module, mode: currentMode };
+}
+
+function createProgramacao() {
+  const draft = collectProgramDraftForConfirmation();
+  if (!draft) return;
+
+  state.pendingProgramDraft = draft;
+  showProgramConfirmationStep(draft);
+}
+
+async function confirmProgramacao() {
+  const draft = state.pendingProgramDraft;
+  if (!draft) {
+    showProgramEditStep();
+    return;
+  }
+
+  $("programConfirmationMessage") && ($("programConfirmationMessage").textContent = "Gravando programação...");
+
+  try {
+    await saveProgramacaoToDatabase();
+  } catch (error) {
+    console.error("Erro na confirmação da programação:", error);
+    $("programConfirmationMessage") && ($("programConfirmationMessage").textContent = error?.message || "Não foi possível confirmar a programação.");
+  }
+}
+
 function collectCustomData() {
   const data = {};
   let invalid = false;
@@ -1690,36 +1936,26 @@ function collectCustomData() {
   return { data, invalid };
 }
 
-async function createProgramacao() {
-  const { data: customData, invalid } = collectCustomData();
-  const week = normalizeWeek($("programWeek")?.value);
-  const date = $("programDate")?.value || "";
-  const activity = $("programActivity")?.value || "";
-  const team = $("programTeam")?.value || "";
-  const responsible = $("programResponsible")?.value || "";
-  const qty = Number($("programQtyInput")?.value || 0);
-  const note = $("programNote")?.value.trim() || "";
+async function saveProgramacaoToDatabase() {
+  const draft = state.pendingProgramDraft;
+  if (!draft) return;
+  const { week, activity, team, note, customData } = draft;
   const module = moduleById(activity);
+  const sb = getSupabaseClient();
 
-  if (!week || !date || !activity || !team || !responsible || !qty || qty < 1 || invalid) {
-    if ($("programFormMessage")) $("programFormMessage").textContent = "Preencha os campos obrigatórios do planejamento e da atividade.";
+  if (!week || !activity || !team || !module) {
+    $("programConfirmationMessage") && ($("programConfirmationMessage").textContent = "Dados obrigatórios incompletos.");
     return;
   }
-
-  const sb = getSupabaseClient();
   if (!sb) {
-    if ($("programFormMessage")) $("programFormMessage").textContent = "Supabase não está configurado.";
+    $("programConfirmationMessage") && ($("programConfirmationMessage").textContent = "Supabase não está configurado.");
     return;
   }
 
   try {
     const teamRecord = teamByName(team);
-    const person = personByName(responsible);
-    if (!teamRecord) throw new Error("Equipe selecionada não encontrada no banco.");
-    if (!person) throw new Error("Responsável selecionado não encontrado no banco.");
-    if (!module?.dbId) {
-      await syncModulesToDB();
-    }
+    if (!teamRecord) throw new Error("Equipe selecionada não encontrada no cadastro.");
+    if (!module.dbId) await syncModulesToDB();
     const refreshedModule = moduleById(activity);
     const equipmentId = await resolveEquipmentId(customData, refreshedModule);
 
@@ -1728,37 +1964,29 @@ async function createProgramacao() {
       semana: weekToNumber(week),
       status: "PROGRAMADO",
       atividade_id: refreshedModule.dbId,
-      data_programacao: date || null,
+      data_programacao: null,
       equipe_id: teamRecord.id,
-      responsavel_id: person.id,
-      quantidade: qty,
+      responsavel_id: null,
+      quantidade: 1,
       observacao: note || null,
       dados_personalizados: customData,
-      modo_importacao: "MANUAL",
+      modo_importacao: draft.mode === "nova" ? "MANUAL_NOVA_PROGRAMACAO" : "MANUAL_INCLUIR",
       arquivo_importacao: null,
       usuario_importacao: state.currentUser?.authUserId || null,
       updated_at: new Date().toISOString()
     };
 
-    const { data: inserted, error } = await sb
-      .from("tb_programacoes")
-      .insert(payload)
-      .select("id,equipamento_id,semana,status,atividade_id,data_programacao,equipe_id,responsavel_id,quantidade,observacao,dados_personalizados,created_at")
-      .single();
+    const { error } = await sb.from("tb_programacoes").insert(payload);
     if (error) throw error;
-
-    const mapped = mapProgrammingRecord(inserted);
-    state.programacoes.push(mapped);
-    cacheProgramacoes();
 
     closeProgramModal();
     await loadProgramacoes();
     renderProgramacao();
     renderDashboard();
-    toast("Programação cadastrada no Supabase.");
+    toast("Programação confirmada no Supabase.");
   } catch (error) {
-    console.error("Erro ao criar programação:", error);
-    if ($("programFormMessage")) $("programFormMessage").textContent = error?.message || "Não foi possível salvar a programação.";
+    console.error("Erro ao confirmar programação:", error);
+    $("programConfirmationMessage") && ($("programConfirmationMessage").textContent = error?.message || "Não foi possível salvar a programação.");
   }
 }
 
@@ -1932,11 +2160,29 @@ function validateAndMapProgramImport(rows, module) {
   return { headers, imported };
 }
 
+function excelTheme() {
+  const s = currentSettings();
+  const hex = value => String(value || "#0b5cff").replace("#", "").toUpperCase();
+  return { primary: hex(s.primary), header: hex(s.header), bg: hex(s.background) };
+}
+
+function styleExcelTable(sheet, headers, rowCount) {
+  const theme = excelTheme();
+  const end = XLSX.utils.encode_cell({ r: rowCount, c: headers.length - 1 });
+  sheet["!autofilter"] = { ref: `A1:${end}` };
+  sheet["!freeze"] = { xSplit: 0, ySplit: 1 };
+  sheet["!cols"] = headers.map(h => ({ wch: Math.max(14, Math.min(34, String(h).length + 5)) }));
+  const range = XLSX.utils.decode_range(`A1:${end}`);
+  for (let c=0;c<headers.length;c++) { const cell=sheet[XLSX.utils.encode_cell({r:0,c})]; if(cell) cell.s={fill:{fgColor:{rgb:theme.header}},font:{bold:true,color:{rgb:"FFFFFF"}},alignment:{horizontal:"center",vertical:"center"}}; }
+  for (let r=1;r<=range.e.r;r++) for(let c=0;c<range.e.c+1;c++){ const cell=sheet[XLSX.utils.encode_cell({r,c})]; if(cell) cell.s={fill:{fgColor:{rgb:r%2?"FFFFFF":theme.bg}},border:{top:{style:"thin",color:{rgb:"D9E1EA"}},bottom:{style:"thin",color:{rgb:"D9E1EA"}},left:{style:"thin",color:{rgb:"D9E1EA"}},right:{style:"thin",color:{rgb:"D9E1EA"}}},alignment:{vertical:"center"}}; }
+  sheet["!rows"]=[{hpt:24}];
+}
+
 function downloadProgramTemplate() {
-  const activityId = $("programActivityFilter")?.value || "";
+  const activityId = $("programActivity")?.value || "";
   const module = moduleById(activityId);
   if (!module) {
-    toast("Selecione uma atividade no filtro ATIVIDADE para gerar o template.");
+    toast("Selecione uma atividade no cabeçalho da programação para gerar o template.");
     return;
   }
 
@@ -1950,7 +2196,9 @@ function downloadProgramTemplate() {
 
   if (window.XLSX) {
     const sheet = XLSX.utils.aoa_to_sheet([headers, blank]);
-    sheet["!cols"] = columns.map(column => ({ wch: Math.max(12, Math.min(32, String(column.label).length + 4)) }));
+    styleExcelTable(sheet, headers, 1);
+    sheet["!autofilter"] = { ref: `A1:${XLSX.utils.encode_col(headers.length - 1)}2` };
+    sheet["!ref"] = `A1:${XLSX.utils.encode_col(headers.length - 1)}2`;
     const info = XLSX.utils.aoa_to_sheet([
       ["Atividade", module.name],
       ["Instruções", "Não altere os cabeçalhos. Campos com * são obrigatórios."],
@@ -1980,10 +2228,10 @@ function exportCSV(headers, rows, filename) {
 }
 
 function importProgramFile(file) {
-  const activityId = $("programActivityFilter")?.value || "";
+  const activityId = $("programActivity")?.value || "";
   const module = moduleById(activityId);
   if (!module) {
-    toast("Selecione uma atividade no filtro ATIVIDADE antes de importar.");
+    toast("Selecione uma atividade no cabeçalho da programação antes de importar.");
     return;
   }
   if (!file) return;
@@ -2257,7 +2505,7 @@ async function loadData() {
 }
 
 function populateFilters() {
-  const rows = state.rows.filter(row => normalizeWeek(row.Week) === currentWeek());
+  const rows = state.rows.filter(row => normalizeWeek(row.Week) === activeDashboardWeek());
   const sys = [...new Set(rows.map(row => String(row.SYS || "").trim()).filter(Boolean))].sort();
   const subsys = [...new Set(rows.map(row => String(row.SUBSYS || "").trim()).filter(Boolean))].sort();
 
@@ -2529,7 +2777,7 @@ async function registerSelectedPontos() {
 }
 
 function renderHistory() {
-  const rows = state.rows.filter(row => normalizeWeek(row.Week) === currentWeek());
+  const rows = state.rows.filter(row => normalizeWeek(row.Week) === activeDashboardWeek());
   const done = rows.filter(hasLog);
   $("historyDone") && ($("historyDone").textContent = done.length);
   $("historyPending") && ($("historyPending").textContent = rows.length - done.length);
@@ -2557,11 +2805,7 @@ function renderHistory() {
    ========================= */
 
 function dashboardFilterState() {
-  return {
-    week: $("dashboardWeekFilter")?.value || "",
-    activity: $("dashboardActivityFilter")?.value || "",
-    team: $("dashboardTeamFilter")?.value || ""
-  };
+  return { week: activeDashboardWeek(), activity: "", team: "" };
 }
 
 function setupDashboardFilters() {
@@ -2611,7 +2855,7 @@ function dashboardData() {
     ...state.dashboardSeed.map(item => normalizeWeek(item.week)),
     ...state.programacoes.map(item => normalizeWeek(item.week)),
     ...state.rows.map(item => normalizeWeek(item.Week)).filter(Boolean),
-    currentWeek()
+    activeDashboardWeek()
   ])].sort((a, b) => weekToNumber(a) - weekToNumber(b));
 
   const selectedWeeks = filters.week ? weeks.filter(week => week === filters.week) : weeks;
@@ -2649,7 +2893,7 @@ function dashboardData() {
     const item = activityMap.get(filters.activity);
     if (item) item.done = done;
   } else if (activityMap.has("ppa")) {
-    activityMap.get("ppa").done = executionRowsForWeek(filters.week || currentWeek(), "ppa", filters.team).length;
+    activityMap.get("ppa").done = executionRowsForWeek(filters.week || activeDashboardWeek(), "ppa", filters.team).length;
   }
 
   return {
@@ -2709,15 +2953,60 @@ function renderDashboard() {
       : `<div class="empty-state inline"><strong>Nenhuma atividade encontrada.</strong><span>Ajuste os filtros ou importe uma programação.</span></div>`;
   }
 
-  const executions = executionRowsForWeek(data.filters.week || currentWeek(), data.filters.activity, data.filters.team).slice(-8).reverse();
-  if ($("recentExecutions")) {
-    $("recentExecutions").innerHTML = executions.length
-      ? executions.map(item => `<div class="execution-item">
-          <div><strong>${escapeHTML(item.row.TAG || "—")}</strong><span>${escapeHTML(item.meta.user)}${item.meta.team ? ` • ${escapeHTML(item.meta.team)}` : ""}</span></div>
-          <time>${escapeHTML(item.meta.time)}</time>
-        </div>`).join("")
-      : `<div class="empty-state inline"><strong>Nenhuma execução registrada.</strong><span>Os registros de campo aparecerão aqui.</span></div>`;
-  }
+}
+
+function setupReportFilters() {
+  const current = { week: $("reportWeekFilter")?.value || "", activity: $("reportActivityFilter")?.value || "", team: $("reportTeamFilter")?.value || "" };
+  const weeks = [...new Set([...(state.weeks || []).map(item => normalizeWeek(item.semana)), ...state.dashboardSeed.map(item => normalizeWeek(item.week)), ...state.programacoes.map(item => normalizeWeek(item.semana))])].filter(Boolean).sort((a,b)=>weekToNumber(a)-weekToNumber(b));
+  if ($("reportWeekFilter")) { $("reportWeekFilter").innerHTML = `<option value="">Todas</option>` + weeks.map(w=>`<option value="${escapeHTML(w)}">${escapeHTML(w)}</option>`).join(""); $("reportWeekFilter").value = weeks.includes(current.week) ? current.week : ""; }
+  if ($("reportActivityFilter")) { $("reportActivityFilter").innerHTML = `<option value="">Todas</option>` + state.moduleCatalog.map(m=>`<option value="${escapeHTML(m.id)}">${escapeHTML(m.name)}</option>`).join(""); $("reportActivityFilter").value = moduleById(current.activity) ? current.activity : ""; }
+  const teams = [...state.teams].sort((a,b)=>String(a.nome||"").localeCompare(String(b.nome||""),"pt-BR",{numeric:true,sensitivity:"base"}));
+  if ($("reportTeamFilter")) { $("reportTeamFilter").innerHTML = `<option value="">Todas</option>` + teams.map(t=>`<option value="${escapeHTML(t.nome)}">${escapeHTML(t.nome)}</option>`).join(""); $("reportTeamFilter").value = teams.some(t=>t.nome===current.team) ? current.team : ""; }
+}
+
+function reportAnalysis() {
+  const filters = { week: $("reportWeekFilter")?.value || "", activity: $("reportActivityFilter")?.value || "", team: $("reportTeamFilter")?.value || "" };
+  const programs = state.programacoes.filter(p =>
+    (!filters.week || normalizeWeek(p.week) === filters.week) &&
+    (!filters.activity || p.activity === filters.activity) &&
+    (!filters.team || p.team === filters.team)
+  );
+  const weeks = [...new Set([
+    ...programs.map(p => normalizeWeek(p.week)),
+    ...state.rows.map(r => normalizeWeek(r.Week)).filter(Boolean)
+  ])].filter(Boolean).sort((a,b)=>weekToNumber(a)-weekToNumber(b));
+  const sourceWeeks = weeks.length ? weeks : (filters.week ? [filters.week] : state.dashboardSeed.map(x=>normalizeWeek(x.week)));
+  const weekRows = sourceWeeks.map(week => {
+    const weekPrograms = programs.filter(p => normalizeWeek(p.week) === week);
+    const seed = state.dashboardSeed.find(x=>normalizeWeek(x.week)===week);
+    const planned = weekPrograms.length ? weekPrograms.reduce((n,p)=>n+Number(p.qty||1),0) : (!state.programacoes.length && !filters.activity && !filters.team ? Number(seed?.planned||0) : 0);
+    const done = executionRowsForWeek(week, filters.activity, filters.team).length || (!state.rows.length && !filters.activity && !filters.team ? Number(seed?.done||0) : 0);
+    return {week,planned,done};
+  });
+  const planned = weekRows.reduce((n,x)=>n+x.planned,0);
+  const done = weekRows.reduce((n,x)=>n+x.done,0);
+  const teamMap = new Map();
+  programs.forEach(p => { const name=p.team || "Sem equipe"; const x=teamMap.get(name)||{name,planned:0,done:0}; x.planned += Number(p.qty||1); teamMap.set(name,x); });
+  teamMap.forEach(x => { x.done = executionRowsForWeek(filters.week || currentWeek(), filters.activity, x.name).length; x.pct=x.planned?Math.round(x.done/x.planned*100):0; });
+  const activityMap = new Map();
+  programs.forEach(p => { const name=moduleById(p.activity)?.name || p.activity || "Sem atividade"; const x=activityMap.get(p.activity)||{name,planned:0,done:0}; x.planned += Number(p.qty||1); activityMap.set(p.activity,x); });
+  activityMap.forEach((x,id)=>{ x.done=executionRowsForWeek(filters.week || currentWeek(), id, filters.team).length; x.pct=x.planned?Math.round(x.done/x.planned*100):0; });
+  if (!programs.length && !state.programacoes.length) state.dashboardSeed.forEach(seed=>{ const x=activityMap.get("ppa")||{name:"Ponto a Ponto",planned:0,done:0}; if(!filters.activity||filters.activity==="ppa"){x.planned+=seed.planned;x.done+=seed.done;} activityMap.set("ppa",x); });
+  return {filters,planned,done,rate:planned?Math.min(done/planned,1):0,teams:[...teamMap.values()],activities:[...activityMap.values()],weeks:weekRows};
+}
+
+function renderReports() {
+  setupReportFilters();
+  const r=reportAnalysis();
+  $("reportPlanned") && ($("reportPlanned").textContent=r.planned);
+  $("reportDone") && ($("reportDone").textContent=r.done);
+  $("reportRate") && ($("reportRate").textContent=`${Math.round(r.rate*100)}%`);
+  $("reportTeams") && ($("reportTeams").textContent=r.teams.filter(x=>x.planned).length);
+  const maxTeam=Math.max(1,...r.teams.map(x=>x.planned));
+  if ($("reportTeamBars")) $("reportTeamBars").innerHTML=r.teams.length?r.teams.map(x=>`<div class="report-bar-row"><div><strong>${escapeHTML(x.name)}</strong><span>${x.done}/${x.planned} • ${x.pct}%</span></div><div class="report-bar-track"><i style="width:${Math.min(100,Math.max(3,Math.round(x.planned/maxTeam*100)))}%"></i><b style="width:${Math.min(100,Math.round(x.done/Math.max(1,x.planned)*100))}%"></b></div></div>`).join(""):`<div class="empty-state inline"><strong>Sem dados por equipe.</strong></div>`;
+  if ($("reportActivityRows")) $("reportActivityRows").innerHTML=r.activities.length?r.activities.map(x=>`<div class="breakdown-row"><div class="breakdown-main"><span class="activity-color-dot"></span><strong>${escapeHTML(x.name)}</strong></div><div class="breakdown-numbers"><span>${x.done}/${x.planned}</span><strong>${x.pct}%</strong></div><div class="breakdown-progress"><i style="width:${Math.min(100,x.pct)}%"></i></div></div>`).join(""):`<div class="empty-state inline"><strong>Sem dados por atividade.</strong></div>`;
+  const maxWeek=Math.max(1,...r.weeks.map(x=>Math.max(x.planned,x.done)));
+  if ($("reportWeekBars")) $("reportWeekBars").innerHTML=r.weeks.length?r.weeks.map(x=>`<div class="week-bar-group"><div class="week-bar-values"><span>${x.planned}</span><span>${x.done}</span></div><div class="week-bar-track"><i class="week-bar planned" style="height:${Math.max(4,Math.round(x.planned/maxWeek*150))}px"></i><i class="week-bar done" style="height:${Math.max(4,Math.round(x.done/maxWeek*150))}px"></i></div><small>${escapeHTML(x.week)}</small></div>`).join(""):`<div class="empty-state inline"><strong>Sem dados semanais.</strong></div>`;
 }
 
 function reportRowsForDashboard() {
@@ -2736,7 +3025,7 @@ function exportDashboardJPEG() {
 }
 
 function exportTechReportJPEG() {
-  const rows = state.rows.filter(row => normalizeWeek(row.Week) === currentWeek());
+  const rows = state.rows.filter(row => normalizeWeek(row.Week) === activeDashboardWeek());
   const done = rows.filter(hasLog).length;
   drawStationeryCanvas("PLANNING PRO", `Relatório de campo • ${currentWeek()}`, [{ label: "Total da semana", planned: rows.length, done, pending: Math.max(rows.length - done, 0), pct: rows.length ? Math.round(done / rows.length * 100) : 0 }], `campo-${currentWeek()}.jpg`);
 }
@@ -2875,9 +3164,9 @@ function exportDashboardPDF() {
 }
 
 function exportTechReportPDF() {
-  const rows = state.rows.filter(row => normalizeWeek(row.Week) === currentWeek());
+  const rows = state.rows.filter(row => normalizeWeek(row.Week) === activeDashboardWeek());
   const done = rows.filter(hasLog).length;
-  exportStyledPDF(`Relatório de campo • ${currentWeek()}`, [{ label: "Total da semana", planned: rows.length, done, pending: Math.max(rows.length - done, 0), pct: rows.length ? Math.round(done / rows.length * 100) : 0 }], `campo-${currentWeek()}.pdf`);
+  exportStyledPDF(`Relatório de campo • ${currentWeek()}`, [{ label: "Total da semana", planned: rows.length, done, pending: Math.max(rows.length - done, 0), pct: rows.length ? Math.round(done / rows.length * 100) : 0 }], `campo-${activeDashboardWeek()}.pdf`);
 }
 
 /* =========================
@@ -3081,7 +3370,15 @@ async function syncAll() {
       await loadModulesFromDB();
     }
 
-    await loadTeamsAndPeople();
+    if (state.role === "technician") {
+      const sb = getSupabaseClient();
+      const { data: teamsData, error: teamsError } = await sb.from("tb_equipes").select("id,nome,disciplina,ativo").eq("ativo", true).order("nome");
+      if (teamsError) throw teamsError;
+      state.teams = (teamsData || []).map(team => ({ id: team.id, dbId: team.id, name: team.nome, nome: team.nome, disciplina: team.disciplina, ativo: team.ativo }));
+    } else {
+      await loadTeamsAndPeople();
+    }
+    await loadWeeks();
     await loadProgramacoes();
 
     if (state.role === "technician") {
@@ -3100,7 +3397,7 @@ async function syncAll() {
     }
 
     if ($("currentDateTime")) $("currentDateTime").textContent = nowBR();
-    if ($("currentWeek")) $("currentWeek").textContent = currentWeek();
+    if ($("currentWeek")) $("currentWeek").textContent = activeDashboardWeek();
   } catch (error) {
     console.error("Erro na sincronização:", error);
     toast(error?.message || "Não foi possível sincronizar todos os dados.");
@@ -3164,10 +3461,11 @@ function bindEvents() {
   $("cancelProgramModal") && ($("cancelProgramModal").onclick = closeProgramModal);
   $("programModal .modal-backdrop") && ($("programModal .modal-backdrop").onclick = closeProgramModal);
   $("programForm")?.addEventListener("submit", event => { event.preventDefault(); createProgramacao(); });
-  $("programWeekFilter") && ($("programWeekFilter").onchange = renderProgramacao);
-  $("programActivityFilter") && ($("programActivityFilter").onchange = renderProgramacao);
-  $("programTeamFilter") && ($("programTeamFilter").onchange = renderProgramacao);
   $("programActivity") && ($("programActivity").onchange = () => renderProgramCustomFields($("programActivity").value));
+  $("programTeam") && ($("programTeam").onchange = () => { $("programFormMessage") && ($("programFormMessage").textContent = ""); });
+  $("editProgramConfirmation") && ($("editProgramConfirmation").onclick = showProgramEditStep);
+  $("confirmProgramConfirmation") && ($("confirmProgramConfirmation").onclick = confirmProgramacao);
+  document.querySelectorAll("[data-program-mode]").forEach(button => button.onclick = () => setProgramMode(button.dataset.programMode));
 
   $("refreshDashboard") && ($("refreshDashboard").onclick = async () => { await syncAll(); toast("Dashboard atualizado."); });
   $("exportDashboardPdfBtn") && ($("exportDashboardPdfBtn").onclick = exportDashboardPDF);
@@ -3193,9 +3491,6 @@ function bindEvents() {
   $("editActivityBtn") && ($("editActivityBtn").onclick = () => openActivityModal(state.selectedModuleId));
   $("deleteActivityBtn") && ($("deleteActivityBtn").onclick = deleteActivity);
   $("newColumnBtn") && ($("newColumnBtn").onclick = () => openColumnModal());
-  $("exportModuleMaskBtn") && ($("exportModuleMaskBtn").onclick = exportModuleMask);
-  $("importModuleMaskBtn") && ($("importModuleMaskBtn").onclick = triggerModuleImport);
-  $("moduleExcelInput")?.addEventListener("change", event => importModuleFile(event.target.files?.[0]));
 
   $("closeActivityModal") && ($("closeActivityModal").onclick = closeActivityModal);
   $("cancelActivityModal") && ($("cancelActivityModal").onclick = closeActivityModal);
@@ -3223,6 +3518,11 @@ function bindEvents() {
   $("confirmDeleteModule") && ($("confirmDeleteModule").onclick = confirmDeleteActivity);
 
   $("newAccessBtn") && ($("newAccessBtn").onclick = () => openAccessModal());
+  $("newWeekBtn") && ($("newWeekBtn").onclick = openWeekModal);
+  $("closeWeekModal") && ($("closeWeekModal").onclick = closeWeekModal);
+  $("cancelWeekModal") && ($("cancelWeekModal").onclick = closeWeekModal);
+  $("weekModal .modal-backdrop") && ($("weekModal .modal-backdrop").onclick = closeWeekModal);
+  $("weekForm")?.addEventListener("submit", createWeek);
   $("closeAccessModal") && ($("closeAccessModal").onclick = closeAccessModal);
   $("cancelAccessModal") && ($("cancelAccessModal").onclick = closeAccessModal);
   $("accessModal .modal-backdrop") && ($("accessModal .modal-backdrop").onclick = closeAccessModal);
@@ -3230,24 +3530,142 @@ function bindEvents() {
   $("generateAccessCodeBtn") && ($("generateAccessCodeBtn").onclick = () => { if ($("accessCodeInput")) $("accessCodeInput").value = randomAccessCode(); });
   $("accessSearch")?.addEventListener("input", renderAccesses);
 
-  $("dashboardWeekFilter") && ($("dashboardWeekFilter").onchange = renderDashboard);
-  $("dashboardActivityFilter") && ($("dashboardActivityFilter").onchange = renderDashboard);
-  $("dashboardTeamFilter") && ($("dashboardTeamFilter").onchange = renderDashboard);
+  $("reportWeekFilter") && ($("reportWeekFilter").onchange = renderReports);
+  $("reportActivityFilter") && ($("reportActivityFilter").onchange = renderReports);
+  $("reportTeamFilter") && ($("reportTeamFilter").onchange = renderReports);
+  $("refreshReports") && ($("refreshReports").onclick = async () => { await syncAll(); renderReports(); });
+  $("exportReportsPdf") && ($("exportReportsPdf").onclick = () => exportStyledPDF(`Relatório analítico • ${$("reportWeekFilter")?.value || "Todas as semanas"}`, reportRowsForDashboard(), `relatorios-${currentWeek()}.pdf`));
 }
 
 /* =========================
    INIT
    ========================= */
 
+function ensurePlanningSidebarBehavior() {
+  const sidebar = $("appSidebar");
+  const shell = $("appShell");
+  const toggle = $("sidebarToggle");
+  if (!sidebar || !shell || !toggle) return;
+
+  const apply = collapsed => {
+    sidebar.classList.toggle("collapsed", collapsed);
+    shell.classList.toggle("sidebar-collapsed", collapsed);
+    toggle.setAttribute("aria-label", collapsed ? "Expandir menu" : "Recolher menu");
+    toggle.title = collapsed ? "Expandir menu" : "Recolher menu";
+  };
+
+  apply(localStorage.getItem("ppaSidebarCollapsed") === "1");
+  toggle.onclick = event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (window.innerWidth <= 900) {
+      sidebar.classList.remove("mobile-open");
+      return;
+    }
+    const next = !sidebar.classList.contains("collapsed");
+    apply(next);
+    localStorage.setItem("ppaSidebarCollapsed", next ? "1" : "0");
+  };
+
+  const mobileBtn = $("mobileMenuBtn");
+  mobileBtn?.addEventListener("click", () => sidebar.classList.toggle("mobile-open"));
+  document.querySelectorAll(".nav-item").forEach(item => item.addEventListener("click", () => {
+    if (window.innerWidth <= 900) sidebar.classList.remove("mobile-open");
+  }));
+  window.addEventListener("resize", () => {
+    if (window.innerWidth > 900) sidebar.classList.remove("mobile-open");
+  });
+}
+
+function ensureNewProgrammingButton() {
+  // A nova programação agora é preenchida diretamente no cabeçalho da tela.
+}
+
+function injectPlanningEnhancementStyles() {
+  if ($("planningEnhancementStyles")) return;
+
+  const style = document.createElement("style");
+  style.id = "planningEnhancementStyles";
+  style.textContent = `
+    /* Planning Pro — ajustes de usabilidade */
+    .app-shell .sidebar{transition:width .22s ease,padding .22s ease}
+    .app-shell .main-content{transition:margin-left .22s ease,width .22s ease}
+    .app-shell.sidebar-collapsed .main-content{width:calc(100% - 76px);margin-left:76px}
+    .app-shell .sidebar.collapsed{width:76px;padding-left:11px;padding-right:11px}
+    .app-shell .sidebar.collapsed .brand{padding-left:5px;padding-right:5px;gap:0}
+    .app-shell .sidebar.collapsed .brand-copy{opacity:0;width:0;overflow:hidden}
+    .app-shell .sidebar.collapsed .nav-item{justify-content:center;padding-left:10px;padding-right:10px}
+    .app-shell .sidebar.collapsed .nav-label{opacity:0;width:0;overflow:hidden}
+    .app-shell .sidebar.collapsed .sidebar-footer{font-size:0;text-align:center;padding-left:0;padding-right:0}
+    .app-shell .sidebar.collapsed .sidebar-footer .online-dot{margin-right:0}
+    .app-shell .sidebar.collapsed .sidebar-toggle svg{transform:rotate(180deg)}
+
+    .programming-header-card{padding:18px;margin-bottom:14px}
+    .programming-header-title{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}
+    .programming-header-title h3{margin:3px 0 0;font-size:16px}
+    .program-inline-form{display:block}
+    .program-required-grid{display:grid;grid-template-columns:1fr 1.35fr 1fr;gap:12px}
+    .program-required-grid label,.program-inline-form>label{display:flex;flex-direction:column;gap:6px;color:#647386;font-size:9px;font-weight:800;letter-spacing:.05em}
+    .program-required-grid select,.program-inline-form textarea{width:100%;border:1px solid #dce4ed;background:#fff;border-radius:9px;padding:10px 11px;color:#25384e;font:inherit;font-size:11px;outline:none}
+    .program-required-grid select:focus,.program-inline-form textarea:focus{border-color:#8fb1e8;box-shadow:0 0 0 3px rgba(11,92,255,.06)}
+    .program-inline-form .dynamic-form-grid{margin:12px 0}
+    .program-inline-form>label{margin-top:12px}
+    .program-inline-actions{display:flex;justify-content:flex-end;margin-top:14px}
+    .program-list-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 18px 10px}
+    .program-list-head h3{margin:3px 0 0;font-size:15px}
+    @media(max-width:820px){.program-required-grid{grid-template-columns:1fr}.programming-header-title,.program-list-head{align-items:flex-start;flex-direction:column}}
+    .program-confirmation-step{display:block}
+    .program-stepper{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;background:#f3f6fa;border:1px solid #e3e9f0;border-radius:11px;margin-bottom:18px}
+    .program-step{border:0;background:transparent;color:#8793a2;padding:9px 10px;border-radius:8px;font-size:9px;font-weight:800;cursor:default}
+    .program-step.active{background:#fff;color:var(--sys-primary,var(--primary,#0b5cff));box-shadow:0 2px 7px rgba(15,35,60,.06)}
+    .program-confirmation-head{margin-bottom:14px}
+    .program-confirmation-head h3{margin:3px 0 6px;font-size:18px}
+    .program-confirmation-head p{margin:0;color:#718096;font-size:10px;line-height:1.5}
+    .program-confirmation-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:14px}
+    .program-confirmation-card{padding:11px 12px;border:1px solid #e5ebf1;background:#f9fbfd;border-radius:11px;min-width:0}
+    .program-confirmation-card span{display:block;color:#8591a0;font-size:7px;font-weight:800;letter-spacing:.1em;margin-bottom:5px}
+    .program-confirmation-card strong{display:block;color:#25384e;font-size:11px;line-height:1.35;word-break:break-word}
+    .program-flag-box{border:1px solid #dfe7f0;background:#fbfcfe;border-radius:13px;padding:13px;margin-bottom:10px}
+    .program-flag-box>div:first-child strong{display:block;font-size:10px;color:#2d4056;margin-top:2px}
+    .program-flag-box>div:first-child small{display:block;color:#8793a1;font-size:8px;line-height:1.45;margin-top:4px}
+    .program-flag-options{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+    .program-flag{border:1px solid #dce4ed;background:#fff;border-radius:10px;padding:10px;text-align:left;display:grid;grid-template-columns:24px 1fr;gap:0 8px;transition:.15s;cursor:pointer}
+    .program-flag>span{grid-row:1 / span 2;width:24px;height:24px;border-radius:7px;background:#edf2f7;color:#718096;display:grid;place-items:center;font-size:13px;font-weight:800}
+    .program-flag strong{font-size:9px;color:#44566b;align-self:end}
+    .program-flag small{font-size:7px;color:#8793a1;line-height:1.35;margin-top:2px}
+    .program-flag.active{border-color:#9dbdf5;background:#f6f9ff;box-shadow:0 0 0 2px rgba(11,92,255,.05)}
+    .program-flag.active>span{background:var(--sys-primary,var(--primary,#0b5cff));color:#fff}
+    .program-flag.active strong{color:var(--sys-primary,var(--primary,#0b5cff))}
+    .program-confirmation-actions{margin-top:15px}
+    .profile-extra-row strong{max-width:70%;text-align:right;word-break:break-word}
+    @media(max-width:720px){
+      .app-shell.sidebar-collapsed .main-content{width:100%;margin-left:0}
+      .app-shell .sidebar.collapsed{width:76px}
+      .program-confirmation-grid,.program-flag-options{grid-template-columns:1fr}
+      .profile-extra-row{align-items:flex-start}
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function enhancePlanningUI() {
+  injectPlanningEnhancementStyles();
+  ensurePlanningSidebarBehavior();
+  ensureNewProgrammingButton();
+  ensureProgramConfirmationUI();
+  hydrateProfileUI();
+}
+
 async function init() {
   setupSidebar();
+  enhancePlanningUI();
   loadSettings();
   loadModuleCatalog();
   loadProgramHistory();
   bindEvents();
 
   if ($("currentDateTime")) $("currentDateTime").textContent = nowBR();
-  if ($("currentWeek")) $("currentWeek").textContent = currentWeek();
+  if ($("currentWeek")) $("currentWeek").textContent = activeDashboardWeek();
   setColumnViewMode(state.columnViewMode);
 
   const sb = getSupabaseClient();
@@ -3286,7 +3704,7 @@ async function init() {
 
 setInterval(() => {
   if ($("currentDateTime")) $("currentDateTime").textContent = nowBR();
-  if ($("currentWeek")) $("currentWeek").textContent = currentWeek();
+  if ($("currentWeek")) $("currentWeek").textContent = activeDashboardWeek();
 }, 1000);
 
 init().catch(error => {

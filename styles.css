@@ -347,3 +347,8 @@ tbody td{padding:10px 9px;border-bottom:1px solid #eef2f6;vertical-align:middle;
 .report-bar-track b{background:var(--sys-primary,#0b5cff);opacity:.9}
 @media(max-width:800px){.report-filters{grid-template-columns:1fr}.reports-grid{grid-template-columns:1fr}.report-wide{grid-column:auto}.report-metrics{grid-template-columns:1fr 1fr}}
 @media(max-width:480px){.report-metrics{grid-template-columns:1fr}.login-screen::before{width:70vw;height:70vw}.login-screen::after{width:60vw;height:60vw}}
+
+.profile-week-row { align-items: flex-start; }
+.profile-week-control { display:flex; flex-direction:column; gap:5px; min-width:180px; }
+.profile-week-control select { width:100%; min-height:40px; border:1px solid var(--sys-border,#dce4ed); border-radius:10px; padding:0 12px; background:#fff; color:var(--sys-text,#142033); font:inherit; }
+.profile-week-control small { color:#718096; font-size:11px; line-height:1.35; }

@@ -192,17 +192,6 @@
         </div>
       </div>
 
-      <div class="filters card dashboard-filters">
-        <label class="select-field">SEMANA
-          <select id="dashboardWeekFilter"><option value="">Todas</option></select>
-        </label>
-        <label class="select-field">ATIVIDADE
-          <select id="dashboardActivityFilter"><option value="">Todas</option></select>
-        </label>
-        <label class="select-field">EQUIPE
-          <select id="dashboardTeamFilter"><option value="">Todas</option></select>
-        </label>
-      </div>
 
       <div class="metrics-grid dashboard-metrics">
         <div class="metric-card card">
@@ -487,7 +476,7 @@
     <section id="screen-atividades" class="screen">
       <div class="page-title-row">
         <div><span class="section-kicker">ARQUITETURA MODULAR</span><h2>Atividades e módulos</h2><p>Cada atividade funciona como um módulo independente, com colunas próprias e máscara de Excel.</p></div>
-        <div class="page-actions"><button id="exportModuleMaskBtn" class="ghost-btn">⇩ Exportar máscara</button><button id="importModuleMaskBtn" class="ghost-btn">⇧ Importar Excel</button><button id="newActivityBtn" class="primary-btn">＋ Nova atividade</button><input id="moduleExcelInput" type="file" accept=".xlsx,.xls,.csv" class="hidden"></div>
+        <div class="page-actions"><button id="newActivityBtn" class="primary-btn">＋ Nova atividade</button></div>
       </div>
       <div class="module-layout">
         <section class="module-list card">
@@ -622,7 +611,7 @@
           <div class="info-row"><span>Nome</span><strong id="profileName2">—</strong></div>
           <div class="info-row"><span>Identificador</span><strong id="profileBadge2">—</strong></div>
           <div class="info-row"><span>Perfil de acesso</span><strong id="profileRole2">—</strong></div>
-          <div class="info-row"><span>Semana atual</span><strong id="profileWeek">—</strong></div>
+          <div class="info-row profile-week-row"><span>Semana atual</span><label class="profile-week-control"><select id="profileWeekSelect" aria-label="Semana atual"></select><small>Esta semana será usada no Dashboard.</small></label></div>
           <button id="logoutBtn" class="logout-btn">Sair da conta</button>
         </section>
       </div>
