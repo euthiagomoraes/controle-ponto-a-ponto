@@ -1516,78 +1516,46 @@ function weekOptions() {
 }
 
 function setupProgrammingSelectors() {
-  const selectedWeek = $("programWeekFilter")?.value || "";
-  const selectedActivity = $("programActivityFilter")?.value || "";
-  const selectedTeam = $("programTeamFilter")?.value || "";
-  const selectedResponsible = $("programResponsible")?.value || "";
+  const currentWeekValue = normalizeWeek($("programWeek")?.value) || currentWeek();
+  const currentActivity = $("programActivity")?.value || "";
+  const currentTeam = $("programTeam")?.value || "";
   const weeks = weekOptions();
-
-  if ($("programWeekFilter")) {
-    $("programWeekFilter").innerHTML = `<option value="">Todas</option>${weeks}`;
-    if ([...$("programWeekFilter").options].some(option => option.value === selectedWeek)) $("programWeekFilter").value = selectedWeek;
-  }
 
   if ($("programWeek")) {
     $("programWeek").innerHTML = weeks;
-    $("programWeek").value = currentWeek();
-  }
-
-  if ($("programActivityFilter")) {
-    $("programActivityFilter").innerHTML = `<option value="">Todas</option>` + state.moduleCatalog.map(module => `<option value="${escapeHTML(module.id)}">${escapeHTML(module.name)}</option>`).join("");
-    if ([...$("programActivityFilter").options].some(option => option.value === selectedActivity)) $("programActivityFilter").value = selectedActivity;
+    $("programWeek").value = [...$("programWeek").options].some(o => o.value === currentWeekValue) ? currentWeekValue : currentWeek();
   }
 
   if ($("programActivity")) {
     $("programActivity").innerHTML = state.moduleCatalog.map(module => `<option value="${escapeHTML(module.id)}">${escapeHTML(module.name)}</option>`).join("");
-    if (!$("programActivity").value && state.moduleCatalog[0]) $("programActivity").value = state.moduleCatalog[0].id;
-  }
-
-  if ($("programTeamFilter")) {
-    $("programTeamFilter").innerHTML = `<option value="">Todas</option>` + state.teams.map(team => `<option value="${escapeHTML(team.nome)}">${escapeHTML(team.nome)}</option>`).join("");
-    if ([...$("programTeamFilter").options].some(option => option.value === selectedTeam)) $("programTeamFilter").value = selectedTeam;
+    if ([...$("programActivity").options].some(o => o.value === currentActivity)) $("programActivity").value = currentActivity;
+    else if (state.moduleCatalog[0]) $("programActivity").value = state.moduleCatalog[0].id;
   }
 
   if ($("programTeam")) {
-    $("programTeam").innerHTML = state.teams.map(team => `<option value="${escapeHTML(team.nome)}">${escapeHTML(team.nome)}</option>`).join("");
-    if (state.teams.length && !$("programTeam").value) $("programTeam").value = state.teams[0].nome;
-  }
-
-  if ($("programResponsible")) {
-    const technicians = state.peopleRecords.filter(person => person.ativo && person.perfil !== "ADMINISTRADOR");
-    $("programResponsible").innerHTML = technicians.map(person => `<option value="${escapeHTML(person.nome)}">${escapeHTML(person.nome)}</option>`).join("");
-    if ([...$("programResponsible").options].some(option => option.value === selectedResponsible)) $("programResponsible").value = selectedResponsible;
+    const teams = [...state.teams].sort((a, b) => String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR", { numeric: true, sensitivity: "base" }));
+    $("programTeam").innerHTML = `<option value="">Selecione a equipe</option>` + teams.map(team => `<option value="${escapeHTML(team.nome)}">${escapeHTML(team.nome)}</option>`).join("");
+    if ([...$("programTeam").options].some(o => o.value === currentTeam)) $("programTeam").value = currentTeam;
   }
 }
 
 function filteredProgramacoes() {
-  const week = $("programWeekFilter")?.value || "";
-  const activity = $("programActivityFilter")?.value || "";
-  const team = $("programTeamFilter")?.value || "";
-  return state.programacoes
-    .filter(program =>
-      (!week || normalizeWeek(program.week) === normalizeWeek(week)) &&
-      (!activity || program.activity === activity) &&
-      (!team || program.team === team)
-    )
-    .sort((a, b) => `${a.date || ""}-${a.team || ""}`.localeCompare(`${b.date || ""}-${b.team || ""}`));
+  return [...state.programacoes].sort((a, b) => {
+    const aw = weekToNumber(a.week), bw = weekToNumber(b.week);
+    if (aw !== bw) return aw - bw;
+    return `${a.activity || ""}-${a.team || ""}`.localeCompare(`${b.activity || ""}-${b.team || ""}`, "pt-BR");
+  });
 }
 
 function programColumnsForModule(module) {
   const fixed = [
     { key: "week", label: "SEMANA", required: true },
-    { key: "date", label: "DATA", required: true },
     { key: "activity", label: "ATIVIDADE", required: true },
     { key: "team", label: "EQUIPE", required: true },
-    { key: "responsible", label: "RESPONSÁVEL", required: true },
-    { key: "qty", label: "QTD.", required: true },
     { key: "note", label: "OBSERVAÇÃO", required: false }
   ];
   const custom = (module?.columns || []).filter(column => !["week", "date", "activity", "team", "responsible", "qty", "note"].includes(column.key));
   return [...fixed, ...custom];
-}
-
-function getPlanningColumnValue(column, row) {
-  return row?.customData?.[column.key] ?? "";
 }
 
 function renderProgramCustomFields(activityId, values = {}) {
@@ -1617,17 +1585,14 @@ function renderProgramCustomFields(activityId, values = {}) {
 function renderProgramacao() {
   setupProgrammingSelectors();
   const rows = filteredProgramacoes();
-  const selectedActivity = $("programActivityFilter")?.value || "";
-  const module = selectedActivity ? moduleById(selectedActivity) : null;
+  const selectedActivity = $("programActivity")?.value || "";
+  const module = moduleById(selectedActivity);
   const customColumns = module?.columns?.filter(column => !["week", "date", "activity", "team", "responsible", "qty", "note"].includes(column.key)) || [];
 
   $("programCount") && ($("programCount").textContent = rows.length);
-  $("programQuantity") && ($("programQuantity").textContent = rows.reduce((sum, row) => sum + Number(row.qty || 0), 0));
 
   const table = $("programTableBody")?.closest("table");
-  if (table) {
-    table.querySelector("thead tr").innerHTML = `<th>SEMANA</th><th>DATA</th><th>ATIVIDADE</th><th>EQUIPE</th><th>RESPONSÁVEL</th><th>QTD.</th>${customColumns.map(column => `<th>${escapeHTML(column.label)}</th>`).join("")}<th>OBSERVAÇÃO</th><th></th>`;
-  }
+  if (table) table.querySelector("thead tr").innerHTML = `<th>SEMANA</th><th>ATIVIDADE</th><th>EQUIPE</th>${customColumns.map(column => `<th>${escapeHTML(column.label)}</th>`).join("")}<th>OBSERVAÇÃO</th><th></th>`;
 
   if ($("programTableBody")) {
     $("programTableBody").innerHTML = rows.map(row => {
@@ -1637,44 +1602,36 @@ function renderProgramacao() {
         : "";
       return `<tr>
         <td class="week-cell">${escapeHTML(row.week)}</td>
-        <td>${escapeHTML(fmtDate(row.date))}</td>
         <td class="program-activity">${escapeHTML(rowModule?.name || row.activity)}</td>
         <td class="program-team">${escapeHTML(row.team || "—")}</td>
-        <td>${escapeHTML(row.responsible || "—")}</td>
-        <td class="program-qty">${escapeHTML(row.qty)}</td>
         ${customCells}
         <td class="program-note">${escapeHTML(row.note || "—")}</td>
         <td><button class="delete-program" data-program-id="${escapeHTML(row.id)}" title="Excluir">×</button></td>
       </tr>`;
     }).join("");
-
-    $("programTableBody").querySelectorAll(".delete-program").forEach(button => {
-      button.onclick = () => deleteProgramacao(button.dataset.programId);
-    });
+    $("programTableBody").querySelectorAll(".delete-program").forEach(button => button.onclick = () => deleteProgramacao(button.dataset.programId));
   }
-
   $("programEmpty")?.classList.toggle("hidden", rows.length !== 0);
 }
 
 function openProgramModal() {
   setupProgrammingSelectors();
-  ensureProgramConfirmationUI();
-  $("programModal")?.classList.remove("hidden");
   $("programFormMessage") && ($("programFormMessage").textContent = "");
-  $("programDate") && ($("programDate").value = new Date().toISOString().slice(0, 10));
   $("programWeek") && ($("programWeek").value = currentWeek());
-  $("programQtyInput") && ($("programQtyInput").value = "1");
   $("programNote") && ($("programNote").value = "");
   state.pendingProgramDraft = null;
   setProgramMode("incluir");
   showProgramEditStep();
   if ($("programActivity")) renderProgramCustomFields($("programActivity").value);
+  document.querySelector("#screen-programacao")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function closeProgramModal() {
-  $("programModal")?.classList.add("hidden");
+  $("programForm")?.reset();
   state.pendingProgramDraft = null;
   showProgramEditStep();
+  setupProgrammingSelectors();
+  if ($("programActivity")) renderProgramCustomFields($("programActivity").value);
 }
 
 async function resolveEquipmentId(customData, module) {
@@ -1726,7 +1683,8 @@ async function resolveEquipmentId(customData, module) {
 function ensureProgramConfirmationUI() {
   const modalBox = document.querySelector("#programModal .modal-box");
   const form = $("programForm");
-  if (!modalBox || !form || $("programConfirmationStep")) return;
+  if ($("programConfirmationStep")) return;
+  if (!modalBox || !form) return;
 
   const panel = document.createElement("section");
   panel.id = "programConfirmationStep";
@@ -1814,9 +1772,6 @@ function showProgramConfirmationStep(draft) {
   $("confirmProgramWeek").textContent = draft.week;
   $("confirmProgramActivity").textContent = draft.module?.name || draft.activity;
   $("confirmProgramTeam").textContent = draft.team;
-  $("confirmProgramResponsible").textContent = draft.responsible;
-  $("confirmProgramQty").textContent = String(draft.qty);
-  $("confirmProgramDate").textContent = fmtDate(draft.date);
   $("programConfirmationMessage").textContent = "";
   setProgramMode(draft.mode || "incluir");
 }
@@ -1824,21 +1779,18 @@ function showProgramConfirmationStep(draft) {
 function collectProgramDraftForConfirmation() {
   const { data: customData, invalid } = collectCustomData();
   const week = normalizeWeek($("programWeek")?.value);
-  const date = $("programDate")?.value || "";
   const activity = $("programActivity")?.value || "";
   const team = $("programTeam")?.value || "";
-  const responsible = $("programResponsible")?.value || "";
-  const qty = Number($("programQtyInput")?.value || 0);
   const note = $("programNote")?.value.trim() || "";
   const module = moduleById(activity);
 
-  if (!week || !date || !activity || !team || !responsible || !qty || qty < 1 || invalid) {
-    $("programFormMessage") && ($("programFormMessage").textContent = "Preencha os campos obrigatórios do planejamento e da atividade.");
+  if (!week || !activity || !team || invalid) {
+    $("programFormMessage") && ($("programFormMessage").textContent = "Preencha os campos obrigatórios: Semana, Atividade e Equipe.");
     return null;
   }
 
   const currentMode = state.pendingProgramDraft?.mode || "incluir";
-  return { week, date, activity, team, responsible, qty, note, customData, module, mode: currentMode };
+  return { week, activity, team, note, customData, module, mode: currentMode };
 }
 
 function createProgramacao() {
@@ -1878,35 +1830,25 @@ function collectCustomData() {
 }
 
 async function saveProgramacaoToDatabase() {
-  const { data: customData, invalid } = collectCustomData();
-  const week = normalizeWeek($("programWeek")?.value);
-  const date = $("programDate")?.value || "";
-  const activity = $("programActivity")?.value || "";
-  const team = $("programTeam")?.value || "";
-  const responsible = $("programResponsible")?.value || "";
-  const qty = Number($("programQtyInput")?.value || 0);
-  const note = $("programNote")?.value.trim() || "";
+  const draft = state.pendingProgramDraft;
+  if (!draft) return;
+  const { week, activity, team, note, customData } = draft;
   const module = moduleById(activity);
+  const sb = getSupabaseClient();
 
-  if (!week || !date || !activity || !team || !responsible || !qty || qty < 1 || invalid) {
-    if ($("programFormMessage")) $("programFormMessage").textContent = "Preencha os campos obrigatórios do planejamento e da atividade.";
+  if (!week || !activity || !team || !module) {
+    $("programConfirmationMessage") && ($("programConfirmationMessage").textContent = "Dados obrigatórios incompletos.");
     return;
   }
-
-  const sb = getSupabaseClient();
   if (!sb) {
-    if ($("programFormMessage")) $("programFormMessage").textContent = "Supabase não está configurado.";
+    $("programConfirmationMessage") && ($("programConfirmationMessage").textContent = "Supabase não está configurado.");
     return;
   }
 
   try {
     const teamRecord = teamByName(team);
-    const person = personByName(responsible);
-    if (!teamRecord) throw new Error("Equipe selecionada não encontrada no banco.");
-    if (!person) throw new Error("Responsável selecionado não encontrado no banco.");
-    if (!module?.dbId) {
-      await syncModulesToDB();
-    }
+    if (!teamRecord) throw new Error("Equipe selecionada não encontrada no cadastro.");
+    if (!module.dbId) await syncModulesToDB();
     const refreshedModule = moduleById(activity);
     const equipmentId = await resolveEquipmentId(customData, refreshedModule);
 
@@ -1915,37 +1857,29 @@ async function saveProgramacaoToDatabase() {
       semana: weekToNumber(week),
       status: "PROGRAMADO",
       atividade_id: refreshedModule.dbId,
-      data_programacao: date || null,
+      data_programacao: null,
       equipe_id: teamRecord.id,
-      responsavel_id: person.id,
-      quantidade: qty,
+      responsavel_id: null,
+      quantidade: 1,
       observacao: note || null,
       dados_personalizados: customData,
-      modo_importacao: state.pendingProgramDraft?.mode === "nova" ? "MANUAL_NOVA_PROGRAMACAO" : "MANUAL_INCLUIR",
+      modo_importacao: draft.mode === "nova" ? "MANUAL_NOVA_PROGRAMACAO" : "MANUAL_INCLUIR",
       arquivo_importacao: null,
       usuario_importacao: state.currentUser?.authUserId || null,
       updated_at: new Date().toISOString()
     };
 
-    const { data: inserted, error } = await sb
-      .from("tb_programacoes")
-      .insert(payload)
-      .select("id,equipamento_id,semana,status,atividade_id,data_programacao,equipe_id,responsavel_id,quantidade,observacao,dados_personalizados,created_at")
-      .single();
+    const { error } = await sb.from("tb_programacoes").insert(payload);
     if (error) throw error;
-
-    const mapped = mapProgrammingRecord(inserted);
-    state.programacoes.push(mapped);
-    cacheProgramacoes();
 
     closeProgramModal();
     await loadProgramacoes();
     renderProgramacao();
     renderDashboard();
-    toast("Programação cadastrada no Supabase.");
+    toast("Programação confirmada no Supabase.");
   } catch (error) {
-    console.error("Erro ao criar programação:", error);
-    if ($("programFormMessage")) $("programFormMessage").textContent = error?.message || "Não foi possível salvar a programação.";
+    console.error("Erro ao confirmar programação:", error);
+    $("programConfirmationMessage") && ($("programConfirmationMessage").textContent = error?.message || "Não foi possível salvar a programação.");
   }
 }
 
@@ -2120,10 +2054,10 @@ function validateAndMapProgramImport(rows, module) {
 }
 
 function downloadProgramTemplate() {
-  const activityId = $("programActivityFilter")?.value || "";
+  const activityId = $("programActivity")?.value || "";
   const module = moduleById(activityId);
   if (!module) {
-    toast("Selecione uma atividade no filtro ATIVIDADE para gerar o template.");
+    toast("Selecione uma atividade no cabeçalho da programação para gerar o template.");
     return;
   }
 
@@ -2167,10 +2101,10 @@ function exportCSV(headers, rows, filename) {
 }
 
 function importProgramFile(file) {
-  const activityId = $("programActivityFilter")?.value || "";
+  const activityId = $("programActivity")?.value || "";
   const module = moduleById(activityId);
   if (!module) {
-    toast("Selecione uma atividade no filtro ATIVIDADE antes de importar.");
+    toast("Selecione uma atividade no cabeçalho da programação antes de importar.");
     return;
   }
   if (!file) return;
@@ -3351,10 +3285,11 @@ function bindEvents() {
   $("cancelProgramModal") && ($("cancelProgramModal").onclick = closeProgramModal);
   $("programModal .modal-backdrop") && ($("programModal .modal-backdrop").onclick = closeProgramModal);
   $("programForm")?.addEventListener("submit", event => { event.preventDefault(); createProgramacao(); });
-  $("programWeekFilter") && ($("programWeekFilter").onchange = renderProgramacao);
-  $("programActivityFilter") && ($("programActivityFilter").onchange = renderProgramacao);
-  $("programTeamFilter") && ($("programTeamFilter").onchange = renderProgramacao);
   $("programActivity") && ($("programActivity").onchange = () => renderProgramCustomFields($("programActivity").value));
+  $("programTeam") && ($("programTeam").onchange = () => { $("programFormMessage") && ($("programFormMessage").textContent = ""); });
+  $("editProgramConfirmation") && ($("editProgramConfirmation").onclick = showProgramEditStep);
+  $("confirmProgramConfirmation") && ($("confirmProgramConfirmation").onclick = confirmProgramacao);
+  document.querySelectorAll("[data-program-mode]").forEach(button => button.onclick = () => setProgramMode(button.dataset.programMode));
 
   $("refreshDashboard") && ($("refreshDashboard").onclick = async () => { await syncAll(); toast("Dashboard atualizado."); });
   $("exportDashboardPdfBtn") && ($("exportDashboardPdfBtn").onclick = exportDashboardPDF);
@@ -3450,16 +3385,7 @@ function ensurePlanningSidebarBehavior() {
 }
 
 function ensureNewProgrammingButton() {
-  const actions = document.querySelector("#screen-programacao .page-title-row .page-actions");
-  if (!actions || $("newProgramBtn")) return;
-
-  const button = document.createElement("button");
-  button.id = "newProgramBtn";
-  button.type = "button";
-  button.className = "primary-btn";
-  button.textContent = "＋ Nova Programação";
-  button.addEventListener("click", openProgramModal);
-  actions.appendChild(button);
+  // A nova programação agora é preenchida diretamente no cabeçalho da tela.
 }
 
 function injectPlanningEnhancementStyles() {
@@ -3481,6 +3407,20 @@ function injectPlanningEnhancementStyles() {
     .app-shell .sidebar.collapsed .sidebar-footer .online-dot{margin-right:0}
     .app-shell .sidebar.collapsed .sidebar-toggle svg{transform:rotate(180deg)}
 
+    .programming-header-card{padding:18px;margin-bottom:14px}
+    .programming-header-title{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}
+    .programming-header-title h3{margin:3px 0 0;font-size:16px}
+    .program-inline-form{display:block}
+    .program-required-grid{display:grid;grid-template-columns:1fr 1.35fr 1fr;gap:12px}
+    .program-required-grid label,.program-inline-form>label{display:flex;flex-direction:column;gap:6px;color:#647386;font-size:9px;font-weight:800;letter-spacing:.05em}
+    .program-required-grid select,.program-inline-form textarea{width:100%;border:1px solid #dce4ed;background:#fff;border-radius:9px;padding:10px 11px;color:#25384e;font:inherit;font-size:11px;outline:none}
+    .program-required-grid select:focus,.program-inline-form textarea:focus{border-color:#8fb1e8;box-shadow:0 0 0 3px rgba(11,92,255,.06)}
+    .program-inline-form .dynamic-form-grid{margin:12px 0}
+    .program-inline-form>label{margin-top:12px}
+    .program-inline-actions{display:flex;justify-content:flex-end;margin-top:14px}
+    .program-list-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 18px 10px}
+    .program-list-head h3{margin:3px 0 0;font-size:15px}
+    @media(max-width:820px){.program-required-grid{grid-template-columns:1fr}.programming-header-title,.program-list-head{align-items:flex-start;flex-direction:column}}
     .program-confirmation-step{display:block}
     .program-stepper{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;background:#f3f6fa;border:1px solid #e3e9f0;border-radius:11px;margin-bottom:18px}
     .program-step{border:0;background:transparent;color:#8793a2;padding:9px 10px;border-radius:8px;font-size:9px;font-weight:800;cursor:default}

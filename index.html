@@ -284,7 +284,7 @@
         <div>
           <span class="section-kicker">PLANEJAMENTO</span>
           <h2>Programação de atividades</h2>
-          <p>Cadastre o que deverá ser executado em cada semana e equipe.</p>
+          <p>Preencha os campos obrigatórios e confirme a programação antes de gravar.</p>
         </div>
         <div class="page-actions">
           <button id="downloadProgramTemplateBtn" class="ghost-btn">⇩ Baixar template Excel</button>
@@ -293,48 +293,83 @@
         </div>
       </div>
 
-      <div class="filters card programming-filters">
-        <label class="select-field">SEMANA
-          <select id="programWeekFilter"></select>
-        </label>
-        <label class="select-field">ATIVIDADE
-          <select id="programActivityFilter"><option value="">Todas</option></select>
-        </label>
-        <label class="select-field">EQUIPE
-          <select id="programTeamFilter"><option value="">Todas</option></select>
-        </label>
-        <div class="program-summary">
-          <span><b id="programCount">0</b> programações</span>
-          <span><b id="programQuantity">0</b> atividades previstas</span>
+      <section class="card programming-header-card">
+        <div class="programming-header-title">
+          <div><span class="section-kicker">NOVA PROGRAMAÇÃO</span><h3>Definição da programação</h3></div>
+          <span class="tag-badge">CAMPOS OBRIGATÓRIOS</span>
         </div>
-      </div>
+        <form id="programForm" class="program-inline-form">
+          <div class="program-required-grid">
+            <label>Semana *
+              <select id="programWeek" required></select>
+            </label>
+            <label>Atividade *
+              <select id="programActivity" required></select>
+            </label>
+            <label>Equipe *
+              <select id="programTeam" required></select>
+            </label>
+          </div>
+          <div id="programCustomFields" class="dynamic-form-grid"></div>
+          <label>Observação
+            <textarea id="programNote" rows="2" maxlength="250" placeholder="Detalhes adicionais da programação..."></textarea>
+          </label>
+          <p id="programFormMessage" class="form-message"></p>
+          <div class="program-inline-actions">
+            <button type="submit" class="primary-btn">Continuar para confirmação →</button>
+          </div>
+        </form>
+
+        <section id="programConfirmationStep" class="program-confirmation-step hidden">
+          <div class="program-stepper" role="tablist" aria-label="Etapas da programação">
+            <button type="button" class="program-step" data-program-step="edit">1. Dados</button>
+            <button type="button" class="program-step active" data-program-step="confirm">2. Confirmar</button>
+          </div>
+          <div class="program-confirmation-head">
+            <span class="section-kicker">CONFIRMAÇÃO DA PROGRAMAÇÃO</span>
+            <h3>Confira antes de gravar</h3>
+            <p>A programação somente será gravada no banco após clicar em <strong>Confirmar</strong>.</p>
+          </div>
+          <div class="program-confirmation-grid">
+            <div class="program-confirmation-card"><span>SEMANA</span><strong id="confirmProgramWeek">—</strong></div>
+            <div class="program-confirmation-card"><span>ATIVIDADE</span><strong id="confirmProgramActivity">—</strong></div>
+            <div class="program-confirmation-card"><span>EQUIPE</span><strong id="confirmProgramTeam">—</strong></div>
+          </div>
+          <div class="program-flag-box">
+            <div>
+              <span class="section-kicker">FLAG DA PROGRAMAÇÃO</span>
+              <strong>Como esta programação deve ser registrada?</strong>
+              <small>As duas opções são cumulativas e não apagam programações anteriores.</small>
+            </div>
+            <div class="program-flag-options" role="group" aria-label="Flag da programação">
+              <button type="button" class="program-flag active" data-program-mode="incluir"><span>＋</span><strong>Incluir</strong><small>Adicionar ao planejamento existente</small></button>
+              <button type="button" class="program-flag" data-program-mode="nova"><span>＋</span><strong>Nova Programação</strong><small>Registrar uma nova programação</small></button>
+            </div>
+          </div>
+          <p id="programConfirmationMessage" class="form-message"></p>
+          <div class="modal-actions program-confirmation-actions">
+            <button type="button" id="editProgramConfirmation" class="secondary-btn">Editar</button>
+            <button type="button" id="confirmProgramConfirmation" class="primary-btn">Confirmar</button>
+          </div>
+        </section>
+      </section>
+
       <div class="program-import-hint">
-        <span>Excel vinculado à atividade selecionada no filtro <strong>ATIVIDADE</strong>.</span>
-        <span>O template usa os campos fixos da programação + as colunas configuradas em <strong>Atividades</strong>. As importações são cumulativas.</span>
+        <span>As programações abaixo permanecem acumuladas no sistema.</span>
+        <span>Use <strong>Incluir</strong> ou <strong>Nova Programação</strong> na confirmação conforme a intenção do lançamento.</span>
       </div>
 
       <section class="card program-table-card">
+        <div class="program-list-head">
+          <div><span class="section-kicker">PROGRAMAÇÕES CADASTRADAS</span><h3>Lista de atividades programadas</h3></div>
+          <div class="program-summary"><span><b id="programCount">0</b> programações</span></div>
+        </div>
         <div class="table-wrap large-table">
           <table>
-            <thead>
-              <tr>
-                <th>SEMANA</th>
-                <th>DATA</th>
-                <th>ATIVIDADE</th>
-                <th>EQUIPE</th>
-                <th>RESPONSÁVEL</th>
-                <th>QTD.</th>
-                <th>OBSERVAÇÃO</th>
-                <th></th>
-              </tr>
-            </thead>
+            <thead><tr><th>SEMANA</th><th>ATIVIDADE</th><th>EQUIPE</th><th>OBSERVAÇÃO</th><th></th></tr></thead>
             <tbody id="programTableBody"></tbody>
           </table>
-          <div id="programEmpty" class="empty-state hidden">
-            <div>□</div>
-            <strong>Nenhuma programação encontrada</strong>
-            <span>Cadastre uma atividade ou ajuste os filtros.</span>
-          </div>
+          <div id="programEmpty" class="empty-state hidden"><div>□</div><strong>Nenhuma programação encontrada</strong><span>Cadastre uma nova programação acima.</span></div>
         </div>
       </section>
     </section>
