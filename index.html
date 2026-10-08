@@ -387,54 +387,52 @@
         </label>
       </div>
 
-      <div class="content-grid">
-        <section class="equipment-card card">
+      <div class="technician-mobile-shell">
+        <div class="tech-mobile-filter-bar card">
+          <div class="search-box">
+            <span class="search-icon">⌕</span>
+            <input id="tagSearch" type="search" placeholder="Pesquisar atividade, TAG ou campo..." autocomplete="off">
+            <button id="clearSearch" class="clear-search" aria-label="Limpar busca">×</button>
+          </div>
+          <label class="select-field">Atividade
+            <select id="sysFilter"><option value="">Todas</option></select>
+          </label>
+          <label class="select-field">Equipe
+            <select id="subsysFilter"><option value="">Todas</option></select>
+          </label>
+        </div>
+
+        <section class="technician-focus-card card">
           <div class="card-heading">
-            <div><span class="section-kicker">EQUIPAMENTO SELECIONADO</span><h2 id="selectedTagTitle">Selecione uma TAG</h2></div>
+            <div><span class="section-kicker">ATIVIDADE SELECIONADA</span><h2 id="selectedTagTitle">Selecione uma atividade</h2><p id="selectedActivitySubtitle">Os campos abaixo seguem exatamente a configuração criada pelo Administrador.</p></div>
             <span id="selectedBadge" class="tag-badge">AGUARDANDO</span>
           </div>
-          <div class="equipment-fields">
-            <div class="field"><span>TAG</span><strong id="fieldTag">—</strong></div>
-            <div class="field"><span>LOOP</span><strong id="fieldLoop">—</strong></div>
-            <div class="field"><span>SERVICE</span><strong id="fieldService">—</strong></div>
-            <div class="field"><span>TIPE</span><strong id="fieldType">—</strong></div>
-            <div class="field"><span>FORN.</span><strong id="fieldForn">—</strong></div>
-            <div class="field"><span>SYS</span><strong id="fieldSys">—</strong></div>
-            <div class="field"><span>SUBSYS</span><strong id="fieldSubsys">—</strong></div>
-            <div class="field"><span>SEMANA</span><strong id="fieldWeek">—</strong></div>
-            <div class="field field-wide"><span>DESCRIÇÃO</span><strong id="fieldDescription">—</strong></div>
-            <div class="field field-wide point-field"><span>ÚLTIMO LOG</span><strong id="fieldLog">Não registrado</strong></div>
-            <div id="technicianCustomFields" class="field-wide dynamic-fields-grid"></div>
-          </div>
+          <div id="technicianActivityDetail" class="technician-activity-detail"></div>
+          <div id="technicianCustomFields" class="dynamic-fields-grid"></div>
           <div class="action-area">
-            <button id="registerBtn" class="primary-btn" disabled>✓ &nbsp;Registrar data de ponto-a-ponto</button>
-            <button id="repeatBtn" class="secondary-btn" disabled>↻ &nbsp;Repetir ponto a ponto</button>
+            <button id="registerBtn" class="primary-btn" disabled>✓ &nbsp;Registrar execução</button>
+            <button id="repeatBtn" class="secondary-btn" disabled>↻ &nbsp;Repetir execução</button>
           </div>
           <p id="actionMessage" class="action-message" role="status"></p>
         </section>
 
-        <section class="list-card card">
+        <section class="technician-list-card card">
           <div class="list-header">
-            <div><span class="section-kicker">BASE DE CONTROLE</span><h2>Equipamentos programados</h2></div>
+            <div><span class="section-kicker">OPERAÇÃO DE CAMPO</span><h2>Atividades da semana</h2><small id="technicianActivityHint">Cada atividade usa a estrutura cadastrada pelo Administrador.</small></div>
             <div class="tech-bulk-actions">
               <label class="select-all-label"><input id="selectAllTags" type="checkbox"> Selecionar todos</label>
               <button id="registerSelectedBtn" class="primary-btn" disabled>✓ Registrar selecionados (<span id="selectedCount">0</span>)</button>
             </div>
             <div class="counters">
               <span><b id="totalCount">0</b> programados</span>
-              <span class="counter-done"><b id="doneCount">0</b> com log</span>
+              <span class="counter-done"><b id="doneCount">0</b> executados</span>
               <span class="counter-pending"><b id="pendingCount">0</b> pendentes</span>
             </div>
           </div>
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th class="select-col"></th><th>TAG</th><th>LOOP</th><th>SERVICE</th><th>TIPE</th><th>DESCRIÇÃO</th><th>SEMANA</th><th>LOGS</th></tr></thead>
-              <tbody id="tagTableBody"></tbody>
-            </table>
-            <div id="emptyState" class="empty-state hidden">
-              <div>⌕</div><strong>Nenhum equipamento encontrado</strong>
-              <span>Ajuste a TAG, SYS ou SUBSYS.</span>
-            </div>
+          <div id="technicianActivityCards" class="technician-activity-cards"></div>
+          <div id="emptyState" class="empty-state hidden">
+            <div>⌕</div><strong>Nenhuma atividade encontrada</strong>
+            <span>Ajuste a busca, atividade ou equipe.</span>
           </div>
         </section>
       </div>
@@ -495,6 +493,10 @@
               <div><span>COLUNAS</span><strong id="moduleColumnCount">0</strong></div>
               <div><span>OBRIGATÓRIAS</span><strong id="moduleRequiredCount">0</strong></div>
               <div><span>REGISTROS IMPORTADOS</span><strong id="moduleRecordCount">0</strong></div>
+            </div>
+            <div id="activityPdfTemplateActions" class="activity-pdf-actions hidden">
+              <div><span class="section-kicker">MODELO DE RELATÓRIO</span><strong id="activityPdfTemplateTitle">Modelo PDF</strong><small id="activityPdfTemplateDescription">Exporte uma estrutura padrão para uso em campo.</small></div>
+              <button id="exportActivityPdfTemplate" type="button" class="ghost-btn">⇩ Exportar modelo PDF</button>
             </div>
             <div class="column-builder-head"><div><span class="section-kicker">MÁSCARA DO EXCEL</span><h4>Colunas personalizadas</h4><p>Crie, edite, ordene e exclua campos. A mesma estrutura será usada na programação e na importação/exportação.</p></div><button id="newColumnBtn" class="primary-btn">＋ Nova coluna</button></div>
             <div class="column-view-toolbar">

@@ -1042,6 +1042,16 @@ function renderModules() {
   $("moduleColumnCount") && ($("moduleColumnCount").textContent = module.columns.length);
   $("moduleRequiredCount") && ($("moduleRequiredCount").textContent = module.columns.filter(c => c.required).length);
   $("moduleRecordCount") && ($("moduleRecordCount").textContent = (moduleRecordStore()[module.id] || []).length);
+  const pdfActions = $("activityPdfTemplateActions");
+  const pdfTitle = $("activityPdfTemplateTitle");
+  const pdfDescription = $("activityPdfTemplateDescription");
+  const hasPdfTemplate = /loop|preserva/i.test(module.name);
+  pdfActions?.classList.toggle("hidden", !hasPdfTemplate);
+  if (hasPdfTemplate) {
+    const preservation = /preserva/i.test(module.name);
+    if (pdfTitle) pdfTitle.textContent = `Modelo PDF • ${preservation ? "Preservação com foto" : "Loop Teste"}`;
+    if (pdfDescription) pdfDescription.textContent = preservation ? "Modelo com áreas de evidência fotográfica para registro em campo." : "Modelo de relatório para identificação, resultado e observações do teste.";
+  }
   $("maskFileName") && ($("maskFileName").textContent = `mascara_${makeKey(module.name)}.xlsx`);
 
   const host = $("columnRows");
@@ -2445,41 +2455,23 @@ function logEntries(row) {
 
 async function loadData() {
   const sb = getSupabaseClient();
-  const ppaModule = moduleById("ppa");
-
-  if (!sb || !ppaModule?.dbId) {
-    state.rows = [];
-    return;
-  }
-
+  if (!sb) { state.rows = []; return; }
   const currentNumber = currentWeekNumber();
 
   const { data: programData, error: programError } = await sb
     .from("tb_programacoes")
     .select("id,equipamento_id,semana,status,atividade_id,data_programacao,equipe_id,responsavel_id,quantidade,observacao,dados_personalizados,created_at")
-    .eq("atividade_id", ppaModule.dbId)
     .eq("semana", currentNumber)
     .order("created_at", { ascending: true });
-
-  if (programError) {
-    console.error("Erro ao carregar programação PPA:", programError);
-    state.rows = [];
-    return;
-  }
+  if (programError) { console.error("Erro ao carregar programação do Técnico:", programError); state.rows = []; return; }
 
   const programs = programData || [];
   const equipmentIds = programs.map(item => item.equipamento_id).filter(Boolean);
   const programIds = programs.map(item => item.id).filter(Boolean);
-
   const [equipmentResult, executionResult] = await Promise.all([
-    equipmentIds.length
-      ? sb.from("tb_equipamentos").select("id,tag,forn,sys,subsys,loop,service,tipe,descricao,ativo").in("id", equipmentIds)
-      : Promise.resolve({ data: [], error: null }),
-    programIds.length
-      ? sb.from("tb_execucoes").select("id,programacao_id,executante_id,executado_em,observacao,created_at,foto_url").in("programacao_id", programIds).order("executado_em", { ascending: true })
-      : Promise.resolve({ data: [], error: null })
+    equipmentIds.length ? sb.from("tb_equipamentos").select("id,tag,forn,sys,subsys,loop,service,tipe,descricao,ativo").in("id", equipmentIds) : Promise.resolve({ data: [], error: null }),
+    programIds.length ? sb.from("tb_execucoes").select("id,programacao_id,executante_id,executado_em,observacao,created_at,foto_url").in("programacao_id", programIds).order("executado_em", { ascending: true }) : Promise.resolve({ data: [], error: null })
   ]);
-
   if (equipmentResult.error) throw equipmentResult.error;
   if (executionResult.error) throw executionResult.error;
 
@@ -2487,19 +2479,20 @@ async function loadData() {
   const executionByProgram = new Map();
   (executionResult.data || []).forEach(execution => {
     const list = executionByProgram.get(execution.programacao_id) || [];
-    const team = programs.find(program => program.id === execution.programacao_id)?.equipe_id;
-    execution.equipeNome = state.teams.find(item => item.id === team)?.nome || "";
-    list.push(execution);
-    executionByProgram.set(execution.programacao_id, list);
+    const program = programs.find(item => item.id === execution.programacao_id);
+    execution.equipeNome = state.teams.find(item => item.id === program?.equipe_id)?.nome || "";
+    list.push(execution); executionByProgram.set(execution.programacao_id, list);
   });
 
   state.rows = programs.map(program => {
+    const module = moduleByDbId(program.atividade_id) || moduleById("ppa");
     const equipment = equipmentById.get(program.equipamento_id) || {};
-    const executionLogs = executionByProgram.get(program.id) || [];
     const customData = program.dados_personalizados || {};
-    return {
+    const executionLogs = executionByProgram.get(program.id) || [];
+    const row = {
       programacaoId: program.id,
-      activityModuleId: "ppa",
+      activityModuleId: module?.id || "ppa",
+      activityName: module?.name || "Atividade",
       FORN: equipment.forn || customData.forn || "",
       SYS: equipment.sys || customData.sys || "",
       SUBSYS: equipment.subsys || customData.subsys || "",
@@ -2514,182 +2507,147 @@ async function loadData() {
       customData,
       equipamentoId: program.equipamento_id,
       team: state.teams.find(item => item.id === program.equipe_id)?.nome || "",
-      status: program.status
+      status: program.status,
+      module
     };
+    return row;
   });
+}
+
+function rowValueForColumn(row, column) {
+  if (!row || !column) return "";
+  if (column.key === "week") return row.Week || "";
+  if (column.key === "logs") return latestLog(row);
+  const aliases = {
+    forn: "FORN", sys: "SYS", subsys: "SUBSYS", loop: "LOOP", tag: "TAG", service: "SERVICE",
+    tipe: "TIPE", type: "TIPE", descricao: "DESCRIÇÃO", description: "DESCRIÇÃO"
+  };
+  const key = aliases[column.key] || column.key;
+  return row.customData?.[column.key] ?? row[key] ?? "";
+}
+
+function technicianSearchMatch(row, query) {
+  if (!query) return true;
+  const module = row.module || moduleById(row.activityModuleId);
+  const values = [row.activityName, row.team, row.TAG, row.SYS, row.SUBSYS, ...(module?.columns || []).map(c => rowValueForColumn(row, c))];
+  return values.some(value => String(value ?? "").toLowerCase().includes(query));
 }
 
 function populateFilters() {
   const rows = state.rows.filter(row => normalizeWeek(row.Week) === activeDashboardWeek());
-  const sys = [...new Set(rows.map(row => String(row.SYS || "").trim()).filter(Boolean))].sort();
-  const subsys = [...new Set(rows.map(row => String(row.SUBSYS || "").trim()).filter(Boolean))].sort();
-
-  if ($("sysFilter")) $("sysFilter").innerHTML = `<option value="">Todos</option>` + sys.map(value => `<option>${escapeHTML(value)}</option>`).join("");
-  if ($("subsysFilter")) $("subsysFilter").innerHTML = `<option value="">Todos</option>` + subsys.map(value => `<option>${escapeHTML(value)}</option>`).join("");
+  const activities = [...new Set(rows.map(row => row.activityName).filter(Boolean))].sort();
+  const teams = [...new Set(rows.map(row => row.team).filter(Boolean))].sort();
+  const sys = $("sysFilter"); const subsys = $("subsysFilter");
+  if (sys) sys.innerHTML = `<option value="">Todas</option>${activities.map(name => `<option value="${escapeHTML(name)}">${escapeHTML(name)}</option>`).join("")}`;
+  if (subsys) subsys.innerHTML = `<option value="">Todas</option>${teams.map(name => `<option value="${escapeHTML(name)}">${escapeHTML(name)}</option>`).join("")}`;
 }
 
 function filteredRows() {
-  const week = currentWeek();
-  const query = $("tagSearch")?.value.trim().toLowerCase() || "";
-  const sys = $("sysFilter")?.value || "";
-  const subsys = $("subsysFilter")?.value || "";
-  return state.rows.filter(row =>
-    normalizeWeek(row.Week) === week &&
-    (!query || String(row.TAG || "").toLowerCase().includes(query)) &&
-    (!sys || String(row.SYS || "") === sys) &&
-    (!subsys || String(row.SUBSYS || "") === subsys)
-  );
-}
-
-function counters(rows) {
-  const done = rows.filter(hasLog).length;
-  $("totalCount") && ($("totalCount").textContent = rows.length);
-  $("doneCount") && ($("doneCount").textContent = done);
-  $("pendingCount") && ($("pendingCount").textContent = rows.length - done);
-}
-
-function renderTable() {
-  const rows = filteredRows();
-  const body = $("tagTableBody");
-  if (!body) return;
-
-  body.innerHTML = rows.map(row => `
-    <tr class="${row.TAG === state.selectedTag ? "selected" : ""}" data-tag="${escapeHTML(row.TAG)}">
-      <td class="select-cell"><input type="checkbox" class="row-select" data-tag-select="${escapeHTML(row.TAG)}" ${state.selectedTags.has(row.TAG) ? "checked" : ""} aria-label="Selecionar ${escapeHTML(row.TAG)}"></td>
-      <td class="tag-cell">${escapeHTML(row.TAG)}</td>
-      <td>${escapeHTML(row.LOOP)}</td>
-      <td>${escapeHTML(row.SERVICE)}</td>
-      <td>${escapeHTML(row.TIPE)}</td>
-      <td>${escapeHTML(row.DESCRIÇÃO)}</td>
-      <td class="week-cell">${escapeHTML(row.Week)}</td>
-      <td class="log-cell">${hasLog(row) ? escapeHTML(latestLog(row)) : "—"}</td>
-    </tr>
-  `).join("");
-
-  body.querySelectorAll("tr[data-tag]").forEach(row => {
-    row.onclick = event => {
-      if (event.target.closest("input")) return;
-      selectItem(row.dataset.tag);
-    };
-  });
-
-  body.querySelectorAll("[data-tag-select]").forEach(input => {
-    input.onchange = event => {
-      event.stopPropagation();
-      if (input.checked) state.selectedTags.add(input.dataset.tagSelect);
-      else state.selectedTags.delete(input.dataset.tagSelect);
-      updateMultiSelectionUI();
-    };
-  });
-
-  $("emptyState")?.classList.toggle("hidden", rows.length !== 0);
-  counters(rows);
-  updateMultiSelectionUI();
-
-  if (!state.selectedTag && rows.length) selectItem(rows[0].TAG, false);
-  else if (state.selectedTag && !rows.some(row => row.TAG === state.selectedTag)) {
-    state.selectedTag = null;
-    clearSelection();
-  }
+  const query = String($("tagSearch")?.value || "").trim().toLowerCase();
+  const activity = String($("sysFilter")?.value || "");
+  const team = String($("subsysFilter")?.value || "");
+  return state.rows.filter(row => normalizeWeek(row.Week) === activeDashboardWeek())
+    .filter(row => !activity || row.activityName === activity)
+    .filter(row => !team || row.team === team)
+    .filter(row => technicianSearchMatch(row, query));
 }
 
 function updateMultiSelectionUI() {
   const count = state.selectedTags.size;
   $("selectedCount") && ($("selectedCount").textContent = count);
   if ($("registerSelectedBtn")) $("registerSelectedBtn").disabled = count === 0;
-
   const visible = filteredRows();
   if ($("selectAllTags")) {
-    $("selectAllTags").checked = visible.length > 0 && visible.every(row => state.selectedTags.has(row.TAG));
-    $("selectAllTags").indeterminate = visible.some(row => state.selectedTags.has(row.TAG)) && !$("selectAllTags").checked;
+    $("selectAllTags").checked = visible.length > 0 && visible.every(row => state.selectedTags.has(row.programacaoId));
+    $("selectAllTags").indeterminate = visible.some(row => state.selectedTags.has(row.programacaoId)) && !$("selectAllTags").checked;
   }
 }
 
 function toggleSelectAllTags() {
   const visible = filteredRows();
-  if ($("selectAllTags")?.checked) visible.forEach(row => state.selectedTags.add(row.TAG));
-  else visible.forEach(row => state.selectedTags.delete(row.TAG));
+  if ($("selectAllTags")?.checked) visible.forEach(row => state.selectedTags.add(row.programacaoId));
+  else visible.forEach(row => state.selectedTags.delete(row.programacaoId));
   renderTable();
 }
 
-function selectItem(tag, rerender = true) {
-  const row = state.rows.find(item => item.TAG === tag);
+function renderTable() {
+  const rows = filteredRows();
+  const host = $("technicianActivityCards");
+  if (!host) return;
+  host.innerHTML = rows.map((row, index) => {
+    const module = row.module || moduleById(row.activityModuleId);
+    const cols = (module?.columns || []).filter(c => !["week", "logs"].includes(c.key)).slice(0, 8);
+    return `<article class="tech-activity-card ${row.TAG === state.selectedTag ? "selected" : ""}" data-tech-row="${escapeHTML(row.programacaoId)}">
+      <div class="tech-activity-card-head"><label class="tech-select"><input type="checkbox" class="tech-row-select" data-row-select="${escapeHTML(row.programacaoId)}" ${state.selectedTags.has(row.programacaoId) ? "checked" : ""} aria-label="Selecionar atividade"></label><div><span class="activity-chip">${escapeHTML(row.activityName)}</span><h3>${escapeHTML(rowValueForColumn(row, cols.find(c => c.key === "tag")) || row.TAG || `Registro ${index+1}`)}</h3></div><span class="tag-badge ${hasLog(row) ? "done" : "pending"}">${hasLog(row) ? "EXECUTADO" : "PENDENTE"}</span></div>
+      <div class="tech-activity-grid">${cols.map(c => `<div><span>${escapeHTML(c.label)}</span><strong>${escapeHTML(rowValueForColumn(row,c) || "—")}</strong></div>`).join("")}</div>
+      <div class="tech-activity-card-foot"><span>${escapeHTML(row.team || "Sem equipe")}</span><span>${escapeHTML(row.Week)}</span><button type="button" class="ghost-btn tech-open-row" data-open-row="${escapeHTML(row.programacaoId)}">Abrir atividade</button></div>
+    </article>`;
+  }).join("");
+  host.querySelectorAll("[data-open-row]").forEach(btn => btn.onclick = e => { e.stopPropagation(); selectItemByProgram(btn.dataset.openRow); });
+  host.querySelectorAll("[data-row-select]").forEach(input => input.onchange = e => { e.stopPropagation(); input.checked ? state.selectedTags.add(input.dataset.rowSelect) : state.selectedTags.delete(input.dataset.rowSelect); updateMultiSelectionUI(); });
+  host.querySelectorAll("[data-tech-row]").forEach(card => card.onclick = e => { if (e.target.closest("input,button")) return; selectItemByProgram(card.dataset.techRow); });
+  $("emptyState")?.classList.toggle("hidden", rows.length !== 0);
+  counters(rows);
+  updateMultiSelectionUI();
+  if (!state.selectedTag && rows.length) selectItem(rows[0].TAG || rows[0].programacaoId, false);
+  else if (state.selectedTag && !rows.some(row => row.TAG === state.selectedTag || row.programacaoId === state.selectedTag)) clearSelection();
+}
+
+function selectItemByProgram(programId) {
+  const row = state.rows.find(item => item.programacaoId === programId);
   if (!row) return;
+  state.selectedTag = row.TAG || row.programacaoId;
+  selectItem(state.selectedTag);
+}
 
-  state.selectedTag = tag;
-  const fields = {
-    selectedTagTitle: row.TAG,
-    fieldTag: row.TAG,
-    fieldLoop: row.LOOP,
-    fieldService: row.SERVICE,
-    fieldType: row.TIPE,
-    fieldForn: row.FORN,
-    fieldSys: row.SYS,
-    fieldSubsys: row.SUBSYS,
-    fieldWeek: row.Week,
-    fieldDescription: row.DESCRIÇÃO,
-    fieldLog: latestLog(row)
-  };
-
-  Object.entries(fields).forEach(([id, value]) => {
-    if ($(id)) $(id).textContent = value || "—";
-  });
-
-  if ($("selectedBadge")) {
-    $("selectedBadge").textContent = hasLog(row) ? "COM LOG" : "PENDENTE";
-    $("selectedBadge").className = `tag-badge ${hasLog(row) ? "done" : "pending"}`;
-  }
-
+function selectItem(tag, rerender = true) {
+  const row = state.rows.find(item => item.TAG === tag || item.programacaoId === tag);
+  if (!row) return;
+  state.selectedTag = row.TAG || row.programacaoId;
+  const module = row.module || moduleById(row.activityModuleId);
+  $("selectedTagTitle") && ($("selectedTagTitle").textContent = row.activityName || module?.name || "Atividade");
+  $("selectedActivitySubtitle") && ($("selectedActivitySubtitle").textContent = `${row.team || "Sem equipe"} • ${row.Week} • estrutura definida pelo Administrador`);
+  if ($("selectedBadge")) { $("selectedBadge").textContent = hasLog(row) ? "EXECUTADO" : "PENDENTE"; $("selectedBadge").className = `tag-badge ${hasLog(row) ? "done" : "pending"}`; }
   $("registerBtn") && ($("registerBtn").disabled = false);
   $("repeatBtn") && ($("repeatBtn").disabled = !hasLog(row));
   $("actionMessage") && ($("actionMessage").textContent = "");
-
+  renderTechnicianDetail(row);
   renderTechnicianCustomFields(row);
   if (rerender) renderTable();
 }
 
+function renderTechnicianDetail(row) {
+  const host = $("technicianActivityDetail");
+  if (!host) return;
+  const module = row.module || moduleById(row.activityModuleId);
+  const cols = (module?.columns || []).filter(c => ["week","logs"].includes(c.key) || ["tag","sys","subsys","loop","forn","service","tipe","descricao"].includes(c.key)).slice(0, 10);
+  host.innerHTML = cols.map(c => `<div class="tech-detail-field"><span>${escapeHTML(c.label)}</span><strong>${escapeHTML(rowValueForColumn(row,c) || "—")}</strong></div>`).join("");
+}
+
 function clearSelection() {
-  $("selectedTagTitle") && ($("selectedTagTitle").textContent = "Selecione uma TAG");
-  ["fieldTag", "fieldLoop", "fieldService", "fieldType", "fieldForn", "fieldSys", "fieldSubsys", "fieldWeek", "fieldDescription"].forEach(id => {
-    if ($(id)) $(id).textContent = "—";
-  });
-  $("fieldLog") && ($("fieldLog").textContent = "Não registrado");
+  $("selectedTagTitle") && ($("selectedTagTitle").textContent = "Selecione uma atividade");
+  $("selectedActivitySubtitle") && ($("selectedActivitySubtitle").textContent = "Os campos abaixo seguem exatamente a configuração criada pelo Administrador.");
+  $("technicianActivityDetail") && ($("technicianActivityDetail").innerHTML = "");
+  $("technicianCustomFields") && ($("technicianCustomFields").innerHTML = "");
   $("selectedBadge") && ($("selectedBadge").textContent = "AGUARDANDO");
   $("registerBtn") && ($("registerBtn").disabled = true);
   $("repeatBtn") && ($("repeatBtn").disabled = true);
 }
 
 function renderTechnicianCustomFields(row) {
-  const host = $("technicianCustomFields");
-  if (!host) return;
-  const module = moduleById(row?.activityModuleId || "ppa");
-  if (!module) {
-    host.innerHTML = "";
-    return;
-  }
-
-  const columns = module.columns.filter(column => !["week", "date", "activity", "team", "responsible", "qty", "note", "logs"].includes(column.key));
-  if (!columns.length) {
-    host.innerHTML = "";
-    return;
-  }
-
-  host.innerHTML = `<div class="dynamic-fields-heading"><span>Dados da atividade</span><small>Campos bloqueados não podem ser alterados pelo Técnico.</small></div>` + columns.map(column => {
-    const value = row.customData?.[column.key] ?? "";
+  const host = $("technicianCustomFields"); if (!host) return;
+  const module = row?.module || moduleById(row?.activityModuleId || "ppa");
+  const columns = (module?.columns || []).filter(column => !["week", "logs"].includes(column.key));
+  if (!columns.length) { host.innerHTML = ""; return; }
+  host.innerHTML = `<div class="dynamic-fields-heading"><span>Dados de ${escapeHTML(module.name)}</span><small>Os campos e a ordem seguem a configuração da atividade.</small></div>` + columns.map(column => {
+    const value = row.customData?.[column.key] ?? rowValueForColumn(row,column) ?? "";
     const disabled = column.technicianEditable ? "" : "disabled";
-    if (column.type === "select") {
-      return `<label class="dynamic-field"><span>${escapeHTML(column.label)}${column.required ? " *" : ""}</span><select data-tech-custom-key="${escapeHTML(column.key)}" ${disabled}><option value="">Selecione</option>${(column.options || []).map(option => `<option value="${escapeHTML(option)}" ${String(option) === String(value) ? "selected" : ""}>${escapeHTML(option)}</option>`).join("")}</select></label>`;
-    }
-    if (column.type === "boolean") {
-      return `<label class="dynamic-field"><span>${escapeHTML(column.label)}</span><select data-tech-custom-key="${escapeHTML(column.key)}" ${disabled}><option value="">Selecione</option><option value="SIM" ${value === "SIM" ? "selected" : ""}>SIM</option><option value="NÃO" ${value === "NÃO" ? "selected" : ""}>NÃO</option></select></label>`;
-    }
+    if (column.type === "select") return `<label class="dynamic-field"><span>${escapeHTML(column.label)}${column.required ? " *" : ""}</span><select data-tech-custom-key="${escapeHTML(column.key)}" ${disabled}><option value="">Selecione</option>${(column.options||[]).map(o=>`<option value="${escapeHTML(o)}" ${String(o)===String(value)?"selected":""}>${escapeHTML(o)}</option>`).join("")}</select></label>`;
+    if (column.type === "boolean") return `<label class="dynamic-field"><span>${escapeHTML(column.label)}</span><select data-tech-custom-key="${escapeHTML(column.key)}" ${disabled}><option value="">Selecione</option><option value="SIM" ${value==="SIM"?"selected":""}>SIM</option><option value="NÃO" ${value==="NÃO"?"selected":""}>NÃO</option></select></label>`;
     const inputType = column.type === "number" ? "number" : column.type === "date" ? "date" : "text";
     return `<label class="dynamic-field"><span>${escapeHTML(column.label)}${column.required ? " *" : ""}</span><input data-tech-custom-key="${escapeHTML(column.key)}" type="${inputType}" value="${escapeHTML(value)}" ${disabled}></label>`;
   }).join("");
-
-  host.querySelectorAll("[data-tech-custom-key]:not([disabled])").forEach(input => {
-    input.addEventListener("change", () => saveTechnicianCustomField(row, input.dataset.techCustomKey, input.value));
-  });
+  host.querySelectorAll("[data-tech-custom-key]:not([disabled])").forEach(input => input.addEventListener("change", () => saveTechnicianCustomField(row,input.dataset.techCustomKey,input.value)));
 }
 
 async function saveTechnicianCustomField(row, key, value) {
@@ -2746,7 +2704,7 @@ async function appendLog(row) {
 }
 
 async function registerPonto() {
-  const row = state.rows.find(item => item.TAG === state.selectedTag);
+  const row = state.rows.find(item => item.TAG === state.selectedTag || item.programacaoId === state.selectedTag);
   if (!row) return;
 
   try {
@@ -2773,7 +2731,7 @@ async function registerSelectedPontos() {
     $("registerSelectedBtn") && ($("registerSelectedBtn").disabled = true);
     let done = 0;
     for (const tag of tags) {
-      const row = state.rows.find(item => item.TAG === tag);
+      const row = state.rows.find(item => item.programacaoId === tag || item.TAG === tag);
       if (!row || hasLog(row)) continue;
       await appendLog(row);
       done += 1;
@@ -3438,6 +3396,40 @@ async function syncAll() {
    EVENTS
    ========================= */
 
+function exportActivityPdfTemplate() {
+  const module = selectedModule();
+  if (!module) return toast("Selecione uma atividade primeiro.");
+  const jsPDF = window.jspdf?.jsPDF;
+  if (!jsPDF) return toast("Biblioteca PDF não carregada.");
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const isPres = /preserva/i.test(module.name);
+  const isLoop = /loop/i.test(module.name);
+  doc.setFontSize(18); doc.text("PLANNING PRO", 15, 18);
+  doc.setFontSize(13); doc.text(`Relatório de ${module.name}`, 15, 27);
+  doc.setFontSize(9); doc.text(`Semana: __________________    Data: ____/____/______`, 15, 36);
+  doc.text("Equipe: ______________________________________________", 15, 43);
+  doc.text("Responsável: __________________________________________", 15, 50);
+  let y = 62;
+  if (isLoop) {
+    doc.setFontSize(11); doc.text("IDENTIFICAÇÃO DO LOOP", 15, y); y += 8;
+    ["TAG", "LOOP", "SYS", "SUBSYS", "FORN."].forEach(label => { doc.rect(15,y,55,9); doc.text(label,18,y+6); doc.line(70,y,195,y); doc.text("________________________________",73,y+6); y+=11; });
+    y+=3; doc.text("RESULTADO DO TESTE",15,y); y+=8;
+    ["APROVADO", "REPROVADO", "PENDENTE"].forEach((v,i)=>{doc.rect(15+i*38,y,5,5);doc.text(v,22+i*38,y+4);}); y+=12;
+    doc.text("Observações:",15,y); y+=5; doc.rect(15,y,180,45); y+=53;
+    doc.text("Assinatura do executante: ______________________________",15,y);
+  } else if (isPres) {
+    doc.setFontSize(11); doc.text("REGISTRO DE PRESERVAÇÃO",15,y); y+=8;
+    ["TAG", "EQUIPAMENTO", "SYS", "SUBSYS", "MÉTODO", "STATUS"].forEach(label=>{doc.rect(15,y,55,9);doc.text(label,18,y+6);doc.line(70,y,195,y);doc.text("________________________________",73,y+6);y+=11;});
+    y+=4; doc.text("FOTO DO EQUIPAMENTO",15,y); y+=5; doc.rect(15,y,80,58); doc.text("Inserir foto",45,y+31); doc.rect(105,y,90,58); doc.text("Inserir foto / evidência",127,y+31); y+=66;
+    doc.text("Observações:",15,y); y+=5; doc.rect(15,y,180,35); y+=43; doc.text("Assinatura do executante: ______________________________",15,y);
+  } else {
+    doc.text("ESTRUTURA DA ATIVIDADE",15,y); y+=8;
+    module.columns.filter(c=>!['week','logs'].includes(c.key)).forEach(c=>{ if(y>275){doc.addPage();y=20;} doc.rect(15,y,55,8);doc.text(String(c.label).slice(0,28),18,y+5.5);doc.line(70,y,195,y);y+=10; });
+  }
+  doc.setFontSize(7); doc.text("Modelo gerado pelo Planning Pro",15,290);
+  doc.save(`modelo-${makeKey(module.name)}.pdf`);
+}
+
 function bindEvents() {
   // Navegação principal — mantém telas, perfil e configurações acessíveis por perfil.
   document.querySelectorAll("[data-screen]").forEach(button => {
@@ -3481,10 +3473,6 @@ function bindEvents() {
       return;
     }
     await loginTechnician(code);
-  });
-
-  document.querySelectorAll(".nav-item").forEach(button => {
-    button.onclick = () => nav(button.dataset.screen);
   });
 
   $("downloadProgramTemplateBtn") && ($("downloadProgramTemplateBtn").onclick = downloadProgramTemplate);
@@ -3531,6 +3519,7 @@ function bindEvents() {
   $("newActivityBtn") && ($("newActivityBtn").onclick = () => openActivityModal());
   $("editActivityBtn") && ($("editActivityBtn").onclick = () => openActivityModal(state.selectedModuleId));
   $("deleteActivityBtn") && ($("deleteActivityBtn").onclick = deleteActivity);
+  $("exportActivityPdfTemplate") && ($("exportActivityPdfTemplate").onclick = exportActivityPdfTemplate);
   $("newColumnBtn") && ($("newColumnBtn").onclick = () => openColumnModal());
 
   $("closeActivityModal") && ($("closeActivityModal").onclick = closeActivityModal);
@@ -3583,39 +3572,20 @@ function bindEvents() {
    ========================= */
 
 function ensurePlanningSidebarBehavior() {
-  const sidebar = $("appSidebar");
-  const shell = $("appShell");
-  const toggle = $("sidebarToggle");
-  if (!sidebar || !shell || !toggle) return;
-
-  const apply = collapsed => {
-    sidebar.classList.toggle("collapsed", collapsed);
-    shell.classList.toggle("sidebar-collapsed", collapsed);
-    toggle.setAttribute("aria-label", collapsed ? "Expandir menu" : "Recolher menu");
-    toggle.title = collapsed ? "Expandir menu" : "Recolher menu";
-  };
-
-  apply(localStorage.getItem("ppaSidebarCollapsed") === "1");
-  toggle.onclick = event => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (window.innerWidth <= 900) {
-      sidebar.classList.remove("mobile-open");
-      return;
-    }
-    const next = !sidebar.classList.contains("collapsed");
-    apply(next);
-    localStorage.setItem("ppaSidebarCollapsed", next ? "1" : "0");
-  };
-
-  const mobileBtn = $("mobileMenuBtn");
-  mobileBtn?.addEventListener("click", () => sidebar.classList.toggle("mobile-open"));
-  document.querySelectorAll(".nav-item").forEach(item => item.addEventListener("click", () => {
-    if (window.innerWidth <= 900) sidebar.classList.remove("mobile-open");
-  }));
-  window.addEventListener("resize", () => {
-    if (window.innerWidth > 900) sidebar.classList.remove("mobile-open");
-  });
+  const sidebar = $("appSidebar"), shell = $("appShell"), toggle = $("sidebarToggle"), mobileBtn = $("mobileMenuBtn");
+  if (!sidebar || !shell) return;
+  let overlay = $("mobileSidebarOverlay");
+  if (!overlay) { overlay = document.createElement("div"); overlay.id = "mobileSidebarOverlay"; overlay.className = "mobile-sidebar-overlay"; document.body.appendChild(overlay); }
+  const closeMobile = () => { sidebar.classList.remove("mobile-open"); overlay.classList.remove("show"); document.body.classList.remove("menu-open"); mobileBtn?.setAttribute("aria-expanded","false"); };
+  const openMobile = () => { if (window.innerWidth > 900) return; sidebar.classList.remove("collapsed"); sidebar.classList.add("mobile-open"); overlay.classList.add("show"); document.body.classList.add("menu-open"); mobileBtn?.setAttribute("aria-expanded","true"); };
+  const apply = collapsed => { sidebar.classList.toggle("collapsed", collapsed); shell.classList.toggle("sidebar-collapsed", collapsed); toggle?.setAttribute("aria-label", collapsed ? "Expandir menu" : "Recolher menu"); };
+  apply(window.innerWidth > 900 && localStorage.getItem("ppaSidebarCollapsed") === "1");
+  if (toggle) toggle.onclick = e => { e.preventDefault(); if (window.innerWidth <= 900) { openMobile(); return; } const next=!sidebar.classList.contains("collapsed"); apply(next); localStorage.setItem("ppaSidebarCollapsed",next?"1":"0"); };
+  if (mobileBtn) mobileBtn.onclick = e => { e.preventDefault(); e.stopPropagation(); sidebar.classList.contains("mobile-open") ? closeMobile() : openMobile(); };
+  overlay.onclick = closeMobile;
+  document.addEventListener("keydown", e => { if (e.key === "Escape") closeMobile(); });
+  document.querySelectorAll(".nav-item[data-screen]").forEach(item => item.addEventListener("click", () => closeMobile()));
+  window.addEventListener("resize", () => { if (window.innerWidth > 900) closeMobile(); });
 }
 
 function ensureNewProgrammingButton() {
