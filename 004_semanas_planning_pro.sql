@@ -1,0 +1,10 @@
+begin;
+create table if not exists public.tb_semanas (id uuid primary key default gen_random_uuid(), semana text not null unique, ativa boolean not null default true, created_at timestamptz not null default now(), constraint tb_semanas_formato_chk check (semana ~ '^W[0-9]+$'));
+alter table public.tb_semanas enable row level security;
+grant select, insert, update, delete on public.tb_semanas to authenticated;
+drop policy if exists tb_semanas_select_authenticated on public.tb_semanas;
+drop policy if exists tb_semanas_admin_write on public.tb_semanas;
+create policy tb_semanas_select_authenticated on public.tb_semanas for select to authenticated using (true);
+create policy tb_semanas_admin_write on public.tb_semanas for all to authenticated using (public.eh_admin()) with check (public.eh_admin());
+insert into public.tb_semanas (semana) values ('W135'),('W136') on conflict (semana) do nothing;
+commit;

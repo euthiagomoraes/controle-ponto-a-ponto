@@ -536,7 +536,7 @@
     <section id="screen-acessos" class="screen">
       <div class="page-title-row">
         <div><span class="section-kicker">CONTROLE DE ACESSO</span><h2>Pessoas e códigos de acesso</h2><p>Cadastre o usuário de campo, gere seu código e defina o perfil/equipe de atuação.</p></div>
-        <button id="newAccessBtn" class="primary-btn">＋ Novo usuário</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><button id="newWeekBtn" class="secondary-btn" type="button">＋ Nova semana</button><button id="newAccessBtn" class="primary-btn">＋ Novo usuário</button></div>
       </div>
       <div class="access-admin-grid">
         <div class="metrics-grid access-metrics">
@@ -832,7 +832,7 @@
 </div>
 
 <div id="toast" class="toast" role="alert"></div>
-<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="./app.js"></script>
 </body>

@@ -42,6 +42,7 @@ const state = {
   rows: [],
   programacoes: [],
   teams: [],
+  weeks: [],
   peopleRecords: [],
   accesses: [],
   moduleCatalog: [],
@@ -293,7 +294,7 @@ function currentTeamName() {
 }
 
 function teamByName(name) {
-  return state.teams.find(t => String(t.name || t.nome).toLowerCase() === String(name || "").toLowerCase()) || null;
+  return state.teams.find(t => String(t.nome || t.name).toLowerCase() === String(name || "").toLowerCase()) || null;
 }
 
 function personByName(name) {
@@ -1307,6 +1308,44 @@ function renderMaskPreview(module) {
 }
 
 /* =========================
+   WEEKS
+   ========================= */
+
+async function loadWeeks() {
+  const sb = getSupabaseClient();
+  if (!sb) { state.weeks = []; return false; }
+  const { data, error } = await sb.from("tb_semanas").select("id,semana,ativa,created_at").eq("ativa", true).order("semana");
+  if (error) { console.error("Erro ao carregar semanas:", error); state.weeks = []; return false; }
+  state.weeks = data || [];
+  return true;
+}
+
+function nextWeekNumber() {
+  const nums = state.weeks.map(item => weekToNumber(item.semana)).filter(Number.isFinite);
+  return Math.max(currentWeekNumber(), ...(nums.length ? nums : [0])) + 1;
+}
+
+async function createWeek() {
+  const sb = getSupabaseClient();
+  if (!sb) return toast("Supabase não está configurado.");
+  const raw = prompt("Número da semana. Exemplo: 137 ou W137", String(nextWeekNumber()));
+  if (raw === null) return;
+  const number = weekToNumber(raw);
+  if (!Number.isInteger(number) || number <= 0) return toast("Informe uma semana válida, por exemplo W137.");
+  const semana = `W${number}`;
+  const { error } = await sb.from("tb_semanas").insert({ semana, ativa: true });
+  if (error) {
+    if (String(error.code) === "23505") return toast(`${semana} já existe.`);
+    console.error(error);
+    return toast(error.message || "Não foi possível criar a semana.");
+  }
+  await loadWeeks();
+  setupProgrammingSelectors();
+  if ($("programWeek")) $("programWeek").value = semana;
+  toast(`${semana} criada com sucesso.`);
+}
+
+/* =========================
    TEAMS / PEOPLE
    ========================= */
 
@@ -1407,7 +1446,7 @@ function renderAccesses() {
 }
 
 function populateTeamSelectors() {
-  const teamOptions = state.teams.map(team => `<option value="${escapeHTML(team.name)}">${escapeHTML(team.name)}</option>`).join("");
+  const teamOptions = [...state.teams].sort((a,b)=>String(a.nome||"").localeCompare(String(b.nome||""),"pt-BR",{numeric:true,sensitivity:"base"})).map(team => `<option value="${escapeHTML(team.nome)}">${escapeHTML(team.nome)}</option>`).join("");
   if ($("accessTeamInput")) $("accessTeamInput").innerHTML = teamOptions;
 }
 
@@ -1501,7 +1540,8 @@ async function saveAccess() {
    ========================= */
 
 function weekOptions() {
-  const weeks = new Set([currentWeek()]);
+  const weeks = new Set(state.weeks.map(item => normalizeWeek(item.semana)));
+  weeks.add(currentWeek());
   state.dashboardSeed.forEach(item => weeks.add(normalizeWeek(item.week)));
   state.programacoes.forEach(item => weeks.add(normalizeWeek(item.week)));
   state.rows.forEach(item => {
@@ -2053,6 +2093,24 @@ function validateAndMapProgramImport(rows, module) {
   return { headers, imported };
 }
 
+function excelTheme() {
+  const s = currentSettings();
+  const hex = value => String(value || "#0b5cff").replace("#", "").toUpperCase();
+  return { primary: hex(s.primary), header: hex(s.header), bg: hex(s.background) };
+}
+
+function styleExcelTable(sheet, headers, rowCount) {
+  const theme = excelTheme();
+  const end = XLSX.utils.encode_cell({ r: rowCount, c: headers.length - 1 });
+  sheet["!autofilter"] = { ref: `A1:${end}` };
+  sheet["!freeze"] = { xSplit: 0, ySplit: 1 };
+  sheet["!cols"] = headers.map(h => ({ wch: Math.max(14, Math.min(34, String(h).length + 5)) }));
+  const range = XLSX.utils.decode_range(`A1:${end}`);
+  for (let c=0;c<headers.length;c++) { const cell=sheet[XLSX.utils.encode_cell({r:0,c})]; if(cell) cell.s={fill:{fgColor:{rgb:theme.header}},font:{bold:true,color:{rgb:"FFFFFF"}},alignment:{horizontal:"center",vertical:"center"}}; }
+  for (let r=1;r<=range.e.r;r++) for(let c=0;c<range.e.c+1;c++){ const cell=sheet[XLSX.utils.encode_cell({r,c})]; if(cell) cell.s={fill:{fgColor:{rgb:r%2?"FFFFFF":theme.bg}},border:{top:{style:"thin",color:{rgb:"D9E1EA"}},bottom:{style:"thin",color:{rgb:"D9E1EA"}},left:{style:"thin",color:{rgb:"D9E1EA"}},right:{style:"thin",color:{rgb:"D9E1EA"}}},alignment:{vertical:"center"}}; }
+  sheet["!rows"]=[{hpt:24}];
+}
+
 function downloadProgramTemplate() {
   const activityId = $("programActivity")?.value || "";
   const module = moduleById(activityId);
@@ -2071,7 +2129,7 @@ function downloadProgramTemplate() {
 
   if (window.XLSX) {
     const sheet = XLSX.utils.aoa_to_sheet([headers, blank]);
-    sheet["!cols"] = columns.map(column => ({ wch: Math.max(12, Math.min(32, String(column.label).length + 4)) }));
+    styleExcelTable(sheet, headers, 1);
     const info = XLSX.utils.aoa_to_sheet([
       ["Atividade", module.name],
       ["Instruções", "Não altere os cabeçalhos. Campos com * são obrigatórios."],
@@ -3203,6 +3261,7 @@ async function syncAll() {
     }
 
     await loadTeamsAndPeople();
+    await loadWeeks();
     await loadProgramacoes();
 
     if (state.role === "technician") {
@@ -3345,6 +3404,7 @@ function bindEvents() {
   $("confirmDeleteModule") && ($("confirmDeleteModule").onclick = confirmDeleteActivity);
 
   $("newAccessBtn") && ($("newAccessBtn").onclick = () => openAccessModal());
+  $("newWeekBtn") && ($("newWeekBtn").onclick = createWeek);
   $("closeAccessModal") && ($("closeAccessModal").onclick = closeAccessModal);
   $("cancelAccessModal") && ($("cancelAccessModal").onclick = closeAccessModal);
   $("accessModal .modal-backdrop") && ($("accessModal .modal-backdrop").onclick = closeAccessModal);
