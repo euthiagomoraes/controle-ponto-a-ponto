@@ -439,3 +439,25 @@ tbody td{padding:10px 9px;border-bottom:1px solid #eef2f6;vertical-align:middle;
 
 /* Cadastro de equipes em Pessoas & Acessos */
 .team-register-card{padding:14px}.team-register-card .list-header{align-items:flex-start}.team-register-card .list-header h3{margin:4px 0 0;font-size:15px}.team-register-card .list-header p{margin:6px 0 0;color:#7b899a;font-size:10px;line-height:1.5;max-width:760px}.team-register-form{display:grid;grid-template-columns:minmax(180px,1.4fr) minmax(180px,1fr) auto;gap:10px;align-items:end;margin:14px 0 8px}.team-register-form label{display:flex;flex-direction:column;gap:6px;font-size:9px;font-weight:800;letter-spacing:.04em;color:#718096}.team-register-form input,.team-register-form select{width:100%;min-width:0;border:1px solid #d9e2ec;border-radius:10px;padding:11px 12px;background:#fff;font-size:11px;color:var(--text);outline:none}.team-register-form input:focus,.team-register-form select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(11,92,255,.08)}.team-register-form .primary-btn{white-space:nowrap}.team-table-wrap{max-height:230px;overflow:auto}.team-table-wrap table{min-width:480px}.team-table-wrap th,.team-table-wrap td{padding:10px 12px}.team-register-card .form-message{margin:6px 0 10px}@media(max-width:760px){.team-register-form{grid-template-columns:1fr}.team-register-form .primary-btn{width:100%}.team-register-card .list-header{display:block}}
+
+
+/* Pastas expansíveis para os cadastros de semanas */
+.week-register-card { grid-column: 1 / -1; }
+.week-folders { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px; margin-top:14px; }
+.week-folder { background:#fff; border:1px solid #dce5f2; border-radius:12px; overflow:hidden; transition:box-shadow .2s ease,border-color .2s ease; }
+.week-folder[open] { border-color:#b8cdfa; box-shadow:0 8px 20px rgba(18,54,105,.08); }
+.week-folder-summary { list-style:none; cursor:pointer; display:flex; align-items:center; gap:11px; min-height:68px; padding:14px 16px; background:linear-gradient(110deg,#fff,#f7faff); }
+.week-folder-summary::-webkit-details-marker { display:none; }
+.folder-glyph { display:grid; place-items:center; width:38px; height:38px; border-radius:10px; background:#eaf1ff; font-size:21px; transition:transform .25s ease; }
+.week-folder[open] .folder-glyph { transform:scale(1.08) rotate(-4deg); }
+.week-folder-name { font-weight:750; color:#10233f; }
+.week-folder-meta { margin-left:auto; color:#8290a5; font-size:11px; }
+.week-folder-chevron { color:#6d7f98; transition:transform .25s ease; }
+.week-folder[open] .week-folder-chevron { transform:rotate(180deg); }
+.week-folder-content { display:flex; align-items:center; gap:13px; padding:17px 20px; border-top:1px solid #edf1f7; animation:weekFolderOpen .22s ease both; }
+.week-folder-document { font-size:27px; }
+.week-folder-content strong,.week-folder-content small { display:block; }
+.week-folder-content small { color:#8290a5; margin-top:4px; }
+.week-folder-empty { padding:24px; text-align:center; border:1px dashed #d3deed; border-radius:12px; color:#71819a; background:#fbfcfe; }
+@keyframes weekFolderOpen { from { opacity:0; transform:translateY(-5px); } to { opacity:1; transform:translateY(0); } }
+@media(max-width:700px) { .week-folder-summary { flex-wrap:wrap; } .week-folder-meta { margin-left:0; } }

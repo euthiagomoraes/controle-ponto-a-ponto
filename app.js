@@ -1394,7 +1394,27 @@ async function loadWeeks() {
   const { data, error } = await sb.from("tb_semanas").select("id,semana,ativa,created_at").eq("ativa", true).order("semana");
   if (error) { console.error("Erro ao carregar semanas:", error); state.weeks = []; return false; }
   state.weeks = data || [];
+  renderWeekFolders();
   return true;
+}
+
+function renderWeekFolders() {
+  const host = $("weekFolders");
+  if (!host) return;
+  const weeks = [...(state.weeks || [])].sort((a,b) => weekToNumber(b.semana) - weekToNumber(a.semana));
+  host.innerHTML = weeks.length ? weeks.map((week, index) => `
+    <details class="week-folder" ${index === 0 ? "open" : ""}>
+      <summary class="week-folder-summary">
+        <span class="folder-glyph" aria-hidden="true">📁</span>
+        <span class="week-folder-name">${escapeHTML(week.semana)}</span>
+        <span class="week-folder-meta">${week.ativa === false ? "Inativa" : "Semana de programação"}</span>
+        <span class="week-folder-chevron" aria-hidden="true">⌄</span>
+      </summary>
+      <div class="week-folder-content">
+        <span class="week-folder-document">📄</span>
+        <div><strong>${escapeHTML(week.semana)}</strong><small>Cadastro de semana do Planning Pro</small></div>
+      </div>
+    </details>`).join("") : `<div class="week-folder-empty">Nenhuma semana cadastrada. Use “Nova semana” para criar a primeira.</div>`;
 }
 
 function nextWeekNumber() {
@@ -1459,6 +1479,19 @@ async function createWeek(event) {
   if ($("programWeek")) $("programWeek").value = semana;
   closeWeekModal();
   toast(`${semana} criada com sucesso.`);
+}
+
+function normalizeDisciplineForDB(value) {
+  const normalized = String(value || "").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").trim().toUpperCase();
+  const allowed = {
+    "ELETRICA": "ELÉTRICA",
+    "INSTRUMENTACAO": "INSTRUMENTAÇÃO",
+    "TUBULACAO": "TUBULAÇÃO",
+    "MECANICA": "MECÂNICA",
+    "AUTOMACAO": "AUTOMAÇÃO",
+    "CIVIL": "CIVIL"
+  };
+  return allowed[normalized] || normalized;
 }
 
 /* =========================
@@ -1564,7 +1597,7 @@ async function saveTeam(event) {
   }
   if (button) { button.disabled = true; button.textContent = "Salvando…"; }
   try {
-    const { error } = await sb.from("tb_equipes").insert({ nome: name, disciplina: discipline, ativo: true });
+    const { error } = await sb.from("tb_equipes").insert({ nome: name, disciplina: normalizeDisciplineForDB(discipline), ativo: true });
     if (error) throw error;
     await loadTeamsAndPeople();
     renderTeams();
@@ -3645,6 +3678,7 @@ function bindEvents() {
 
   $("newAccessBtn") && ($("newAccessBtn").onclick = () => openAccessModal());
   $("newWeekBtn") && ($("newWeekBtn").onclick = openWeekModal);
+  $("weekPanelNewBtn") && ($("weekPanelNewBtn").onclick = openWeekModal);
   $("closeWeekModal") && ($("closeWeekModal").onclick = closeWeekModal);
   $("cancelWeekModal") && ($("cancelWeekModal").onclick = closeWeekModal);
   $("weekModal .modal-backdrop") && ($("weekModal .modal-backdrop").onclick = closeWeekModal);
