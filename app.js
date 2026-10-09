@@ -306,12 +306,37 @@ function currentTeamName() {
   return state.currentUser?.team || "";
 }
 
+function normalizeLookupName(value) {
+  return String(value ?? "")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .trim().toLowerCase()
+    .replace(/^(equipe|team|eq\.?)[\s._-]*/i, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 function teamByName(name) {
-  return state.teams.find(t => String(t.nome || t.name).toLowerCase() === String(name || "").toLowerCase()) || null;
+  const raw = String(name ?? "").trim();
+  if (!raw) return null;
+  const normalized = normalizeLookupName(raw);
+  const exact = state.teams.filter(t => normalizeLookupName(t.nome || t.name) === normalized);
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) return null;
+
+  // Aceita abreviações comuns da planilha: "A" corresponde a "Equipe A".
+  // Só retorna quando houver uma correspondência única para evitar vincular à equipe errada.
+  const aliases = state.teams.filter(t => {
+    const teamName = normalizeLookupName(t.nome || t.name);
+    return teamName === normalized || (normalized.length === 1 && teamName.split(" ").at(-1) === normalized);
+  });
+  return aliases.length === 1 ? aliases[0] : null;
 }
 
 function personByName(name) {
-  return state.peopleRecords.find(p => String(p.nome).toLowerCase() === String(name || "").toLowerCase()) || null;
+  const normalized = normalizeLookupName(name);
+  if (!normalized) return null;
+  const matches = state.peopleRecords.filter(p => normalizeLookupName(p.nome) === normalized);
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function setupSidebar() {
@@ -2295,14 +2320,25 @@ async function confirmProgramImport(mode) {
 
   try {
     if (!module.dbId) await syncModulesToDB();
+    // Atualiza os cadastros antes da validação para não depender de uma lista antiga em memória.
+    await loadTeamsAndPeople();
 
-    let insertedCount = 0;
-    for (const record of pending.records) {
+    const resolvedRecords = pending.records.map((record, index) => {
       const team = teamByName(record.team);
       const person = personByName(record.responsible);
-      if (!team) throw new Error(`Equipe “${record.team || ""}” não encontrada no cadastro.`);
-      if (!person) throw new Error(`Responsável “${record.responsible || ""}” não encontrado no cadastro.`);
+      if (!team) {
+        const available = state.teams.map(t => t.nome || t.name).filter(Boolean).join(", ") || "nenhuma equipe ativa cadastrada";
+        throw new Error(`Linha ${index + 2}: equipe “${record.team || "(vazia)"}” não encontrada. Confira o cadastro de Equipes. Equipes ativas: ${available}. O importador aceita “A” para “Equipe A” quando houver correspondência única.`);
+      }
+      if (!person) {
+        const available = state.peopleRecords.map(p => p.nome).filter(Boolean).join(", ") || "nenhuma pessoa ativa cadastrada";
+        throw new Error(`Linha ${index + 2}: responsável “${record.responsible || "(vazio)"}” não encontrado no cadastro. Pessoas ativas: ${available}.`);
+      }
+      return { record, team, person };
+    });
 
+    let insertedCount = 0;
+    for (const { record, team, person } of resolvedRecords) {
       const equipmentId = await resolveEquipmentId(record.customData || {}, module);
       const payload = {
         equipamento_id: equipmentId,
