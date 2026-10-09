@@ -1470,7 +1470,7 @@ async function loadTeamsAndPeople() {
   if (!sb) return false;
 
   const [teamsResult, peopleResult] = await Promise.all([
-    sb.from("tb_equipes").select("id,nome,disciplina,ativo,created_at,updated_at").eq("ativo", true).order("nome"),
+    sb.from("tb_equipes").select("id,nome,disciplina,ativo,created_at,updated_at").order("nome"),
     sb.from("tb_pessoas").select("id,nome,cracha,perfil,ativo,auth_user_id,equipe_id,disciplina,created_at,updated_at").eq("ativo", true).order("nome")
   ]);
 
@@ -1489,7 +1489,9 @@ async function loadTeamsAndPeople() {
     name: team.nome,
     nome: team.nome,
     disciplina: team.disciplina,
-    ativo: team.ativo
+    // Alguns cadastros antigos foram criados sem preencher `ativo`.
+    // Trate NULL/undefined como ativo; somente false explícito desativa a equipe.
+    ativo: team.ativo !== false
   }));
 
   state.peopleRecords = peopleResult.data || [];
@@ -2327,8 +2329,10 @@ async function confirmProgramImport(mode) {
       const team = teamByName(record.team);
       const person = personByName(record.responsible);
       if (!team) {
-        const available = state.teams.map(t => t.nome || t.name).filter(Boolean).join(", ") || "nenhuma equipe ativa cadastrada";
-        throw new Error(`Linha ${index + 2}: equipe “${record.team || "(vazia)"}” não encontrada. Confira o cadastro de Equipes. Equipes ativas: ${available}. O importador aceita “A” para “Equipe A” quando houver correspondência única.`);
+        const available = state.teams.filter(t => t.ativo !== false).map(t => t.nome || t.name).filter(Boolean).join(", ");
+        const allTeams = state.teams.map(t => `${t.nome || t.name}${t.ativo === false ? " (inativa)" : ""}`).filter(Boolean).join(", ");
+        const detail = allTeams ? `Equipes cadastradas: ${allTeams}.` : "A tabela tb_equipes não retornou nenhum registro para este usuário. Verifique o cadastro no Supabase e as políticas RLS.";
+        throw new Error(`Linha ${index + 2}: equipe “${record.team || "(vazia)"}” não encontrada. ${detail} Equipes disponíveis para importação: ${available || "nenhuma equipe ativa"}. O importador aceita “A” para “Equipe A” quando houver correspondência única.`);
       }
       if (!person) {
         const available = state.peopleRecords.map(p => p.nome).filter(Boolean).join(", ") || "nenhuma pessoa ativa cadastrada";
@@ -3396,9 +3400,9 @@ async function syncAll() {
 
     if (state.role === "technician") {
       const sb = getSupabaseClient();
-      const { data: teamsData, error: teamsError } = await sb.from("tb_equipes").select("id,nome,disciplina,ativo").eq("ativo", true).order("nome");
+      const { data: teamsData, error: teamsError } = await sb.from("tb_equipes").select("id,nome,disciplina,ativo").order("nome");
       if (teamsError) throw teamsError;
-      state.teams = (teamsData || []).map(team => ({ id: team.id, dbId: team.id, name: team.nome, nome: team.nome, disciplina: team.disciplina, ativo: team.ativo }));
+      state.teams = (teamsData || []).map(team => ({ id: team.id, dbId: team.id, name: team.nome, nome: team.nome, disciplina: team.disciplina, ativo: team.ativo !== false }));
     } else {
       await loadTeamsAndPeople();
     }
