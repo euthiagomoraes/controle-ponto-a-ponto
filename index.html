@@ -532,6 +532,16 @@
           <div class="metric-card card"><span>ATIVOS</span><strong id="accessActive">0</strong><small>com acesso liberado</small></div>
           <div class="metric-card card"><span>CÓDIGOS</span><strong id="accessCodes">0</strong><small>códigos gerados</small></div>
         </div>
+        <section class="card team-register-card">
+          <div class="list-header"><div><span class="section-kicker">CADASTRO DE EQUIPES</span><h3>Equipes de execução</h3><p>Cadastre as equipes aqui para vinculá-las aos técnicos e reconhecer a coluna EQUIPE na importação do Excel.</p></div></div>
+          <form id="teamForm" class="team-register-form">
+            <label>Nome da equipe<input id="teamNameInput" type="text" maxlength="100" placeholder="Ex.: Equipe A" required></label>
+            <label>Disciplina<select id="teamDisciplineInput" required><option value="">Selecione a disciplina</option><option>Elétrica</option><option>Instrumentação</option><option>Tubulação</option><option>Mecânica</option><option>Automação</option><option>Civil</option></select></label>
+            <button id="saveTeamBtn" class="primary-btn" type="submit">＋ Cadastrar equipe</button>
+          </form>
+          <p id="teamFormMessage" class="form-message" role="status"></p>
+          <div class="table-wrap team-table-wrap"><table><thead><tr><th>EQUIPE</th><th>DISCIPLINA</th><th>STATUS</th></tr></thead><tbody id="teamTableBody"></tbody></table><div id="teamEmpty" class="empty-state hidden"><div>＋</div><strong>Nenhuma equipe cadastrada</strong><span>Use o formulário acima para cadastrar a primeira equipe.</span></div></div>
+        </section>
         <section class="card access-table-card">
           <div class="list-header"><div><span class="section-kicker">CADASTRO</span><h3>Usuários de campo</h3></div><div class="access-search"><input id="accessSearch" type="search" placeholder="Buscar nome, e-mail ou equipe..."></div></div>
           <div class="table-wrap large-table"><table><thead><tr><th>NOME</th><th>FUNÇÃO</th><th>E-MAIL</th><th>CÓDIGO</th><th>EQUIPE</th><th>PERFIL</th><th>STATUS</th><th></th></tr></thead><tbody id="accessTableBody"></tbody></table><div id="accessEmpty" class="empty-state hidden"><div>◎</div><strong>Nenhum usuário encontrado</strong><span>Cadastre a primeira pessoa para liberar acesso.</span></div></div>

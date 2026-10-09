@@ -1529,7 +1529,63 @@ function normalizeAccesses() {
   state.accesses = clone(ACCESS_DEFAULTS);
 }
 
+function renderTeams() {
+  const teams = [...(state.teams || [])].sort((a, b) => String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR", { numeric: true, sensitivity: "base" }));
+  const body = $("teamTableBody");
+  if (body) body.innerHTML = teams.map(team => `
+    <tr>
+      <td><strong>${escapeHTML(team.nome || team.name || "—")}</strong></td>
+      <td>${escapeHTML(team.disciplina || "—")}</td>
+      <td><span class="status-chip ${team.ativo === false ? "inactive" : "active"}">${team.ativo === false ? "INATIVA" : "ATIVA"}</span></td>
+    </tr>
+  `).join("");
+  $("teamEmpty")?.classList.toggle("hidden", teams.length > 0);
+}
+
+async function saveTeam(event) {
+  event?.preventDefault?.();
+  const name = $("teamNameInput")?.value.trim().replace(/\s+/g, " ") || "";
+  const discipline = $("teamDisciplineInput")?.value || "";
+  const message = $("teamFormMessage");
+  const button = $("saveTeamBtn");
+  if (message) message.textContent = "";
+  if (!name || !discipline) {
+    if (message) message.textContent = "Informe o nome da equipe e a disciplina.";
+    return;
+  }
+  if ((state.teams || []).some(team => normalizeLookupName(team.nome || team.name) === normalizeLookupName(name))) {
+    if (message) message.textContent = `A equipe “${name}” já está cadastrada.`;
+    return;
+  }
+  const sb = getSupabaseClient();
+  if (!sb) {
+    if (message) message.textContent = "Supabase não está configurado.";
+    return;
+  }
+  if (button) { button.disabled = true; button.textContent = "Salvando…"; }
+  try {
+    const { error } = await sb.from("tb_equipes").insert({ nome: name, disciplina: discipline, ativo: true });
+    if (error) throw error;
+    await loadTeamsAndPeople();
+    renderTeams();
+    renderAccesses();
+    setupProgrammingSelectors();
+    if ($("teamForm")) $("teamForm").reset();
+    if (message) message.textContent = `Equipe “${name}” cadastrada com sucesso.`;
+    toast("Equipe cadastrada no Supabase.");
+  } catch (error) {
+    console.error("Erro ao cadastrar equipe:", error);
+    const detail = error?.message || "Não foi possível cadastrar a equipe.";
+    if (message) message.textContent = /row-level security|permission|not allowed|42501/i.test(detail)
+      ? "O Supabase bloqueou o cadastro. Verifique a política RLS de INSERT da tabela tb_equipes para administradores."
+      : detail;
+  } finally {
+    if (button) { button.disabled = false; button.textContent = "＋ Cadastrar equipe"; }
+  }
+}
+
 function renderAccesses() {
+  renderTeams();
   const search = $("accessSearch")?.value.trim().toLowerCase() || "";
   const rows = state.accesses.filter(person => {
     const values = [person.nome, person.email, person.funcao, person.team, person.codigo, person.disciplina];
@@ -3599,6 +3655,7 @@ function bindEvents() {
   $("accessForm")?.addEventListener("submit", event => { event.preventDefault(); saveAccess(); });
   $("generateAccessCodeBtn") && ($("generateAccessCodeBtn").onclick = () => { if ($("accessCodeInput")) $("accessCodeInput").value = randomAccessCode(); });
   $("accessSearch")?.addEventListener("input", renderAccesses);
+  $("teamForm")?.addEventListener("submit", saveTeam);
 
   $("reportWeekFilter") && ($("reportWeekFilter").onchange = renderReports);
   $("reportActivityFilter") && ($("reportActivityFilter").onchange = renderReports);
