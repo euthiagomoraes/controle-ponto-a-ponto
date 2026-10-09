@@ -524,7 +524,7 @@
     <section id="screen-acessos" class="screen">
       <div class="page-title-row">
         <div><span class="section-kicker">CONTROLE DE ACESSO</span><h2>Pessoas e códigos de acesso</h2><p>Cadastre o usuário de campo, gere seu código e defina o perfil/equipe de atuação.</p></div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><button id="newWeekBtn" class="secondary-btn" type="button">＋ Nova semana</button><button id="newAccessBtn" class="primary-btn">＋ Novo usuário</button></div>
+        <div class="access-top-actions"><button id="newTeamBtn" class="secondary-btn" type="button">＋ Cadastrar equipe</button><button id="newWeekBtn" class="secondary-btn" type="button">＋ Nova semana</button><button id="newAccessBtn" class="primary-btn" type="button">＋ Novo usuário</button></div>
       </div>
       <div class="access-admin-grid">
         <div class="metrics-grid access-metrics">
@@ -532,24 +532,18 @@
           <div class="metric-card card"><span>ATIVOS</span><strong id="accessActive">0</strong><small>com acesso liberado</small></div>
           <div class="metric-card card"><span>CÓDIGOS</span><strong id="accessCodes">0</strong><small>códigos gerados</small></div>
         </div>
-        <section class="card team-register-card">
-          <div class="list-header"><div><span class="section-kicker">CADASTRO DE EQUIPES</span><h3>Equipes de execução</h3><p>Cadastre as equipes aqui para vinculá-las aos técnicos e reconhecer a coluna EQUIPE na importação do Excel.</p></div></div>
-          <form id="teamForm" class="team-register-form">
-            <label>Nome da equipe<input id="teamNameInput" type="text" maxlength="100" placeholder="Ex.: Equipe A" required></label>
-            <label>Disciplina<select id="teamDisciplineInput" required><option value="">Selecione a disciplina</option><option>Elétrica</option><option>Instrumentação</option><option>Tubulação</option><option>Mecânica</option><option>Automação</option><option>Civil</option></select></label>
-            <button id="saveTeamBtn" class="primary-btn" type="submit">＋ Cadastrar equipe</button>
-          </form>
-          <p id="teamFormMessage" class="form-message" role="status"></p>
-          <div class="table-wrap team-table-wrap"><table><thead><tr><th>EQUIPE</th><th>DISCIPLINA</th><th>STATUS</th></tr></thead><tbody id="teamTableBody"></tbody></table><div id="teamEmpty" class="empty-state hidden"><div>＋</div><strong>Nenhuma equipe cadastrada</strong><span>Use o formulário acima para cadastrar a primeira equipe.</span></div></div>
-        </section>
-        <section class="card access-table-card">
-          <div class="list-header"><div><span class="section-kicker">CADASTRO</span><h3>Usuários de campo</h3></div><div class="access-search"><input id="accessSearch" type="search" placeholder="Buscar nome, e-mail ou equipe..."></div></div>
+        <details class="card access-accordion team-register-card" open>
+          <summary class="access-accordion-summary"><span><span class="section-kicker">CADASTRO DE EQUIPES</span><strong>Equipes de execução</strong><small>Equipes vinculadas aos técnicos e usadas na importação do Excel.</small></span><span class="accordion-chevron">⌄</span></summary>
+          <div class="access-accordion-content">
+            <div class="table-wrap team-table-wrap"><table><thead><tr><th>EQUIPE</th><th>DISCIPLINA</th><th>STATUS</th></tr></thead><tbody id="teamTableBody"></tbody></table><div id="teamEmpty" class="empty-state hidden"><div>＋</div><strong>Nenhuma equipe cadastrada</strong><span>Use “Cadastrar equipe” para adicionar a primeira.</span></div></div>
+          </div>
+        </details>
+        <details class="card access-accordion access-table-card" open>
+          <summary class="access-accordion-summary"><span><span class="section-kicker">CADASTRO</span><strong>Usuários de campo</strong><small>Cadastro e gerenciamento dos acessos dos executantes.</small></span><span class="accordion-chevron">⌄</span></summary>
+          <div class="access-accordion-content"><div class="access-search access-accordion-search"><input id="accessSearch" type="search" placeholder="Buscar nome, e-mail ou equipe..."></div>
           <div class="table-wrap large-table"><table><thead><tr><th>NOME</th><th>FUNÇÃO</th><th>E-MAIL</th><th>CÓDIGO</th><th>EQUIPE</th><th>PERFIL</th><th>STATUS</th><th></th></tr></thead><tbody id="accessTableBody"></tbody></table><div id="accessEmpty" class="empty-state hidden"><div>◎</div><strong>Nenhum usuário encontrado</strong><span>Cadastre a primeira pessoa para liberar acesso.</span></div></div>
-        </section>
-        <section class="card week-register-card">
-          <div class="list-header"><div><span class="section-kicker">CADASTRO DE SEMANAS</span><h3>Semanas cadastradas</h3><p>Organize as semanas de programação em pastas expansíveis.</p></div><button id="weekPanelNewBtn" class="secondary-btn" type="button">＋ Nova semana</button></div>
-          <div id="weekFolders" class="week-folders"></div>
-        </section>
+          </div>
+        </details>
       </div>
     </section>
 
@@ -832,6 +826,22 @@
       </label>
       <p id="accessFormMessage" class="form-message"></p>
       <div class="modal-actions"><button type="button" id="cancelAccessModal" class="secondary-btn">Cancelar</button><button type="submit" class="primary-btn">Salvar usuário</button></div>
+    </form>
+  </div>
+</div>
+
+<div id="teamModal" class="modal hidden" aria-hidden="true">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box team-modal">
+    <button id="closeTeamModal" class="modal-close" type="button" aria-label="Fechar">×</button>
+    <span class="section-kicker">CADASTRO DE EQUIPES</span>
+    <h3>Nova equipe</h3>
+    <p>Informe o nome e a disciplina da equipe de execução.</p>
+    <form id="teamForm" class="program-form">
+      <label>Nome da equipe<input id="teamNameInput" type="text" maxlength="100" placeholder="Ex.: Equipe A" required></label>
+      <label>Disciplina<select id="teamDisciplineInput" required><option value="">Selecione a disciplina</option><option>Elétrica</option><option>Instrumentação</option><option>Tubulação</option><option>Mecânica</option><option>Automação</option><option>Civil</option></select></label>
+      <p id="teamFormMessage" class="form-message" role="status"></p>
+      <div class="modal-actions"><button id="cancelTeamModal" type="button" class="secondary-btn">Cancelar</button><button id="saveTeamBtn" class="primary-btn" type="submit">Cadastrar equipe</button></div>
     </form>
   </div>
 </div>

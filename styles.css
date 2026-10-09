@@ -461,3 +461,19 @@ tbody td{padding:10px 9px;border-bottom:1px solid #eef2f6;vertical-align:middle;
 .week-folder-empty { padding:24px; text-align:center; border:1px dashed #d3deed; border-radius:12px; color:#71819a; background:#fbfcfe; }
 @keyframes weekFolderOpen { from { opacity:0; transform:translateY(-5px); } to { opacity:1; transform:translateY(0); } }
 @media(max-width:700px) { .week-folder-summary { flex-wrap:wrap; } .week-folder-meta { margin-left:0; } }
+
+/* REV. 16 — accordions em Pessoas e Acessos e modais de cadastro */
+.access-top-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center}
+.access-accordion{padding:0;overflow:hidden}
+.access-accordion-summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px;cursor:pointer;user-select:none}
+.access-accordion-summary::-webkit-details-marker{display:none}
+.access-accordion-summary>span:first-child{display:flex;flex-direction:column;gap:4px}
+.access-accordion-summary strong{font-size:15px;color:var(--text)}
+.access-accordion-summary small{font-size:10px;color:#7b899a;line-height:1.45}
+.accordion-chevron{font-size:18px;color:#7b899a;transition:transform .18s ease}
+.access-accordion[open] .accordion-chevron{transform:rotate(180deg)}
+.access-accordion-content{padding:0 14px 14px}
+.access-accordion-search{display:flex;justify-content:flex-end;margin-bottom:10px}
+.team-modal{width:min(480px,calc(100% - 28px))}
+#weekModal .modal-backdrop{background:rgba(4,13,25,.18);backdrop-filter:none}
+@media(max-width:700px){.access-top-actions{width:100%;justify-content:stretch}.access-top-actions button{flex:1;min-width:130px}.access-accordion-summary{padding:13px}.access-accordion-content{padding:0 10px 10px}}

@@ -1482,13 +1482,14 @@ async function createWeek(event) {
 }
 
 function normalizeDisciplineForDB(value) {
-  const normalized = String(value || "").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").trim().toUpperCase();
+  const normalized = String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
+  // A constraint do banco usa os valores canônicos sem acentos.
   const allowed = {
-    "ELETRICA": "ELÉTRICA",
-    "INSTRUMENTACAO": "INSTRUMENTAÇÃO",
-    "TUBULACAO": "TUBULAÇÃO",
-    "MECANICA": "MECÂNICA",
-    "AUTOMACAO": "AUTOMAÇÃO",
+    "ELETRICA": "ELETRICA",
+    "INSTRUMENTACAO": "INSTRUMENTACAO",
+    "TUBULACAO": "TUBULACAO",
+    "MECANICA": "MECANICA",
+    "AUTOMACAO": "AUTOMACAO",
     "CIVIL": "CIVIL"
   };
   return allowed[normalized] || normalized;
@@ -1562,17 +1563,42 @@ function normalizeAccesses() {
   state.accesses = clone(ACCESS_DEFAULTS);
 }
 
+function disciplineLabel(value) {
+  const labels = { ELETRICA: "Elétrica", INSTRUMENTACAO: "Instrumentação", TUBULACAO: "Tubulação", MECANICA: "Mecânica", AUTOMACAO: "Automação", CIVIL: "Civil" };
+  const key = String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
+  return labels[key] || value || "—";
+}
+
 function renderTeams() {
   const teams = [...(state.teams || [])].sort((a, b) => String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR", { numeric: true, sensitivity: "base" }));
   const body = $("teamTableBody");
   if (body) body.innerHTML = teams.map(team => `
     <tr>
       <td><strong>${escapeHTML(team.nome || team.name || "—")}</strong></td>
-      <td>${escapeHTML(team.disciplina || "—")}</td>
+      <td>${escapeHTML(disciplineLabel(team.disciplina))}</td>
       <td><span class="status-chip ${team.ativo === false ? "inactive" : "active"}">${team.ativo === false ? "INATIVA" : "ATIVA"}</span></td>
     </tr>
   `).join("");
   $("teamEmpty")?.classList.toggle("hidden", teams.length > 0);
+}
+
+function openTeamModal() {
+  const modal = $("teamModal");
+  if (!modal) return;
+  $("teamForm")?.reset();
+  if ($("teamFormMessage")) $("teamFormMessage").textContent = "";
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  window.setTimeout(() => $("teamNameInput")?.focus(), 40);
+}
+
+function closeTeamModal() {
+  const modal = $("teamModal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+  $("teamForm")?.reset();
+  if ($("teamFormMessage")) $("teamFormMessage").textContent = "";
 }
 
 async function saveTeam(event) {
@@ -1603,9 +1629,8 @@ async function saveTeam(event) {
     renderTeams();
     renderAccesses();
     setupProgrammingSelectors();
-    if ($("teamForm")) $("teamForm").reset();
-    if (message) message.textContent = `Equipe “${name}” cadastrada com sucesso.`;
-    toast("Equipe cadastrada no Supabase.");
+    closeTeamModal();
+    toast(`Equipe “${name}” cadastrada no Supabase.`);
   } catch (error) {
     console.error("Erro ao cadastrar equipe:", error);
     const detail = error?.message || "Não foi possível cadastrar a equipe.";
@@ -3678,7 +3703,10 @@ function bindEvents() {
 
   $("newAccessBtn") && ($("newAccessBtn").onclick = () => openAccessModal());
   $("newWeekBtn") && ($("newWeekBtn").onclick = openWeekModal);
-  $("weekPanelNewBtn") && ($("weekPanelNewBtn").onclick = openWeekModal);
+  $("newTeamBtn") && ($("newTeamBtn").onclick = openTeamModal);
+  $("closeTeamModal") && ($("closeTeamModal").onclick = closeTeamModal);
+  $("cancelTeamModal") && ($("cancelTeamModal").onclick = closeTeamModal);
+  $("teamModal .modal-backdrop") && ($("teamModal .modal-backdrop").onclick = closeTeamModal);
   $("closeWeekModal") && ($("closeWeekModal").onclick = closeWeekModal);
   $("cancelWeekModal") && ($("cancelWeekModal").onclick = closeWeekModal);
   $("weekModal .modal-backdrop") && ($("weekModal .modal-backdrop").onclick = closeWeekModal);
