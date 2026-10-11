@@ -1873,6 +1873,15 @@ function renderProgramCustomFields(activityId, values = {}) {
   }).join("");
 }
 
+// Retorna o valor de uma coluna personalizada da programação.
+// Os dados dinâmicos são armazenados em customData (mapeado de dados_personalizados no Supabase).
+function getPlanningColumnValue(column, row) {
+  if (!column || !row) return "";
+  const key = column.key;
+  if (!key) return "";
+  return row.customData?.[key] ?? row[key] ?? "";
+}
+
 function renderProgramacao() {
   setupProgrammingSelectors();
   const rows = filteredProgramacoes();
@@ -2154,7 +2163,7 @@ async function saveProgramacaoToDatabase() {
       quantidade: 1,
       observacao: note || null,
       dados_personalizados: customData,
-      modo_importacao: draft.mode === "nova" ? "MANUAL_NOVA_PROGRAMACAO" : "MANUAL_INCLUIR",
+      modo_importacao: draft.mode === "nova" ? "NOVA_PROGRAMACAO" : "INCLUIR_NA_PROGRAMACAO",
       arquivo_importacao: null,
       usuario_importacao: state.currentUser?.authUserId || null,
       updated_at: new Date().toISOString()
@@ -2491,7 +2500,7 @@ async function confirmProgramImport(mode) {
         quantidade: Number(record.qty || 1),
         observacao: record.note || null,
         dados_personalizados: record.customData || {},
-        modo_importacao: mode === "new" ? "NOVA_CARGA" : "INCLUSAO",
+        modo_importacao: mode === "new" ? "NOVA_PROGRAMACAO" : "INCLUIR_NA_PROGRAMACAO",
         arquivo_importacao: pending.fileName,
         usuario_importacao: state.currentUser?.authUserId || null,
         updated_at: new Date().toISOString()
