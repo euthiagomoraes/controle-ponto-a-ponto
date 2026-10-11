@@ -1482,17 +1482,25 @@ async function createWeek(event) {
 }
 
 function normalizeDisciplineForDB(value) {
-  const normalized = String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
-  // A constraint do banco usa os valores canônicos sem acentos.
-  const allowed = {
-    "ELETRICA": "ELETRICA",
-    "INSTRUMENTACAO": "INSTRUMENTACAO",
-    "TUBULACAO": "TUBULACAO",
-    "MECANICA": "MECANICA",
-    "AUTOMACAO": "AUTOMACAO",
-    "CIVIL": "CIVIL"
+  // Persistir códigos canônicos sem acentos, compatíveis com a constraint do banco.
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toUpperCase();
+}
+
+function formatDisciplineLabel(value) {
+  const normalized = normalizeDisciplineForDB(value);
+  const labels = {
+    ELETRICA: "Elétrica",
+    INSTRUMENTACAO: "Instrumentação",
+    TUBULACAO: "Tubulação",
+    MECANICA: "Mecânica",
+    AUTOMACAO: "Automação",
+    CIVIL: "Civil"
   };
-  return allowed[normalized] || normalized;
+  return labels[normalized] || String(value || "—");
 }
 
 /* =========================
@@ -1563,48 +1571,25 @@ function normalizeAccesses() {
   state.accesses = clone(ACCESS_DEFAULTS);
 }
 
-function disciplineLabel(value) {
-  const labels = { ELETRICA: "Elétrica", INSTRUMENTACAO: "Instrumentação", TUBULACAO: "Tubulação", MECANICA: "Mecânica", AUTOMACAO: "Automação", CIVIL: "Civil" };
-  const key = String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
-  return labels[key] || value || "—";
-}
-
 function renderTeams() {
   const teams = [...(state.teams || [])].sort((a, b) => String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR", { numeric: true, sensitivity: "base" }));
   const body = $("teamTableBody");
   if (body) body.innerHTML = teams.map(team => `
     <tr>
       <td><strong>${escapeHTML(team.nome || team.name || "—")}</strong></td>
-      <td>${escapeHTML(disciplineLabel(team.disciplina))}</td>
+      <td>${escapeHTML(formatDisciplineLabel(team.disciplina))}</td>
       <td><span class="status-chip ${team.ativo === false ? "inactive" : "active"}">${team.ativo === false ? "INATIVA" : "ATIVA"}</span></td>
     </tr>
   `).join("");
   $("teamEmpty")?.classList.toggle("hidden", teams.length > 0);
-}
-
-function openTeamModal() {
-  const modal = $("teamModal");
-  if (!modal) return;
-  $("teamForm")?.reset();
-  if ($("teamFormMessage")) $("teamFormMessage").textContent = "";
-  modal.classList.remove("hidden");
-  modal.setAttribute("aria-hidden", "false");
-  window.setTimeout(() => $("teamNameInput")?.focus(), 40);
-}
-
-function closeTeamModal() {
-  const modal = $("teamModal");
-  if (!modal) return;
-  modal.classList.add("hidden");
-  modal.setAttribute("aria-hidden", "true");
-  $("teamForm")?.reset();
-  if ($("teamFormMessage")) $("teamFormMessage").textContent = "";
+  populateTeamSelectors();
 }
 
 async function saveTeam(event) {
   event?.preventDefault?.();
   const name = $("teamNameInput")?.value.trim().replace(/\s+/g, " ") || "";
   const discipline = $("teamDisciplineInput")?.value || "";
+  const linkedPersonId = $("teamPersonInput")?.value || "";
   const message = $("teamFormMessage");
   const button = $("saveTeamBtn");
   if (message) message.textContent = "";
@@ -1623,20 +1608,39 @@ async function saveTeam(event) {
   }
   if (button) { button.disabled = true; button.textContent = "Salvando…"; }
   try {
-    const { error } = await sb.from("tb_equipes").insert({ nome: name, disciplina: normalizeDisciplineForDB(discipline), ativo: true });
+    const { data: insertedTeam, error } = await sb.from("tb_equipes")
+      .insert({ nome: name, disciplina: normalizeDisciplineForDB(discipline), ativo: true })
+      .select("id,nome,disciplina,ativo")
+      .single();
     if (error) throw error;
+
+    // O vínculo é persistido em tb_pessoas.equipe_id, mantendo a pessoa vinculada à equipe.
+    if (linkedPersonId) {
+      const { error: linkError } = await sb.from("tb_pessoas").update({
+        equipe_id: insertedTeam.id,
+        disciplina: normalizeDisciplineForDB(discipline),
+        updated_at: new Date().toISOString()
+      }).eq("id", linkedPersonId);
+      if (linkError) throw new Error(`Equipe criada, mas não foi possível vincular a pessoa selecionada: ${linkError.message}`);
+    }
     await loadTeamsAndPeople();
     renderTeams();
     renderAccesses();
     setupProgrammingSelectors();
-    closeTeamModal();
-    toast(`Equipe “${name}” cadastrada no Supabase.`);
+    if ($("teamForm")) $("teamForm").reset();
+    populateTeamSelectors();
+    if (message) message.textContent = linkedPersonId
+      ? `Equipe “${name}” cadastrada e pessoa vinculada com sucesso.`
+      : `Equipe “${name}” cadastrada com sucesso.`;
+    toast("Equipe cadastrada no Supabase.");
   } catch (error) {
     console.error("Erro ao cadastrar equipe:", error);
     const detail = error?.message || "Não foi possível cadastrar a equipe.";
-    if (message) message.textContent = /row-level security|permission|not allowed|42501/i.test(detail)
-      ? "O Supabase bloqueou o cadastro. Verifique a política RLS de INSERT da tabela tb_equipes para administradores."
-      : detail;
+    if (message) message.textContent = /tb_equipes_disciplina_check|check constraint/i.test(detail)
+      ? "A disciplina foi rejeitada pela regra do banco. Execute a migration 006_corrigir_disciplina_equipes.sql no SQL Editor do Supabase e tente novamente."
+      : /row-level security|permission|not allowed|42501/i.test(detail)
+        ? "O Supabase bloqueou o cadastro. Verifique a política RLS de INSERT da tabela tb_equipes para administradores."
+        : detail;
   } finally {
     if (button) { button.disabled = false; button.textContent = "＋ Cadastrar equipe"; }
   }
@@ -1678,8 +1682,22 @@ function renderAccesses() {
 }
 
 function populateTeamSelectors() {
-  const teamOptions = [...state.teams].sort((a,b)=>String(a.nome||"").localeCompare(String(b.nome||""),"pt-BR",{numeric:true,sensitivity:"base"})).map(team => `<option value="${escapeHTML(team.nome)}">${escapeHTML(team.nome)}</option>`).join("");
-  if ($("accessTeamInput")) $("accessTeamInput").innerHTML = teamOptions;
+  const sortedTeams = [...state.teams].sort((a,b)=>String(a.nome||"").localeCompare(String(b.nome||""),"pt-BR",{numeric:true,sensitivity:"base"}));
+  const teamOptions = sortedTeams.map(team => `<option value="${escapeHTML(team.nome)}">${escapeHTML(team.nome)}</option>`).join("");
+  if ($("accessTeamInput")) {
+    const previous = $("accessTeamInput").value;
+    $("accessTeamInput").innerHTML = teamOptions;
+    if (sortedTeams.some(team => team.nome === previous)) $("accessTeamInput").value = previous;
+  }
+
+  if ($("teamPersonInput")) {
+    const previousPerson = $("teamPersonInput").value;
+    const people = [...(state.peopleRecords || [])].filter(person => person.ativo !== false)
+      .sort((a,b)=>String(a.nome||"").localeCompare(String(b.nome||""),"pt-BR",{sensitivity:"base"}));
+    $("teamPersonInput").innerHTML = `<option value="">Sem vínculo inicial</option>` + people
+      .map(person => `<option value="${escapeHTML(person.id)}">${escapeHTML(person.nome)}${person.equipe_id ? ` — ${escapeHTML(state.teams.find(team => team.id === person.equipe_id)?.nome || "equipe vinculada")}` : ""}</option>`).join("");
+    if (people.some(person => person.id === previousPerson)) $("teamPersonInput").value = previousPerson;
+  }
 }
 
 function randomAccessCode() {
@@ -2441,16 +2459,20 @@ async function confirmProgramImport(mode) {
 
     const resolvedRecords = pending.records.map((record, index) => {
       const team = teamByName(record.team);
-      const person = personByName(record.responsible);
+      const responsibleName = String(record.responsible ?? "").trim();
+      // Responsável é opcional. Se estiver vazio, aproveita o vínculo pessoa/equipe
+      // quando houver exatamente uma pessoa ativa vinculada à equipe; caso contrário, fica sem responsável.
+      const linkedPeople = team ? state.peopleRecords.filter(item => item.ativo !== false && item.equipe_id === team.id) : [];
+      const person = responsibleName ? personByName(responsibleName) : (linkedPeople.length === 1 ? linkedPeople[0] : null);
       if (!team) {
         const available = state.teams.filter(t => t.ativo !== false).map(t => t.nome || t.name).filter(Boolean).join(", ");
         const allTeams = state.teams.map(t => `${t.nome || t.name}${t.ativo === false ? " (inativa)" : ""}`).filter(Boolean).join(", ");
         const detail = allTeams ? `Equipes cadastradas: ${allTeams}.` : "A tabela tb_equipes não retornou nenhum registro para este usuário. Verifique o cadastro no Supabase e as políticas RLS.";
         throw new Error(`Linha ${index + 2}: equipe “${record.team || "(vazia)"}” não encontrada. ${detail} Equipes disponíveis para importação: ${available || "nenhuma equipe ativa"}. O importador aceita “A” para “Equipe A” quando houver correspondência única.`);
       }
-      if (!person) {
+      if (responsibleName && !person) {
         const available = state.peopleRecords.map(p => p.nome).filter(Boolean).join(", ") || "nenhuma pessoa ativa cadastrada";
-        throw new Error(`Linha ${index + 2}: responsável “${record.responsible || "(vazio)"}” não encontrado no cadastro. Pessoas ativas: ${available}.`);
+        throw new Error(`Linha ${index + 2}: responsável “${responsibleName}” não encontrado no cadastro. Pessoas ativas: ${available}. Deixe a célula vazia para importar sem responsável ou vincule uma pessoa à equipe no cadastro.`);
       }
       return { record, team, person };
     });
@@ -2465,7 +2487,7 @@ async function confirmProgramImport(mode) {
         atividade_id: module.dbId,
         data_programacao: record.date || null,
         equipe_id: team.id,
-        responsavel_id: person.id,
+        responsavel_id: person?.id || null,
         quantidade: Number(record.qty || 1),
         observacao: record.note || null,
         dados_personalizados: record.customData || {},
@@ -3703,10 +3725,7 @@ function bindEvents() {
 
   $("newAccessBtn") && ($("newAccessBtn").onclick = () => openAccessModal());
   $("newWeekBtn") && ($("newWeekBtn").onclick = openWeekModal);
-  $("newTeamBtn") && ($("newTeamBtn").onclick = openTeamModal);
-  $("closeTeamModal") && ($("closeTeamModal").onclick = closeTeamModal);
-  $("cancelTeamModal") && ($("cancelTeamModal").onclick = closeTeamModal);
-  $("teamModal .modal-backdrop") && ($("teamModal .modal-backdrop").onclick = closeTeamModal);
+  $("weekPanelNewBtn") && ($("weekPanelNewBtn").onclick = openWeekModal);
   $("closeWeekModal") && ($("closeWeekModal").onclick = closeWeekModal);
   $("cancelWeekModal") && ($("cancelWeekModal").onclick = closeWeekModal);
   $("weekModal .modal-backdrop") && ($("weekModal .modal-backdrop").onclick = closeWeekModal);

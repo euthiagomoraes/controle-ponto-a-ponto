@@ -438,7 +438,7 @@ tbody td{padding:10px 9px;border-bottom:1px solid #eef2f6;vertical-align:middle;
 }
 
 /* Cadastro de equipes em Pessoas & Acessos */
-.team-register-card{padding:14px}.team-register-card .list-header{align-items:flex-start}.team-register-card .list-header h3{margin:4px 0 0;font-size:15px}.team-register-card .list-header p{margin:6px 0 0;color:#7b899a;font-size:10px;line-height:1.5;max-width:760px}.team-register-form{display:grid;grid-template-columns:minmax(180px,1.4fr) minmax(180px,1fr) auto;gap:10px;align-items:end;margin:14px 0 8px}.team-register-form label{display:flex;flex-direction:column;gap:6px;font-size:9px;font-weight:800;letter-spacing:.04em;color:#718096}.team-register-form input,.team-register-form select{width:100%;min-width:0;border:1px solid #d9e2ec;border-radius:10px;padding:11px 12px;background:#fff;font-size:11px;color:var(--text);outline:none}.team-register-form input:focus,.team-register-form select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(11,92,255,.08)}.team-register-form .primary-btn{white-space:nowrap}.team-table-wrap{max-height:230px;overflow:auto}.team-table-wrap table{min-width:480px}.team-table-wrap th,.team-table-wrap td{padding:10px 12px}.team-register-card .form-message{margin:6px 0 10px}@media(max-width:760px){.team-register-form{grid-template-columns:1fr}.team-register-form .primary-btn{width:100%}.team-register-card .list-header{display:block}}
+.team-register-card{padding:14px}.team-register-card .list-header{align-items:flex-start}.team-register-card .list-header h3{margin:4px 0 0;font-size:15px}.team-register-card .list-header p{margin:6px 0 0;color:#7b899a;font-size:10px;line-height:1.5;max-width:760px}.team-register-form{display:grid;grid-template-columns:minmax(160px,1.2fr) minmax(160px,1fr) minmax(200px,1.2fr) auto;gap:10px;align-items:end;margin:14px 0 8px}.team-register-form label{display:flex;flex-direction:column;gap:6px;font-size:9px;font-weight:800;letter-spacing:.04em;color:#718096}.team-register-form input,.team-register-form select{width:100%;min-width:0;border:1px solid #d9e2ec;border-radius:10px;padding:11px 12px;background:#fff;font-size:11px;color:var(--text);outline:none}.team-register-form input:focus,.team-register-form select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(11,92,255,.08)}.team-register-form .primary-btn{white-space:nowrap}.team-table-wrap{max-height:230px;overflow:auto}.team-table-wrap table{min-width:480px}.team-table-wrap th,.team-table-wrap td{padding:10px 12px}.team-register-card .form-message{margin:6px 0 10px}@media(max-width:760px){.team-register-form{grid-template-columns:1fr}.team-register-form .primary-btn{width:100%}.team-register-card .list-header{display:block}}
 
 
 /* Pastas expansíveis para os cadastros de semanas */
@@ -461,19 +461,3 @@ tbody td{padding:10px 9px;border-bottom:1px solid #eef2f6;vertical-align:middle;
 .week-folder-empty { padding:24px; text-align:center; border:1px dashed #d3deed; border-radius:12px; color:#71819a; background:#fbfcfe; }
 @keyframes weekFolderOpen { from { opacity:0; transform:translateY(-5px); } to { opacity:1; transform:translateY(0); } }
 @media(max-width:700px) { .week-folder-summary { flex-wrap:wrap; } .week-folder-meta { margin-left:0; } }
-
-/* REV. 16 — accordions em Pessoas e Acessos e modais de cadastro */
-.access-top-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center}
-.access-accordion{padding:0;overflow:hidden}
-.access-accordion-summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px;cursor:pointer;user-select:none}
-.access-accordion-summary::-webkit-details-marker{display:none}
-.access-accordion-summary>span:first-child{display:flex;flex-direction:column;gap:4px}
-.access-accordion-summary strong{font-size:15px;color:var(--text)}
-.access-accordion-summary small{font-size:10px;color:#7b899a;line-height:1.45}
-.accordion-chevron{font-size:18px;color:#7b899a;transition:transform .18s ease}
-.access-accordion[open] .accordion-chevron{transform:rotate(180deg)}
-.access-accordion-content{padding:0 14px 14px}
-.access-accordion-search{display:flex;justify-content:flex-end;margin-bottom:10px}
-.team-modal{width:min(480px,calc(100% - 28px))}
-#weekModal .modal-backdrop{background:rgba(4,13,25,.18);backdrop-filter:none}
-@media(max-width:700px){.access-top-actions{width:100%;justify-content:stretch}.access-top-actions button{flex:1;min-width:130px}.access-accordion-summary{padding:13px}.access-accordion-content{padding:0 10px 10px}}
