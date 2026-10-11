@@ -461,3 +461,38 @@ tbody td{padding:10px 9px;border-bottom:1px solid #eef2f6;vertical-align:middle;
 .week-folder-empty { padding:24px; text-align:center; border:1px dashed #d3deed; border-radius:12px; color:#71819a; background:#fbfcfe; }
 @keyframes weekFolderOpen { from { opacity:0; transform:translateY(-5px); } to { opacity:1; transform:translateY(0); } }
 @media(max-width:700px) { .week-folder-summary { flex-wrap:wrap; } .week-folder-meta { margin-left:0; } }
+
+/* V13 — experiência mobile tipo aplicativo: drawer confiável, navegação e áreas seguras */
+@media(max-width:900px){
+  #appShell .side-nav.hidden{display:none!important}
+  #appShell .side-nav:not(.hidden){display:flex!important}
+  #mobileSidebarOverlay{z-index:998!important}
+  #appShell #appSidebar{z-index:999!important;visibility:visible;will-change:transform;background:var(--sys-header,#07111f)!important}
+  #appShell #appSidebar.mobile-open{visibility:visible!important;pointer-events:auto!important}
+  #appShell #appSidebar:not(.mobile-open){pointer-events:none!important}
+  #appShell .main-content{min-width:0;max-width:100vw;overflow-x:clip}
+  #appShell .topbar{display:flex;align-items:center;gap:11px;padding:10px 13px;min-height:68px;padding-top:max(10px,env(safe-area-inset-top));}
+  #appShell .topbar>div:first-of-type{min-width:0;flex:1}
+  #appShell .topbar h1{line-height:1.25;overflow-wrap:anywhere;margin:2px 0}
+  #appShell .mobile-menu-btn{position:relative;z-index:1000;flex-shrink:0;box-shadow:0 4px 12px rgba(10,35,70,.12);touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+  #appShell .sidebar .brand{display:flex!important;align-items:center;gap:10px;padding:8px 5px 18px!important;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:12px}
+  #appShell .sidebar .brand-mark{flex:0 0 42px}
+  #appShell .sidebar .brand-copy{display:flex!important;flex-direction:column;opacity:1!important;width:auto!important}
+  #appShell .sidebar .nav-item{font-size:13px!important;min-height:48px!important;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+  #appShell .sidebar .nav-icon{width:22px;height:22px;flex:0 0 22px}
+  #appShell .sidebar .nav-label{font-size:12px!important;white-space:normal;line-height:1.3}
+  #appShell .sidebar-footer{padding-bottom:max(14px,env(safe-area-inset-bottom))!important}
+  #appShell .main-content{padding-bottom:calc(24px + env(safe-area-inset-bottom))!important}
+  #appShell .card{border-radius:15px}
+  #appShell input,#appShell select,#appShell textarea{font-size:16px!important}
+}
+@media(max-width:560px){
+  #appShell .topbar .eyebrow{font-size:8px;letter-spacing:.08em}
+  #appShell .topbar h1{font-size:14px!important}
+  #appShell .topbar .subtitle{font-size:9px;line-height:1.4}
+  #appShell .mobile-sidebar-overlay.show{backdrop-filter:blur(1px);-webkit-backdrop-filter:blur(1px)}
+  #appShell .page-title-row{gap:10px;flex-wrap:wrap}
+  #appShell .page-title-row h2,#appShell .page-title-row h3{overflow-wrap:anywhere}
+  #appShell .metrics-grid{gap:9px}
+  #appShell .metric-card,#appShell .stat-card{min-width:0}
+}
