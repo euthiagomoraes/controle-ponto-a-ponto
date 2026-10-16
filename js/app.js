@@ -102,7 +102,7 @@ function bindEvents() {
   $("backlogBulkClear").addEventListener("click", () => { state.backlog.selected.clear(); renderBacklog(); });
   $("backlogBulkMove").addEventListener("click", () => openReprogram([...state.backlog.selected]));
   $("reprogramConfirm").addEventListener("click", confirmReprogram);
-  $("kpiBacklogCard").addEventListener("click", () => goTo("backlog"));
+  $("kpiBacklogCard").addEventListener("click", () => { if (state.user?.role === "admin") goTo("backlog"); });
   $("dashboardBacklogBtn").addEventListener("click", () => goTo("backlog"));
   $("programPager").addEventListener("click", e => {
     const b = e.target.closest("[data-page]");
@@ -184,8 +184,17 @@ function bindEvents() {
     applySettings();
     renderSettings();
   }));
-  $("settingsSave").addEventListener("click", () => { if (saveSettings()) setMessage("settingsMessage", "Configurações salvas neste navegador.", true); });
-  $("settingsReset").addEventListener("click", () => { state.settings = { ...DEFAULT_SETTINGS }; saveSettings(); renderSettings(); setMessage("settingsMessage", "Padrão restaurado.", true); });
+  const persistSettings = (button, okText) => withButton(button, async () => {
+    try {
+      await withBusy(saveSettings);
+      renderSettings();
+      setMessage("settingsMessage", okText, true);
+    } catch (error) {
+      setMessage("settingsMessage", error.message);
+    }
+  });
+  $("settingsSave").addEventListener("click", e => persistSettings(e.currentTarget, "Identidade salva. Vale para todos os usuários e para a tela de login."));
+  $("settingsReset").addEventListener("click", e => { state.settings = { ...DEFAULT_SETTINGS }; renderSettings(); persistSettings(e.currentTarget, "Padrão restaurado para todos os usuários."); });
 
   // Campo
   $("fieldWeekPrev").addEventListener("click", () => changeFieldWeek(-1));
@@ -230,6 +239,9 @@ function bindEvents() {
 async function init() {
   applyTheme();
   loadSettings();
+  setLoginBackgroundRunning(true);
+  fitLoginBackground();
+  window.addEventListener("resize", fitLoginBackground);
   if (storageGet(localStorage, "ppaSidebarCollapsed") === "1") $("appShell").classList.add("collapsed");
   bindEvents();
 
@@ -244,7 +256,10 @@ async function init() {
     return;
   }
 
+  // Identidade visual do banco (logo/cores da tela de login) em paralelo com a sessão.
+  const settingsReady = loadSystemSettings().catch(error => console.warn("Identidade visual:", error));
   const restored = await restoreSession();
+  await settingsReady;
   if (restored?.error) {
     showLoginStep("chooser");
     toast(restored.error, "error");

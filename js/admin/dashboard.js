@@ -8,6 +8,16 @@
    ========================================================= */
 
 function renderDashboard() {
+  // Mesmo painel para os dois perfis; no campo os dados já vêm restritos à equipe da pessoa.
+  const field = state.user?.role === "technician";
+  const team = field ? teamName(state.user.equipeId) : "";
+  setText("dashboardSubtitle", field
+    ? `Avanço ${team ? `da ${team}` : "das equipes"} na semana selecionada.`
+    : "Execução da programação na semana selecionada.");
+  const alert = $("dashboardAlert");
+  alert.classList.toggle("hidden", !(field && state.dashboardError));
+  alert.textContent = field ? state.dashboardError : "";
+
   const weeks = allWeeks();
   if (!state.dashboardWeek || !weeks.includes(state.dashboardWeek)) state.dashboardWeek = weekLabel(currentWeekNumber());
   fillSelect($("dashboardWeek"), weeks.slice().reverse().map(w => ({ value: w, label: w })), { value: state.dashboardWeek });

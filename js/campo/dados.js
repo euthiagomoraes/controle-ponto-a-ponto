@@ -43,11 +43,40 @@ async function loadFieldWeek() {
 
   const activeIds = new Set(state.activities.map(a => a.id));
   state.field.programs = programs.filter(p => activeIds.has(p.activityId));
-  state.executions = setExecutions(executions);
-  state.equipment = new Map(equipment.map(e => [e.id, e]));
+  mergeExecutions(programs, executions);
+  equipment.forEach(e => state.equipment.set(e.id, e));
   const visible = new Set(state.field.programs.map(p => p.id));
   state.field.selected = new Set([...state.field.selected].filter(id => visible.has(id) && !isDone(state.field.programs.find(p => p.id === id))));
   if (!visible.has(state.field.activeId)) state.field.activeId = null;
+}
+
+// A tela de campo e o Dashboard compartilham o mesmo mapa de execuções (por item).
+function mergeExecutions(programs, executions) {
+  const grouped = setExecutions(executions);
+  programs.forEach(p => state.executions.set(p.id, grouped.get(p.id) || []));
+}
+
+// Semanas carregadas no Dashboard de campo: 12 anteriores, a atual e 2 seguintes.
+const FIELD_DASHBOARD_BACK = 12;
+const FIELD_DASHBOARD_AHEAD = 2;
+const MISSING_012 = "O Dashboard da equipe de campo precisa da migration 012_identidade_e_dashboard_campo.sql. Peça ao administrador para executá-la no Supabase.";
+
+// Programação da equipe em várias semanas, para os indicadores (fica em state.programs, como no planejamento).
+async function loadFieldDashboard() {
+  const current = currentWeekNumber();
+  const { data, error } = await requireDb().rpc("tecnico_programacao_periodo", {
+    p_cracha: fieldCode(), p_semana_de: current - FIELD_DASHBOARD_BACK, p_semana_ate: current + FIELD_DASHBOARD_AHEAD
+  });
+  if (error && isMissingFunction(error)) throw new Error(MISSING_012);
+  if (error) throw error;
+  const rows = Array.isArray(data) ? data : [];
+  rows.forEach(r => {
+    if (r.equipe_id && r.equipe_nome && !teamById(r.equipe_id)) state.teams.push({ id: r.equipe_id, nome: r.equipe_nome, ativo: true });
+  });
+  const activeIds = new Set(state.activities.map(a => a.id));
+  const programs = rows.map(r => mapProgram(r)).filter(p => activeIds.has(p.activityId));
+  mergeExecutions(programs, rows.flatMap(r => (r.execucoes || []).map(e => ({ ...e, programacao_id: r.id }))));
+  state.programs = programs;
 }
 
 async function fieldRegister(ids, observacao, executadoEm) {

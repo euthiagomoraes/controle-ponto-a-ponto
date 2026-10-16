@@ -269,10 +269,41 @@ button { cursor: pointer; }
 /* =========================================================
    LOGIN
    ========================================================= */
-.login { min-height: 100%; display: grid; place-items: center; padding: 24px 16px; background:
+.login { position: relative; overflow: hidden; min-height: 100%; display: grid; place-items: center; padding: 24px 16px; background:
   radial-gradient(1200px 500px at 10% -10%, var(--primary-soft), transparent 60%), var(--bg); }
-.login-panel { width: 100%; max-width: 420px; }
-.login-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+.login-panel { position: relative; z-index: 1; width: 100%; max-width: 420px; }
+.login-step { backdrop-filter: blur(6px); }
+.login-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; width: fit-content; max-width: 100%; padding: 8px 14px 8px 8px; border-radius: 14px; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(4px); }
+.login-logo { max-height: 56px; max-width: 180px; object-fit: contain; border-radius: 8px; background: #fff; padding: 6px 8px; box-shadow: var(--shadow); }
+
+/* Fundo animado: processo industrial (P&ID / HMI) */
+.login-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+.login-bg .bg-grid-minor { fill: none; stroke: var(--line); stroke-width: .5; opacity: .55; }
+.login-bg .bg-grid { fill: none; stroke: var(--line); stroke-width: 1; }
+.login-bg .bg-pipes path { fill: none; stroke: var(--line-strong); stroke-width: 10; stroke-linejoin: round; stroke-linecap: round; }
+.login-bg .bg-flow path { fill: none; stroke: var(--primary); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 14 22; opacity: .75; animation: bg-flow 2.4s linear infinite; }
+.login-bg .bg-equip { fill: var(--surface); stroke: var(--muted); stroke-width: 2; stroke-linejoin: round; }
+.login-bg .bg-level { fill: var(--primary); opacity: .28; }
+.login-bg .bg-tick { fill: none; stroke: var(--subtle); stroke-width: 1.5; }
+.login-bg .bg-label { fill: var(--subtle); font: 600 12px var(--mono); letter-spacing: .06em; }
+.login-bg .bg-rotor { transform-box: fill-box; transform-origin: center; animation: spin 2.2s linear infinite; }
+.login-bg .bg-rotor-blades { fill: none; stroke: var(--primary); stroke-width: 3; stroke-linecap: round; }
+.login-bg .bg-signal path, .login-bg .bg-signal-solid { fill: none; stroke: var(--subtle); stroke-width: 1.5; }
+.login-bg .bg-signal path { stroke-dasharray: 8 6; }
+.login-bg .bg-instr circle, .login-bg .bg-instr rect { fill: var(--surface); stroke: var(--muted); stroke-width: 2; }
+.login-bg .bg-instr path { stroke: var(--muted); stroke-width: 1.5; }
+.login-bg .bg-instr text { fill: var(--muted); font: 700 13px var(--mono); text-anchor: middle; }
+.login-bg .bg-pulse circle { fill: var(--ok); }
+.login-bg .bg-modules rect { fill: var(--surface-2); stroke: var(--line-strong); }
+.login-bg .bg-leds circle { fill: var(--ok); animation: bg-blink 1.8s linear infinite; }
+.login-bg .bg-leds .bg-led-run { fill: var(--warn); animation-duration: .9s; }
+.login-bg .bg-trend { fill: none; stroke: var(--chart-done); stroke-width: 2.5; stroke-linejoin: round; stroke-dasharray: 420; stroke-dashoffset: 420; animation: bg-draw 7s ease-in-out infinite; }
+.login-bg .bg-trend.sp { stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 6 6; stroke-dashoffset: 0; animation: none; }
+.login-bg .bg-fade-in { stop-color: var(--bg); stop-opacity: .9; }
+.login-bg .bg-fade-out { stop-color: var(--bg); stop-opacity: .1; }
+@keyframes bg-flow { to { stroke-dashoffset: -72; } }
+@keyframes bg-blink { 0%, 48% { opacity: 1; } 50%, 100% { opacity: .2; } }
+@keyframes bg-draw { 0% { stroke-dashoffset: 420; } 60%, 85% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -420; } }
 .login-brand strong { display: block; font-size: 16px; }
 .login-brand span { font-size: 12.5px; color: var(--muted); }
 .login-step { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 28px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 14px; }
@@ -680,8 +711,18 @@ button { cursor: pointer; }
   .bulk-bar > span { font-size: 13px; }
 }
 
+/* Celular/tablet: com fonte menor que 16px o iOS dá zoom ao tocar no campo (busca, senha etc.). */
+@media (max-width: 960px), (pointer: coarse) {
+  input:not(.code-input), select, textarea { font-size: 16px !important; }
+}
+
+/* Itens exclusivos do planejamento ficam ocultos para a equipe de campo. */
+body[data-role="technician"] .admin-only { display: none !important; }
+body[data-role="technician"] .kpi-link { pointer-events: none; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
+  .login-bg .bg-pulse { display: none; }
 }
 
 @media print {

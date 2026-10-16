@@ -116,7 +116,12 @@ async function logout() {
   state.user = null;
   state.programs = [];
   state.executions = new Map();
-  state.field = { ...state.field, programs: [], selected: new Set(), activeId: null };
+  state.equipment = new Map();
+  state.dashboardWeek = null;
+  state.dashboardError = "";
+  state.field = { ...state.field, weekNum: null, programs: [], selected: new Set(), activeId: null };
+  delete document.body.dataset.role;
+  setLoginBackgroundRunning(true);
   $("appShell").classList.add("hidden");
   $("loginScreen").classList.remove("hidden");
   $("adminLoginForm").reset();
@@ -125,8 +130,27 @@ async function logout() {
   showLoginStep("chooser");
 }
 
+// As animações SMIL do fundo do login (pulsos, nível do tanque) ficam paradas fora da tela de login
+// e quando o sistema pede movimento reduzido.
+function setLoginBackgroundRunning(running) {
+  const svg = $("loginBg");
+  if (!svg?.pauseAnimations) return;
+  const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  if (running && !reduce) svg.unpauseAnimations(); else svg.pauseAnimations();
+}
+
+// Em tela vertical (celular) o fundo alinha à esquerda, mostrando tanque, bomba e instrumentos.
+function fitLoginBackground() {
+  const svg = $("loginBg");
+  if (!svg) return;
+  const portrait = window.innerHeight > window.innerWidth;
+  svg.setAttribute("preserveAspectRatio", portrait ? "xMinYMid slice" : "xMidYMid slice");
+}
+
 async function enterApp(user) {
   state.user = user;
+  document.body.dataset.role = user.role;
+  setLoginBackgroundRunning(false);
   $("loginScreen").classList.add("hidden");
   $("appShell").classList.remove("hidden");
   document.querySelectorAll("[data-nav-role]").forEach(nav => nav.classList.toggle("active", nav.dataset.navRole === user.role));

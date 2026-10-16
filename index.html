@@ -56,9 +56,118 @@
      LOGIN
      ========================================================= -->
 <div id="loginScreen" class="login">
+  <!-- Fundo decorativo: processo industrial em estilo P&ID/HMI (tubulação, instrumentos ISA, CLP e tendência). -->
+  <svg id="loginBg" class="login-bg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+    <defs>
+      <pattern id="bgGridMinor" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" class="bg-grid-minor"/></pattern>
+      <pattern id="bgGrid" width="100" height="100" patternUnits="userSpaceOnUse"><rect width="100" height="100" fill="url(#bgGridMinor)"/><path d="M100 0H0V100" class="bg-grid"/></pattern>
+      <clipPath id="bgTankClip"><rect x="120" y="400" width="150" height="250" rx="22"/></clipPath>
+      <radialGradient id="bgFade" cx="50%" cy="50%" r="55%">
+        <stop offset="0" class="bg-fade-in"/>
+        <stop offset="1" class="bg-fade-out"/>
+      </radialGradient>
+    </defs>
+    <rect width="1600" height="900" fill="url(#bgGrid)"/>
+
+    <!-- Tubulação principal e fluxo -->
+    <g class="bg-pipes">
+      <path id="bgPipeMain" d="M270 600H380V470H620V330H1000V520H1620"/>
+      <path id="bgPipeLow" d="M-20 760H520V840H1100V700H1620"/>
+      <path id="bgPipeTop" d="M195 400V250H470V140H760"/>
+    </g>
+    <g class="bg-flow">
+      <path d="M270 600H380V470H620V330H1000V520H1620"/>
+      <path d="M-20 760H520V840H1100V700H1620"/>
+      <path d="M195 400V250H470V140H760"/>
+    </g>
+
+    <!-- Tanque com nível -->
+    <rect x="120" y="400" width="150" height="250" rx="22" class="bg-equip"/>
+    <g clip-path="url(#bgTankClip)">
+      <rect x="120" y="520" width="150" height="130" class="bg-level">
+        <animate attributeName="y" values="540;470;510;540" dur="9s" repeatCount="indefinite"/>
+        <animate attributeName="height" values="110;180;140;110" dur="9s" repeatCount="indefinite"/>
+      </rect>
+    </g>
+    <path d="M140 470H155M140 520H155M140 570H155" class="bg-tick"/>
+    <text x="195" y="680" class="bg-label" text-anchor="middle">TQ-101</text>
+
+    <!-- Bomba centrífuga -->
+    <circle cx="380" cy="600" r="34" class="bg-equip"/>
+    <g class="bg-rotor"><path d="M380 572V628M352 600H408M360 580L400 620M400 580L360 620" class="bg-rotor-blades"/></g>
+    <text x="380" y="660" class="bg-label" text-anchor="middle">B-101</text>
+
+    <!-- Válvula de controle (gaveta + atuador) -->
+    <g transform="translate(1300 520)">
+      <path d="M-22 -14L22 14V-14L-22 14Z" class="bg-equip"/>
+      <path d="M0 0V-34" class="bg-signal-solid"/>
+      <path d="M-20 -34A20 20 0 0 1 20 -34Z" class="bg-equip"/>
+      <text x="0" y="38" class="bg-label" text-anchor="middle">FCV-201</text>
+    </g>
+    <g transform="translate(500 470)">
+      <path d="M-18 -11L18 11V-11L-18 11Z" class="bg-equip"/>
+    </g>
+
+    <!-- Instrumentos (balões ISA) e linhas de sinal -->
+    <g class="bg-signal">
+      <path id="bgSigLT" d="M270 470H330V330"/>
+      <path id="bgSigFT" d="M620 470V560H700"/>
+      <path id="bgSigTIC" d="M1300 486V230H1360"/>
+      <path id="bgSigPT" d="M1160 520V430"/>
+      <path id="bgSigTT" d="M1460 520V430"/>
+    </g>
+    <g class="bg-instr">
+      <g transform="translate(330 300)"><circle r="30"/><path d="M-30 0H30"/><text y="-7">LT</text><text y="19">101</text></g>
+      <g transform="translate(730 560)"><circle r="30"/><path d="M-30 0H30"/><text y="-7">FT</text><text y="19">102</text></g>
+      <g transform="translate(1160 400)"><circle r="30"/><path d="M-30 0H30"/><text y="-7">PT</text><text y="19">201</text></g>
+      <g transform="translate(1460 400)"><circle r="30"/><path d="M-30 0H30"/><text y="-7">TT</text><text y="19">202</text></g>
+      <!-- Controlador em painel (função compartilhada): balão dentro de quadrado -->
+      <g transform="translate(1390 230)"><rect x="-30" y="-30" width="60" height="60"/><circle r="30"/><path d="M-30 0H30"/><text y="-7">TIC</text><text y="19">301</text></g>
+    </g>
+    <!-- Pulsos de sinal percorrendo as linhas -->
+    <g class="bg-pulse">
+      <circle r="4"><animateMotion dur="3.2s" repeatCount="indefinite"><mpath href="#bgSigLT"/></animateMotion></circle>
+      <circle r="4"><animateMotion dur="2.6s" begin="-1s" repeatCount="indefinite"><mpath href="#bgSigFT"/></animateMotion></circle>
+      <circle r="4"><animateMotion dur="3.6s" begin="-2s" repeatCount="indefinite"><mpath href="#bgSigTIC"/></animateMotion></circle>
+      <circle r="4"><animateMotion dur="2.2s" repeatCount="indefinite"><mpath href="#bgSigPT"/></animateMotion></circle>
+      <circle r="4"><animateMotion dur="2.8s" begin="-1.4s" repeatCount="indefinite"><mpath href="#bgSigTT"/></animateMotion></circle>
+    </g>
+
+    <!-- Rack de CLP com LEDs de status -->
+    <g transform="translate(130 70)">
+      <rect width="300" height="120" rx="8" class="bg-equip"/>
+      <g class="bg-modules">
+        <rect x="14" y="16" width="40" height="88" rx="3"/><rect x="62" y="16" width="40" height="88" rx="3"/>
+        <rect x="110" y="16" width="40" height="88" rx="3"/><rect x="158" y="16" width="40" height="88" rx="3"/>
+        <rect x="206" y="16" width="40" height="88" rx="3"/><rect x="254" y="16" width="32" height="88" rx="3"/>
+      </g>
+      <g class="bg-leds">
+        <circle cx="34" cy="32" r="4" style="animation-delay:0s"/><circle cx="34" cy="46" r="4" style="animation-delay:.4s"/>
+        <circle cx="82" cy="32" r="4" style="animation-delay:.9s"/><circle cx="82" cy="46" r="4" style="animation-delay:.2s"/>
+        <circle cx="130" cy="32" r="4" style="animation-delay:1.3s"/><circle cx="178" cy="32" r="4" style="animation-delay:.7s"/>
+        <circle cx="178" cy="46" r="4" style="animation-delay:1.1s"/><circle cx="226" cy="32" r="4" style="animation-delay:.5s"/>
+        <circle cx="270" cy="32" r="4" class="bg-led-run"/>
+      </g>
+      <text x="0" y="146" class="bg-label">CLP-01 · REDE PROFINET</text>
+    </g>
+
+    <!-- Tela de tendência (HMI) -->
+    <g transform="translate(1110 600)">
+      <rect width="360" height="190" rx="10" class="bg-equip"/>
+      <path d="M24 160H340M24 30V160" class="bg-tick"/>
+      <path d="M24 120H340M24 80H340M24 40H340" class="bg-grid"/>
+      <polyline class="bg-trend" points="24,120 54,112 84,118 114,96 144,104 174,82 204,90 234,70 264,78 294,58 324,66 340,60"/>
+      <polyline class="bg-trend sp" points="24,90 340,90"/>
+      <text x="24" y="20" class="bg-label">TIC-301 · PV / SP</text>
+    </g>
+
+    <!-- Atenua o centro para o cartão de login ficar legível -->
+    <rect width="1600" height="900" fill="url(#bgFade)"/>
+  </svg>
   <div class="login-panel">
     <div class="login-brand">
-      <span class="brand-mark" data-brand-mark>PP</span>
+      <img id="loginLogo" class="login-logo hidden" alt="Logo">
+      <span id="loginBrandMark" class="brand-mark" data-brand-mark>PP</span>
       <div><strong>Planning Pro</strong><span>Programação de atividades de campo</span></div>
     </div>
 
@@ -133,6 +242,7 @@
     <nav class="nav" data-nav-role="technician">
       <span class="nav-section">Campo</span>
       <button class="nav-item" data-screen="campo" title="Atividades da semana"><svg class="icon"><use href="#i-clipboard"/></svg><span>Atividades da semana</span></button>
+      <button class="nav-item" data-screen="dashboard" title="Dashboard"><svg class="icon"><use href="#i-dashboard"/></svg><span>Dashboard</span></button>
       <button class="nav-item" data-screen="historico" title="Histórico"><svg class="icon"><use href="#i-history"/></svg><span>Histórico</span></button>
     </nav>
 
@@ -163,7 +273,7 @@
       <div class="page-head">
         <div>
           <h2>Previsto x realizado</h2>
-          <p class="muted">Execução da programação na semana selecionada.</p>
+          <p id="dashboardSubtitle" class="muted">Execução da programação na semana selecionada.</p>
         </div>
         <div class="actions">
           <label class="inline-select">Semana <select id="dashboardWeek"></select></label>
@@ -173,6 +283,7 @@
         </div>
       </div>
 
+      <div id="dashboardAlert" class="alert warn hidden" role="status"></div>
       <div class="kpi-grid">
         <div class="kpi"><span>Programadas</span><strong id="kpiPlanned">0</strong><small>itens na semana</small></div>
         <div class="kpi ok"><span>Executadas</span><strong id="kpiDone">0</strong><small>com registro de campo</small></div>
@@ -204,7 +315,7 @@
         <section class="card">
           <div class="card-head">
             <div><h3>Backlog por semana de origem</h3><p class="muted sm">Itens não executados de semanas anteriores à selecionada</p></div>
-            <button id="dashboardBacklogBtn" class="btn ghost sm" type="button"><svg class="icon"><use href="#i-forward"/></svg><span>Reprogramar</span></button>
+            <button id="dashboardBacklogBtn" class="btn ghost sm admin-only" type="button"><svg class="icon"><use href="#i-forward"/></svg><span>Reprogramar</span></button>
           </div>
           <div id="dashboardBacklog" class="progress-list"></div>
         </section>
@@ -496,7 +607,7 @@
       <div class="page-head">
         <div>
           <h2>Identidade visual</h2>
-          <p class="muted">Cor principal da interface e padrão dos PDFs/JPEGs. As preferências ficam salvas neste navegador.</p>
+          <p class="muted">Cor principal da interface e padrão dos PDFs/JPEGs. Vale para todos os usuários, inclusive a tela de login.</p>
         </div>
       </div>
       <div class="grid-2">

@@ -1,27 +1,51 @@
 /* Planning Pro · admin/configuracoes.js
- * Configurações visuais (cores, logo) e tema claro/escuro.
+ * Identidade visual (logo e cores) compartilhada pelo banco e tema claro/escuro.
  */
 "use strict";
 
 /* =========================================================
    CONFIGURAÇÕES / TEMA
+   A identidade visual fica em tb_configuracoes (migration 012) e vale para todos os
+   usuários, inclusive a tela de login. O localStorage guarda só uma cópia para a
+   primeira pintura da página, antes da resposta do banco.
    ========================================================= */
 
+const SETTINGS_KEY = "identidade";
+
+const pickSettings = obj => ({ ...DEFAULT_SETTINGS, ...Object.fromEntries(Object.entries(obj || {}).filter(([k]) => k in DEFAULT_SETTINGS)) });
+
 function loadSettings() {
-  try {
-    const saved = JSON.parse(localStorage.getItem("ppaSettings") || "null") || {};
-    state.settings = { ...DEFAULT_SETTINGS, ...Object.fromEntries(Object.entries(saved).filter(([k]) => k in DEFAULT_SETTINGS)) };
-  } catch {
-    state.settings = { ...DEFAULT_SETTINGS };
-  }
+  try { state.settings = pickSettings(JSON.parse(storageGet(localStorage, "ppaSettings") || "null")); }
+  catch { state.settings = { ...DEFAULT_SETTINGS }; }
   applySettings();
 }
 
-function saveSettings() {
-  try { localStorage.setItem("ppaSettings", JSON.stringify(state.settings)); }
-  catch { toast("Não foi possível salvar: armazenamento do navegador cheio. Use uma logo menor.", "error"); return false; }
+function cacheSettings() {
+  storageSet(localStorage, "ppaSettings", JSON.stringify(state.settings));
+}
+
+// Lê a identidade do banco (disponível também antes do login).
+async function loadSystemSettings() {
+  const sb = db();
+  if (!sb) return;
+  const { data, error } = await sb.from("tb_configuracoes").select("valor").eq("chave", SETTINGS_KEY).maybeSingle();
+  if (error) { console.warn("Identidade visual do banco indisponível (execute a migration 012):", error.message); return; }
+  if (!data?.valor) return;
+  state.settings = pickSettings(data.valor);
+  cacheSettings();
   applySettings();
-  return true;
+}
+
+async function saveSettings() {
+  const { error } = await requireDb().from("tb_configuracoes")
+    .upsert({ chave: SETTINGS_KEY, valor: state.settings, updated_at: new Date().toISOString() }, { onConflict: "chave" });
+  if (error) {
+    throw new Error(/relation .*tb_configuracoes|does not exist|schema cache/i.test(error.message)
+      ? "A tabela de configurações não existe. Execute 012_identidade_e_dashboard_campo.sql no SQL Editor do Supabase."
+      : dbErrorMessage(error));
+  }
+  cacheSettings();
+  applySettings();
 }
 
 function applySettings() {
@@ -34,6 +58,13 @@ function applySettings() {
     el.style.backgroundImage = state.settings.logo ? `url("${state.settings.logo}")` : "";
     el.textContent = state.settings.logo ? "" : "PP";
   });
+  // Na tela de login a logo aparece inteira (sem recorte quadrado).
+  const loginLogo = $("loginLogo");
+  if (loginLogo) {
+    loginLogo.classList.toggle("hidden", !state.settings.logo);
+    if (state.settings.logo) loginLogo.src = state.settings.logo;
+    $("loginBrandMark")?.classList.toggle("hidden", Boolean(state.settings.logo));
+  }
 }
 
 function renderSettings() {

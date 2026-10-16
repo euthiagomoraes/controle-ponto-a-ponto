@@ -136,6 +136,9 @@ async function syncAll() {
         if (state.field.weekNum === null) state.field.weekNum = currentWeekNumber();
         await loadFieldContext();
         await loadFieldWeek();
+        // O Dashboard de campo depende da migration 012; sem ela, as telas de campo seguem funcionando.
+        try { await loadFieldDashboard(); state.dashboardError = ""; }
+        catch (error) { state.dashboardError = dbErrorMessage(error); console.warn("Dashboard de campo:", state.dashboardError); }
       }
       state.loadError = "";
     } catch (error) {

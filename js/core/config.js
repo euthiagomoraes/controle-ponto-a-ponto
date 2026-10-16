@@ -60,7 +60,7 @@ const DEFAULT_ACTIVITIES = [
 const DEFAULT_SETTINGS = { primary: "#1f5eff", header: "#0f1b2d", chartPlanned: "#1f5eff", chartDone: "#12895a", logo: "" };
 
 const ADMIN_SCREENS = ["dashboard", "programacao", "backlog", "importacoes", "relatorios", "atividades", "equipes", "configuracoes", "perfil"];
-const FIELD_SCREENS = ["campo", "historico", "perfil"];
+const FIELD_SCREENS = ["campo", "dashboard", "historico", "perfil"];
 
 /* =========================================================
    ESTADO
@@ -77,6 +77,7 @@ const state = {
   equipment: new Map(),      // id -> equipamento
   settings: { ...DEFAULT_SETTINGS },
   loadError: "",
+  dashboardError: "",
 
   dashboardWeek: null,
   program: { activityId: null, week: "", team: "", status: "", search: "", page: 0, selected: new Set() },
