@@ -1261,7 +1261,7 @@ async function updateProgram(button, p, { weekNum, team, customData }) {
       toast("Programação atualizada.");
     } catch (error) {
       setMessage("programFormMessage", error?.code === "23505"
-        ? `Este equipamento (mesmo TAG, SYS e SUBSYS) já está programado em ${weekLabel(weekNum)}. Escolha outra semana ou ajuste o item existente.`
+        ? `O banco recusou: já existe este equipamento em ${weekLabel(weekNum)}. Se os itens têm campos diferentes, execute 011_programacao_sem_unicidade_equipamento.sql no Supabase.`
         : dbErrorMessage(error));
     }
   });
@@ -1294,17 +1294,19 @@ function openReprogram(ids) {
   openModal("reprogramModal");
 }
 
-// O banco não aceita o mesmo equipamento (TAG + SYS + SUBSYS) duas vezes na mesma semana: detecta antes de gravar.
-function reprogramConflicts(targetWeek) {
+// Conflito = o item ficaria idêntico (todos os campos) a outro já programado na semana de destino.
+function reprogramConflicts(targetWeek, targetTeamId = $("reprogramTeam")?.value || "") {
   const moving = new Set(state.reprogramIds);
-  const occupied = new Set(state.programs.filter(p => p.weekNum === targetWeek && !moving.has(p.id) && p.equipmentId).map(p => p.equipmentId));
+  const keyOf = (p, week, team) => duplicateKey(activityById(p.activityId), week, team, p.customData);
+  const occupied = new Set(state.programs.filter(p => p.weekNum === targetWeek && !moving.has(p.id)).map(p => keyOf(p, p.weekNum, p.teamId)));
   const seen = new Set();
   const conflicts = [];
   state.reprogramIds.forEach(id => {
     const p = state.programs.find(x => x.id === id);
-    if (!p?.equipmentId) return;
-    if (occupied.has(p.equipmentId) || seen.has(p.equipmentId)) conflicts.push(p);
-    seen.add(p.equipmentId);
+    if (!p) return;
+    const key = keyOf(p, targetWeek, targetTeamId || p.teamId);
+    if (occupied.has(key) || seen.has(key)) conflicts.push(p);
+    seen.add(key);
   });
   return conflicts;
 }
@@ -1315,14 +1317,14 @@ function renderReprogramWarning() {
   const warn = $("reprogramWarn");
   warn.classList.toggle("hidden", !conflicts.length);
   warn.textContent = conflicts.length
-    ? `${conflicts.length} item(ns) já têm o mesmo equipamento (TAG/SYS/SUBSYS) programado em ${weekLabel(target)} e serão mantidos na semana atual: ${conflicts.slice(0, 8).map(programTitle).join(", ")}${conflicts.length > 8 ? "…" : ""}.`
+    ? `${conflicts.length} item(ns) ficariam idênticos a itens já programados em ${weekLabel(target)} e serão mantidos na semana atual: ${conflicts.slice(0, 8).map(programTitle).join(", ")}${conflicts.length > 8 ? "…" : ""}.`
     : "";
 }
 
 async function confirmReprogram() {
   const target = Number($("reprogramWeek").value);
   const teamId = $("reprogramTeam").value || null;
-  const blocked = new Set(reprogramConflicts(target).map(p => p.id));
+  const blocked = new Set(reprogramConflicts(target, teamId || "").map(p => p.id));
   const programs = state.reprogramIds.map(id => state.programs.find(p => p.id === id)).filter(p => p && !blocked.has(p.id) && p.weekNum !== target);
   if (!programs.length) return setMessage("reprogramMessage", "Nenhum item pode ser movido para esta semana.");
 
@@ -1339,7 +1341,7 @@ async function confirmReprogram() {
           return { p, data, error };
         }));
         results.forEach(({ p, data, error }) => {
-          if (error) failed.push(`${programTitle(p)}: ${error.code === "23505" ? `equipamento já programado em ${weekLabel(target)}` : dbErrorMessage(error)}`);
+          if (error) failed.push(`${programTitle(p)}: ${error.code === "23505" ? `o banco recusou duplicidade em ${weekLabel(target)} (execute 011_programacao_sem_unicidade_equipamento.sql)` : dbErrorMessage(error)}`);
           else { Object.assign(p, mapProgram(data)); moved++; }
         });
       }
@@ -1633,25 +1635,33 @@ function parseProgramRows(rows, activity) {
     records.push({ line, weekNum, week: weekLabel(weekNum), team, customData });
   });
 
-  // Cada TAG vira um equipamento; o banco não aceita o mesmo equipamento duas vezes na mesma semana.
+  // Só é repetida a linha idêntica em TODOS os campos (semana, equipe e colunas da atividade).
+  // Basta um campo diferente (ex.: SERVICE) para a linha ser outro item.
   const byKey = new Map();
   records.forEach(r => {
-    const key = duplicateKey(r.weekNum, r.customData);
-    if (key) byKey.set(key, [...(byKey.get(key) || []), r]);
+    const key = duplicateKey(activity, r.weekNum, r.team.id, r.customData);
+    byKey.set(key, [...(byKey.get(key) || []), r]);
   });
   byKey.forEach(list => {
     if (list.length < 2) return;
-    errors.push(`${equipmentLabel(list[0].customData)} repetido em ${list[0].week} nas linhas ${list.map(r => r.line).join(", ")}: mesmo TAG, SYS e SUBSYS na mesma semana. Deixe uma linha por equipamento em cada semana.`);
+    errors.push(`Linhas ${list.map(r => r.line).join(", ")} são idênticas em todos os campos (${list[0].week} · ${list[0].team.nome} · ${programSummary(activity, list[0].customData)}). Remova as repetidas.`);
   });
 
   if (!records.length && !errors.length) throw new Error("O arquivo não possui linhas de dados.");
   return { records, errors };
 }
 
-// Identifica o item programado: mesma semana e mesmo equipamento (TAG + SYS + SUBSYS).
-function duplicateKey(weekNum, customData) {
-  const key = equipmentKey(customData);
-  return key ? `${weekNum}|${key}` : null;
+// Identidade do item programado = todos os campos da linha: semana, equipe e cada coluna da atividade.
+function duplicateKey(activity, weekNum, teamId, customData) {
+  const values = activityColumns(activity).map(c => normalizeText(customData?.[c.key]));
+  return [activity?.id, weekNum, teamId, ...values].join("|");
+}
+
+// Resumo curto dos valores preenchidos, para mensagens.
+function programSummary(activity, customData) {
+  const filled = activityColumns(activity).map(c => [c, customData?.[c.key]]).filter(([, v]) => String(v ?? "").trim() !== "");
+  const text = filled.slice(0, 4).map(([c, v]) => `${c.label} ${v}`).join(", ");
+  return text + (filled.length > 4 ? "…" : "") || "sem dados";
 }
 
 // Converte de volta para linha do banco (usado para restaurar itens em caso de falha).
@@ -1683,7 +1693,9 @@ function describeUniqueViolation(error, records, equipmentIds) {
       : true)).map(r => r.line);
   return `O banco não aceita duas programações com a mesma combinação ${cols.map(c => DB_COLUMN_LABELS[c] || c).join(" + ")} (restrição ${constraint}). `
     + `Conflito: ${readable.join(", ")}${lines.length ? ` — linha(s) ${lines.join(", ")} do arquivo` : ""}. `
-    + "Esse item já está programado no banco ou repetido no arquivo.";
+    + (cols.includes("equipamento_id")
+      ? "O banco ainda impede o mesmo equipamento duas vezes na semana, mesmo com campos diferentes. Execute 011_programacao_sem_unicidade_equipamento.sql no SQL Editor do Supabase e importe novamente."
+      : "Esse item já está programado no banco ou repetido no arquivo.");
 }
 
 async function handleProgramFile(file) {
@@ -1695,8 +1707,8 @@ async function handleProgramFile(file) {
     // Recarrega do banco: a base pode ter sido alterada fora do app (ex.: limpeza via SQL).
     await withBusy(loadAdminPrograms);
     const { records, errors } = parseProgramRows(rows, activity);
-    const existingKeys = new Set(state.programs.filter(p => p.activityId === activity.id).map(p => duplicateKey(p.weekNum, p.customData)).filter(Boolean));
-    const duplicates = records.filter(r => existingKeys.has(duplicateKey(r.weekNum, r.customData))).length;
+    const existingKeys = new Set(state.programs.filter(p => p.activityId === activity.id).map(p => duplicateKey(activity, p.weekNum, p.teamId, p.customData)));
+    const duplicates = records.filter(r => existingKeys.has(duplicateKey(activity, r.weekNum, r.team.id, r.customData))).length;
     state.pendingImport = { file: file.name, activityId: activity.id, records, errors, duplicates };
     renderImportModal();
     openModal("importModal");
@@ -1722,6 +1734,7 @@ function renderImportModal() {
 
   const errorsBox = $("importErrors");
   errorsBox.classList.toggle("hidden", !pending.errors.length);
+  if (!pending.errors.length) errorsBox.innerHTML = "";
   if (pending.errors.length) {
     errorsBox.innerHTML = `<strong>${pending.errors.length} problema(s) no arquivo. Corrija o arquivo e importe novamente — nenhuma linha será gravada enquanto houver erros.</strong><ul>${pending.errors.slice(0, 200).map(e => `<li>${escapeHTML(e)}</li>`).join("")}</ul>${pending.errors.length > 200 ? `<p>… e mais ${pending.errors.length - 200}.</p>` : ""}`;
   }
@@ -1738,7 +1751,7 @@ function renderImportModal() {
   const replaceCount = replaceCandidates(pending).length;
   $("importReplaceHint").innerHTML = `Remove <b>${replaceCount}</b> item(ns) <b>pendente(s)</b> de ${escapeHTML(activity?.name || "")} em ${escapeHTML(weeks.join(", ") || "—")} e grava o arquivo. Itens já executados são mantidos.`;
   $("importDupWrap").classList.toggle("hidden", !pending.duplicates);
-  setText("importDupText", `Ignorar ${pending.duplicates} linha(s) que já estão programadas (mesma semana, TAG, SYS e SUBSYS)`);
+  setText("importDupText", `Ignorar ${pending.duplicates} linha(s) idênticas a itens já programados (todos os campos iguais)`);
   setMessage("importMessage", "");
   $("importConfirm").disabled = Boolean(pending.errors.length) || !pending.records.length;
   $("importModes").classList.toggle("hidden", Boolean(pending.errors.length));
@@ -1764,8 +1777,8 @@ async function confirmImport() {
       const inserted = await withBusy(async () => {
         const sb = requireDb();
         if (skipDuplicates) {
-          const existing = new Set(state.programs.filter(p => p.activityId === activity.id).map(p => duplicateKey(p.weekNum, p.customData)).filter(Boolean));
-          records = records.filter(r => !existing.has(duplicateKey(r.weekNum, r.customData)));
+          const existing = new Set(state.programs.filter(p => p.activityId === activity.id).map(p => duplicateKey(activity, p.weekNum, p.teamId, p.customData)));
+          records = records.filter(r => !existing.has(duplicateKey(activity, r.weekNum, r.team.id, r.customData)));
         }
         equipmentIds = await resolveEquipment(records.map(r => r.customData));
         const payloads = records.map(r => ({
@@ -3000,6 +3013,7 @@ function bindEvents() {
   $("backlogBulkClear").addEventListener("click", () => { state.backlog.selected.clear(); renderBacklog(); });
   $("backlogBulkMove").addEventListener("click", () => openReprogram([...state.backlog.selected]));
   $("reprogramWeek").addEventListener("change", renderReprogramWarning);
+  $("reprogramTeam").addEventListener("change", renderReprogramWarning);
   $("reprogramConfirm").addEventListener("click", confirmReprogram);
   $("kpiBacklogCard").addEventListener("click", () => goTo("backlog"));
   $("dashboardBacklogBtn").addEventListener("click", () => goTo("backlog"));
