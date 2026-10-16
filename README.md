@@ -25,6 +25,7 @@ O template tem as colunas padrão `SEMANA` e `EQUIPE` e, em seguida, exatamente 
 As colunas da atividade podem ficar em branco. SEMANA e EQUIPE precisam estar preenchidas em cada linha, porque definem quando e para qual equipe o item aparece.
 
 - Semana: `W137` ou só `137` (também aceita `w137`, `W-137`, `Semana 137`); é sempre gravada como W137.
+- TAG: pode se repetir na mesma semana desde que SYS ou SUBSYS sejam diferentes; o equipamento é identificado por TAG + SYS + SUBSYS (requer a migration `010`).
 - Equipe: nome cadastrado (aceita `A` para `Equipe A` quando não houver ambiguidade).
 - Datas: `DD/MM/AAAA` ou data nativa do Excel.
 - Listas: o valor precisa estar entre as opções (maiúsculas/acentos são normalizados). Sim/Não aceita `SIM`, `S`, `X`, `NÃO`, `N`.

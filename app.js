@@ -1185,9 +1185,8 @@ async function saveProgramForm(event) {
     try {
       await withBusy(async () => {
         const equipmentIds = await resolveEquipment([customData]);
-        const tag = tagOf(customData);
         const payload = {
-          equipamento_id: tag ? equipmentIds.get(tag) || null : null,
+          equipamento_id: equipmentIds.get(equipmentKey(customData)) || null,
           semana: weekNum,
           status: "PROGRAMADO",
           atividade_id: activity.id,
@@ -1247,9 +1246,9 @@ async function updateProgram(button, p, { weekNum, team, customData }) {
     try {
       await withBusy(async () => {
         let equipmentId;
-        const newTag = tagOf(customData);
-        if (normalizeText(newTag) !== normalizeText(tagOf(p.customData))) {
-          equipmentId = newTag ? (await resolveEquipment([customData])).get(newTag) || null : null;
+        const merged = { ...p.customData, ...customData };
+        if (equipmentKey(merged) !== equipmentKey(p.customData)) {
+          equipmentId = equipmentKey(merged) ? (await resolveEquipment([merged])).get(equipmentKey(merged)) || null : null;
         }
         const payload = programUpdatePayload(p, { weekNum, teamId: team.id, customData, equipmentId });
         const { data, error } = await requireDb().from("tb_programacoes").update(payload).eq("id", p.id).select(PROGRAM_COLUMNS).single();
@@ -1262,7 +1261,7 @@ async function updateProgram(button, p, { weekNum, team, customData }) {
       toast("Programação atualizada.");
     } catch (error) {
       setMessage("programFormMessage", error?.code === "23505"
-        ? `Esta TAG já está programada em ${weekLabel(weekNum)}. Escolha outra semana ou ajuste o item existente.`
+        ? `Este equipamento (mesmo TAG, SYS e SUBSYS) já está programado em ${weekLabel(weekNum)}. Escolha outra semana ou ajuste o item existente.`
         : dbErrorMessage(error));
     }
   });
@@ -1295,7 +1294,7 @@ function openReprogram(ids) {
   openModal("reprogramModal");
 }
 
-// O banco não aceita a mesma TAG duas vezes na mesma semana: detecta antes de gravar.
+// O banco não aceita o mesmo equipamento (TAG + SYS + SUBSYS) duas vezes na mesma semana: detecta antes de gravar.
 function reprogramConflicts(targetWeek) {
   const moving = new Set(state.reprogramIds);
   const occupied = new Set(state.programs.filter(p => p.weekNum === targetWeek && !moving.has(p.id) && p.equipmentId).map(p => p.equipmentId));
@@ -1316,7 +1315,7 @@ function renderReprogramWarning() {
   const warn = $("reprogramWarn");
   warn.classList.toggle("hidden", !conflicts.length);
   warn.textContent = conflicts.length
-    ? `${conflicts.length} item(ns) já têm a mesma TAG programada em ${weekLabel(target)} e serão mantidos na semana atual: ${conflicts.slice(0, 8).map(programTitle).join(", ")}${conflicts.length > 8 ? "…" : ""}.`
+    ? `${conflicts.length} item(ns) já têm o mesmo equipamento (TAG/SYS/SUBSYS) programado em ${weekLabel(target)} e serão mantidos na semana atual: ${conflicts.slice(0, 8).map(programTitle).join(", ")}${conflicts.length > 8 ? "…" : ""}.`
     : "";
 }
 
@@ -1340,7 +1339,7 @@ async function confirmReprogram() {
           return { p, data, error };
         }));
         results.forEach(({ p, data, error }) => {
-          if (error) failed.push(`${programTitle(p)}: ${error.code === "23505" ? `TAG já programada em ${weekLabel(target)}` : dbErrorMessage(error)}`);
+          if (error) failed.push(`${programTitle(p)}: ${error.code === "23505" ? `equipamento já programado em ${weekLabel(target)}` : dbErrorMessage(error)}`);
           else { Object.assign(p, mapProgram(data)); moved++; }
         });
       }
@@ -1457,28 +1456,47 @@ function tagOf(data) {
   return "";
 }
 
-// Garante tb_equipamentos para cada TAG em lote: 1 consulta + 1 inserção, em vez de N chamadas.
+const pickValue = (data, keys) => { for (const k of keys) { const v = String(data?.[k] ?? "").trim(); if (v) return v; } return ""; };
+const sysOf = data => pickValue(data, ["sys", "SYS", "sistema"]);
+const subsysOf = data => pickValue(data, ["subsys", "SUBSYS", "subsistema", "sub_sistema"]);
+
+// Um equipamento é identificado por TAG + SYS + SUBSYS: o mesmo TAG pode existir em sistemas diferentes.
+function equipmentKey(data) {
+  const tag = normalizeText(tagOf(data));
+  return tag ? `${tag}|${normalizeText(sysOf(data))}|${normalizeText(subsysOf(data))}` : "";
+}
+
+// Texto legível da identificação: "FT-001 (SYS S1 / SUBSYS S1.1)".
+function equipmentLabel(data) {
+  const parts = [sysOf(data) && `SYS ${sysOf(data)}`, subsysOf(data) && `SUBSYS ${subsysOf(data)}`].filter(Boolean);
+  return `${tagOf(data)}${parts.length ? ` (${parts.join(" / ")})` : ""}`;
+}
+
+// Garante tb_equipamentos em lote (1 consulta + 1 inserção). Retorna Map equipmentKey → id.
 async function resolveEquipment(records) {
   const sb = requireDb();
-  const byTag = new Map();
-  records.forEach(r => { const tag = tagOf(r); if (tag && !byTag.has(tag)) byTag.set(tag, r); });
+  const byKey = new Map();
+  records.forEach(r => { const key = equipmentKey(r); if (key && !byKey.has(key)) byKey.set(key, r); });
   const ids = new Map();
-  if (!byTag.size) return ids;
+  if (!byKey.size) return ids;
 
-  const existing = await fetchIn("tb_equipamentos", "id,tag", "tag", [...byTag.keys()]);
-  existing.forEach(e => ids.set(e.tag, e.id));
+  const tags = [...new Set([...byKey.values()].map(tagOf))];
+  const existing = await fetchIn("tb_equipamentos", "id,tag,sys,subsys", "tag", tags);
+  existing.forEach(e => { const key = equipmentKey(e); if (byKey.has(key) && !ids.has(key)) ids.set(key, e.id); });
 
-  const pick = (r, keys) => { for (const k of keys) { const v = String(r?.[k] ?? "").trim(); if (v) return v; } return null; };
-  const missing = [...byTag.entries()].filter(([tag]) => !ids.has(tag)).map(([tag, r]) => ({
-    tag,
-    forn: pick(r, ["forn"]), sys: pick(r, ["sys"]), subsys: pick(r, ["subsys"]), loop: pick(r, ["loop"]),
-    service: pick(r, ["service"]), tipe: pick(r, ["tipe", "type"]), descricao: pick(r, ["descricao", "equipamento"]),
+  const missing = [...byKey.entries()].filter(([key]) => !ids.has(key)).map(([, r]) => ({
+    tag: tagOf(r),
+    forn: pickValue(r, ["forn"]) || null, sys: sysOf(r) || null, subsys: subsysOf(r) || null, loop: pickValue(r, ["loop"]) || null,
+    service: pickValue(r, ["service"]) || null, tipe: pickValue(r, ["tipe", "type"]) || null, descricao: pickValue(r, ["descricao", "equipamento"]) || null,
     ativo: true
   }));
   for (const part of chunk(missing, 500)) {
-    const { data, error } = await sb.from("tb_equipamentos").insert(part).select("id,tag");
+    const { data, error } = await sb.from("tb_equipamentos").insert(part).select("id,tag,sys,subsys");
+    if (error?.code === "23505") {
+      throw new Error("O cadastro de equipamentos do banco ainda exige TAG única, mas o arquivo tem o mesmo TAG em sistemas diferentes. Execute 010_equipamento_tag_por_sistema.sql no SQL Editor do Supabase e importe novamente.");
+    }
     if (error) throw error;
-    (data || []).forEach(e => ids.set(e.tag, e.id));
+    (data || []).forEach(e => ids.set(equipmentKey(e), e.id));
   }
   return ids;
 }
@@ -1623,17 +1641,17 @@ function parseProgramRows(rows, activity) {
   });
   byKey.forEach(list => {
     if (list.length < 2) return;
-    errors.push(`TAG “${tagOf(list[0].customData)}” repetida em ${list[0].week} nas linhas ${list.map(r => r.line).join(", ")}. Deixe uma linha por TAG em cada semana.`);
+    errors.push(`${equipmentLabel(list[0].customData)} repetido em ${list[0].week} nas linhas ${list.map(r => r.line).join(", ")}: mesmo TAG, SYS e SUBSYS na mesma semana. Deixe uma linha por equipamento em cada semana.`);
   });
 
   if (!records.length && !errors.length) throw new Error("O arquivo não possui linhas de dados.");
   return { records, errors };
 }
 
-// Identifica o item programado: mesma semana e mesma TAG (equipamento).
+// Identifica o item programado: mesma semana e mesmo equipamento (TAG + SYS + SUBSYS).
 function duplicateKey(weekNum, customData) {
-  const tag = normalizeText(tagOf(customData));
-  return tag ? `${weekNum}|${tag}` : null;
+  const key = equipmentKey(customData);
+  return key ? `${weekNum}|${key}` : null;
 }
 
 // Converte de volta para linha do banco (usado para restaurar itens em caso de falha).
@@ -1646,7 +1664,7 @@ function programToRow(p) {
   };
 }
 
-const DB_COLUMN_LABELS = { equipamento_id: "TAG", semana: "SEMANA", atividade_id: "ATIVIDADE", equipe_id: "EQUIPE" };
+const DB_COLUMN_LABELS = { equipamento_id: "EQUIPAMENTO", semana: "SEMANA", atividade_id: "ATIVIDADE", equipe_id: "EQUIPE" };
 
 // Traduz a recusa de chave duplicada (23505) indicando quais linhas do arquivo causaram o conflito.
 function describeUniqueViolation(error, records, equipmentIds) {
@@ -1655,10 +1673,11 @@ function describeUniqueViolation(error, records, equipmentIds) {
   if (!m) return `O banco recusou itens duplicados${constraint ? ` (restrição ${constraint})` : ""}. ${error?.details || error?.message || ""}`;
   const cols = m[1].split(",").map(s => s.trim());
   const vals = m[2].split(",").map(s => s.trim());
-  const tagById = new Map([...equipmentIds.entries()].map(([tag, id]) => [String(id), tag]));
-  const readable = cols.map((c, i) => `${DB_COLUMN_LABELS[c] || c} ${c === "equipamento_id" ? (tagById.get(vals[i]) || vals[i]) : c === "semana" ? weekLabel(vals[i]) : c === "equipe_id" ? (teamName(vals[i]) || vals[i]) : vals[i]}`);
+  const labelById = new Map();
+  records.forEach(r => { const id = equipmentIds.get(equipmentKey(r.customData)); if (id) labelById.set(String(id), equipmentLabel(r.customData)); });
+  const readable = cols.map((c, i) => `${DB_COLUMN_LABELS[c] || c} ${c === "equipamento_id" ? (labelById.get(vals[i]) || vals[i]) : c === "semana" ? weekLabel(vals[i]) : c === "equipe_id" ? (teamName(vals[i]) || vals[i]) : vals[i]}`);
   const lines = records.filter(r => cols.every((c, i) =>
-    c === "equipamento_id" ? String(equipmentIds.get(tagOf(r.customData))) === vals[i]
+    c === "equipamento_id" ? String(equipmentIds.get(equipmentKey(r.customData))) === vals[i]
       : c === "semana" ? String(r.weekNum) === vals[i]
       : c === "equipe_id" ? String(r.team.id) === vals[i]
       : true)).map(r => r.line);
@@ -1719,7 +1738,7 @@ function renderImportModal() {
   const replaceCount = replaceCandidates(pending).length;
   $("importReplaceHint").innerHTML = `Remove <b>${replaceCount}</b> item(ns) <b>pendente(s)</b> de ${escapeHTML(activity?.name || "")} em ${escapeHTML(weeks.join(", ") || "—")} e grava o arquivo. Itens já executados são mantidos.`;
   $("importDupWrap").classList.toggle("hidden", !pending.duplicates);
-  setText("importDupText", `Ignorar ${pending.duplicates} linha(s) que já estão programadas (mesma semana e TAG)`);
+  setText("importDupText", `Ignorar ${pending.duplicates} linha(s) que já estão programadas (mesma semana, TAG, SYS e SUBSYS)`);
   setMessage("importMessage", "");
   $("importConfirm").disabled = Boolean(pending.errors.length) || !pending.records.length;
   $("importModes").classList.toggle("hidden", Boolean(pending.errors.length));
@@ -1750,7 +1769,7 @@ async function confirmImport() {
         }
         equipmentIds = await resolveEquipment(records.map(r => r.customData));
         const payloads = records.map(r => ({
-          equipamento_id: equipmentIds.get(tagOf(r.customData)) || null,
+          equipamento_id: equipmentIds.get(equipmentKey(r.customData)) || null,
           semana: r.weekNum,
           status: "PROGRAMADO",
           atividade_id: activity.id,
