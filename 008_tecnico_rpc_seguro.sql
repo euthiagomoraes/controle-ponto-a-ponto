@@ -6,15 +6,56 @@
 --
 -- Estas funções validam o código a cada chamada, restringem os dados à equipe da pessoa e aplicam no
 -- servidor a regra "equipe de campo só altera colunas marcadas como editáveis".
--- O app (app.js) usa estas funções automaticamente quando existem; sem elas, usa o acesso direto antigo.
+-- A tela de campo do app.js depende destas funções: a role anon não tem permissão nas tabelas.
 --
--- Execute no SQL Editor do Supabase. Depois de validar o login de campo, rode a PARTE 2 (opcional).
+-- Execute no SQL Editor do Supabase (pode rodar de novo com segurança).
+-- Depois de validar o login de campo, rode a PARTE 2 (opcional).
 
 begin;
 
 -- ---------------------------------------------------------------------------
 -- PARTE 1 — funções
 -- ---------------------------------------------------------------------------
+
+-- Versão anterior desta migration tinha outra assinatura.
+drop function if exists public.tecnico_registrar_execucao(text, uuid[], text);
+
+-- Atividades ativas com suas colunas + equipe da pessoa. Retorna NULL se o código for inválido.
+create or replace function public.tecnico_contexto(p_cracha text)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with tec as (
+    select id, equipe_id
+    from public.tb_pessoas
+    where cracha = trim(p_cracha) and ativo = true and perfil <> 'ADMINISTRADOR'
+    limit 1
+  )
+  select jsonb_build_object(
+    'equipe', (
+      select jsonb_build_object('id', e.id, 'nome', e.nome, 'disciplina', e.disciplina)
+      from public.tb_equipes e where e.id = tec.equipe_id
+    ),
+    'atividades', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'id', a.id,
+        'nome', a.nome,
+        'descricao', a.descricao,
+        'colunas', coalesce((
+          select jsonb_agg(to_jsonb(c) order by c.ordem)
+          from public.tb_atividade_colunas c
+          where c.atividade_id = a.id
+        ), '[]'::jsonb)
+      ) order by a.created_at)
+      from public.tb_atividades a
+      where a.ativo = true
+    ), '[]'::jsonb)
+  )
+  from tec;
+$$;
 
 -- Programação da semana para a equipe do técnico, com equipamento e execuções embutidos.
 create or replace function public.tecnico_programacao(p_cracha text, p_semana integer)
@@ -31,6 +72,7 @@ as $$
     limit 1
   )
   select to_jsonb(p) || jsonb_build_object(
+    'equipe_nome', (select eq.nome from public.tb_equipes eq where eq.id = p.equipe_id),
     'equipamento', (select to_jsonb(e) from public.tb_equipamentos e where e.id = p.equipamento_id),
     'execucoes', coalesce((
       select jsonb_agg(jsonb_build_object(
@@ -54,10 +96,12 @@ as $$
 $$;
 
 -- Registra execução em um ou mais itens da equipe do técnico.
+-- p_executado_em permite informar o dia em que o serviço foi feito (nunca no futuro); nulo = agora.
 create or replace function public.tecnico_registrar_execucao(
   p_cracha text,
   p_programacao_ids uuid[],
-  p_observacao text default null
+  p_observacao text default null,
+  p_executado_em timestamptz default null
 )
 returns setof jsonb
 language plpgsql
@@ -98,7 +142,7 @@ begin
   return query
   with ins as (
     insert into public.tb_execucoes (programacao_id, executante_id, executado_em, observacao)
-    select i.id, v_tec.id, now(), nullif(trim(p_observacao), '')
+    select i.id, v_tec.id, least(coalesce(p_executado_em, now()), now()), nullif(trim(p_observacao), '')
     from unnest(p_programacao_ids) as i(id)
     returning id, programacao_id, executante_id, executado_em, observacao
   )
@@ -165,14 +209,23 @@ begin
 end;
 $$;
 
+revoke all on function public.tecnico_contexto(text) from public;
 revoke all on function public.tecnico_programacao(text, integer) from public;
-revoke all on function public.tecnico_registrar_execucao(text, uuid[], text) from public;
+revoke all on function public.tecnico_registrar_execucao(text, uuid[], text, timestamptz) from public;
 revoke all on function public.tecnico_salvar_campos(text, uuid, jsonb) from public;
+grant execute on function public.tecnico_contexto(text) to anon, authenticated;
 grant execute on function public.tecnico_programacao(text, integer) to anon, authenticated;
-grant execute on function public.tecnico_registrar_execucao(text, uuid[], text) to anon, authenticated;
+grant execute on function public.tecnico_registrar_execucao(text, uuid[], text, timestamptz) to anon, authenticated;
 grant execute on function public.tecnico_salvar_campos(text, uuid, jsonb) to anon, authenticated;
 
 commit;
+
+-- Faz o PostgREST enxergar as funções novas imediatamente.
+notify pgrst, 'reload schema';
+
+-- Teste rápido (troque pelo código de uma pessoa de campo ativa):
+-- select public.tecnico_contexto('123456');
+-- select * from public.tecnico_programacao('123456', 137);
 
 -- ---------------------------------------------------------------------------
 -- PARTE 2 (opcional, recomendada) — fechar o acesso anônimo direto às tabelas

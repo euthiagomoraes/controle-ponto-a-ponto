@@ -540,6 +540,9 @@
             <div id="detailSaveRow" class="actions end hidden">
               <button id="detailSave" class="btn ghost sm" type="button"><svg class="icon"><use href="#i-check"/></svg><span>Salvar campos</span></button>
             </div>
+            <label class="field">Data da execução
+              <input id="detailDate" type="date" required>
+            </label>
             <label class="field">Observação da execução (opcional)
               <textarea id="detailObs" rows="2" maxlength="500" placeholder="Ex.: executado com restrição, aguardando liberação…"></textarea>
             </label>
@@ -554,6 +557,7 @@
 
       <div id="bulkBar" class="bulk-bar hidden">
         <span><b id="bulkCount">0</b> selecionada(s)</span>
+        <input id="bulkDate" class="bulk-date" type="date" aria-label="Data da execução">
         <button id="bulkClear" class="btn ghost sm" type="button">Limpar</button>
         <button id="bulkRegister" class="btn primary" type="button"><svg class="icon"><use href="#i-check"/></svg><span>Registrar execução</span></button>
       </div>

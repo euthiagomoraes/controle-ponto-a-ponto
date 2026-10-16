@@ -91,7 +91,7 @@ const state = {
   executions: new Map(),     // programacao_id -> [execuções]
   equipment: new Map(),      // id -> equipamento
   settings: { ...DEFAULT_SETTINGS },
-  rpcAvailable: true,
+  loadError: "",
 
   dashboardWeek: null,
   program: { activityId: null, week: "", team: "", status: "", search: "", page: 0 },
@@ -141,6 +141,11 @@ function fmtDateTime(value) {
   if (Number.isNaN(d.getTime())) return String(value);
   return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
+
+// localStorage/sessionStorage podem lançar exceção (modo privado, bloqueio de rastreamento do Edge).
+function storageGet(store, key) { try { return store.getItem(key) || ""; } catch { return ""; } }
+function storageSet(store, key, value) { try { store.setItem(key, value); return true; } catch { return false; } }
+function storageRemove(store, key) { try { store.removeItem(key); } catch { /* indisponível */ } }
 
 const nowStamp = () => fmtDateTime(new Date().toISOString());
 const pct = (part, total) => total ? Math.round(part / total * 100) : 0;
@@ -445,7 +450,7 @@ function readLogo(file) {
 }
 
 function applyTheme() {
-  const theme = localStorage.getItem("ppaTheme");
+  const theme = storageGet(localStorage, "ppaTheme");
   if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
   else delete document.documentElement.dataset.theme;
   const dark = theme === "dark" || (!theme && window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -455,7 +460,7 @@ function applyTheme() {
 function toggleTheme() {
   const dark = document.documentElement.dataset.theme === "dark"
     || (!document.documentElement.dataset.theme && window.matchMedia("(prefers-color-scheme: dark)").matches);
-  localStorage.setItem("ppaTheme", dark ? "light" : "dark");
+  storageSet(localStorage, "ppaTheme", dark ? "light" : "dark");
   applyTheme();
 }
 
@@ -484,8 +489,9 @@ function personToUser(p, extra = {}) {
 
 async function loadAdminProfile() {
   const sb = requireDb();
-  const { data: auth } = await sb.auth.getUser();
-  const authUser = auth?.user;
+  // getSession lê a sessão salva (e renova o token se preciso) sem depender de uma chamada extra ao servidor.
+  const { data: auth } = await sb.auth.getSession();
+  const authUser = auth?.session?.user;
   if (!authUser) return null;
   const { data, error } = await sb.from("tb_pessoas")
     .select("id,nome,cracha,perfil,ativo,auth_user_id,equipe_id,disciplina")
@@ -532,7 +538,7 @@ async function loginTechnician(event) {
     try {
       const user = await technicianByCode(code);
       if (!user) throw new Error("Código não encontrado ou inativo.");
-      sessionStorage.setItem("ppaFieldCode", code);
+      storageSet(localStorage, "ppaFieldCode", code);
       await enterApp(user);
     } catch (error) {
       setMessage("techLoginMessage", dbErrorMessage(error, "Não foi possível entrar."));
@@ -540,26 +546,34 @@ async function loginTechnician(event) {
   });
 }
 
+// Ao recarregar a página, só desloga se o acesso for realmente inválido.
+// Falha de rede/timeout mantém a sessão guardada e mostra o motivo.
 async function restoreSession() {
-  // Equipe de campo: não usa Supabase Auth; revalida o código guardado na sessão do navegador.
-  const fieldCode = sessionStorage.getItem("ppaFieldCode");
-  if (fieldCode) {
+  const code = storageGet(localStorage, "ppaFieldCode") || storageGet(sessionStorage, "ppaFieldCode");
+  if (code) {
     try {
-      const user = await technicianByCode(fieldCode);
-      if (user) return user;
-    } catch (error) { console.warn("Falha ao restaurar sessão de campo:", error); }
-    sessionStorage.removeItem("ppaFieldCode");
+      const user = await technicianByCode(code);
+      if (user) { storageSet(localStorage, "ppaFieldCode", code); return user; }
+      storageRemove(localStorage, "ppaFieldCode");
+    } catch (error) {
+      console.warn("Falha ao restaurar sessão de campo:", error);
+      return { error: dbErrorMessage(error, "Não foi possível validar o acesso. Tente novamente.") };
+    }
   }
   try {
     const user = await loadAdminProfile();
     if (user?.role === "admin") return user;
-  } catch (error) { console.warn("Falha ao restaurar sessão administrativa:", error); }
+  } catch (error) {
+    console.warn("Falha ao restaurar sessão administrativa:", error);
+    return { error: dbErrorMessage(error, "Não foi possível validar a sessão. Tente novamente.") };
+  }
   return null;
 }
 
 async function logout() {
   try { await db()?.auth.signOut(); } catch (error) { console.warn(error); }
-  sessionStorage.removeItem("ppaFieldCode");
+  storageRemove(localStorage, "ppaFieldCode");
+  storageRemove(sessionStorage, "ppaFieldCode");
   state.user = null;
   state.programs = [];
   state.executions = new Map();
@@ -727,14 +741,15 @@ async function syncAll() {
         await Promise.all([loadTeams(), loadPeople(), loadWeeks()]);
         await loadAdminPrograms();
       } else {
-        await loadActivities();
-        try { await loadTeams(); } catch (error) { console.warn("Equipes indisponíveis para o perfil de campo:", error.message); }
         if (state.field.weekNum === null) state.field.weekNum = currentWeekNumber();
+        await loadFieldContext();
         await loadFieldWeek();
       }
+      state.loadError = "";
     } catch (error) {
-      console.error("Erro ao sincronizar:", error);
-      toast(dbErrorMessage(error, "Não foi possível carregar os dados."), "error");
+      console.error("Erro ao sincronizar:", error?.message || error, error);
+      state.loadError = dbErrorMessage(error, "Não foi possível carregar os dados.");
+      toast(state.loadError, "error");
     }
   });
   renderUserChrome();
@@ -965,7 +980,7 @@ function renderProgramacao() {
   setText("programTableTitle", activity ? activity.name : "Programações");
   setText("programTableMeta", activity ? `${rows.length} item(ns) · ${s.done} executado(s) · ${s.pending} pendente(s)` : "Cadastre uma atividade para começar.");
 
-  $("programTableHead").innerHTML = `<tr><th>Semana</th><th>Equipe</th>${cols.map(c => `<th>${escapeHTML(c.label)}</th>`).join("")}<th>Data prevista</th><th>Responsável</th><th>Situação</th><th>Observação</th><th></th></tr>`;
+  $("programTableHead").innerHTML = `<tr><th>Semana</th><th>Equipe</th>${cols.map(c => `<th>${escapeHTML(c.label)}</th>`).join("")}<th>Data prevista</th><th>Responsável</th><th>Situação</th><th>Executado em</th><th>Observação</th><th></th></tr>`;
   $("programTableBody").innerHTML = pageRows.map(p => {
     const done = isDone(p);
     const last = executionsOf(p.id).at(-1);
@@ -975,7 +990,8 @@ function renderProgramacao() {
       ${cols.map(c => `<td title="${escapeHTML(columnValue(p, c))}">${escapeHTML(formatColumnValue(c, columnValue(p, c)))}</td>`).join("")}
       <td>${escapeHTML(fmtDate(p.date))}</td>
       <td>${escapeHTML(dash(personById(p.responsibleId)?.nome))}</td>
-      <td><span class="status ${done ? "done" : "pending"}" title="${last ? `Último registro: ${escapeHTML(fmtDateTime(last.executado_em))}` : ""}">${done ? "Executado" : "Pendente"}</span></td>
+      <td><span class="status ${done ? "done" : "pending"}">${done ? "Executado" : "Pendente"}</span></td>
+      <td title="${last ? escapeHTML(`${fmtDateTime(last.executado_em)} · ${executorName(last)}`) : ""}">${last ? `${escapeHTML(fmtDate(toISODate(new Date(last.executado_em))))}${executionsOf(p.id).length > 1 ? ` <span class="chip">${executionsOf(p.id).length}x</span>` : ""}` : "—"}</td>
       <td class="wrap">${escapeHTML(dash(p.note))}</td>
       <td class="actions-cell"><button class="icon-btn sm danger" type="button" data-delete-program="${escapeHTML(p.id)}" title="Excluir"><svg class="icon"><use href="#i-trash"/></svg></button></td>
     </tr>`;
@@ -2018,50 +2034,42 @@ function renderProfile() {
 }
 
 /* =========================================================
-   CAMPO — dados (RPC seguro com fallback para acesso direto)
+   CAMPO — dados
+   A equipe de campo entra só com o código (role anon), que não tem permissão
+   nas tabelas. Todo acesso passa pelas funções SECURITY DEFINER da migration 008.
    ========================================================= */
 
-const fieldCode = () => sessionStorage.getItem("ppaFieldCode") || "";
+const fieldCode = () => storageGet(localStorage, "ppaFieldCode");
 
-// Tenta a função segura do banco (migration 008); se ela não existir, usa as tabelas diretamente.
-async function callFieldRpc(name, params) {
-  if (!state.rpcAvailable) return { fallback: true };
-  const { data, error } = await requireDb().rpc(name, params);
-  if (error && isMissingFunction(error)) {
-    state.rpcAvailable = false;
-    console.warn(`Função ${name} não encontrada — usando acesso direto às tabelas. Execute 008_tecnico_rpc_seguro.sql.`);
-    return { fallback: true };
-  }
+const MISSING_008 = "O banco ainda não tem as funções da equipe de campo. Peça ao administrador para executar 008_tecnico_rpc_seguro.sql no SQL Editor do Supabase.";
+
+async function fieldRpc(name, params) {
+  const { data, error } = await requireDb().rpc(name, { p_cracha: fieldCode(), ...params });
+  if (error && isMissingFunction(error)) throw new Error(MISSING_008);
   if (error) throw error;
-  return { data };
+  return data;
+}
+
+// Atividades/colunas e equipe da pessoa.
+async function loadFieldContext() {
+  const ctx = await fieldRpc("tecnico_contexto", {});
+  if (!ctx) throw new Error("Código de acesso inválido ou inativo.");
+  state.activities = (ctx.atividades || []).map(a => ({
+    id: a.id, name: a.nome, description: a.descricao || "",
+    columns: (a.colunas || []).map(mapColumn).sort((x, y) => x.ordem - y.ordem)
+  }));
+  state.teams = ctx.equipe ? [{ ...ctx.equipe, ativo: true }] : [];
 }
 
 async function loadFieldWeek() {
-  const weekNum = state.field.weekNum;
-  const rpc = await callFieldRpc("tecnico_programacao", { p_cracha: fieldCode(), p_semana: weekNum });
-  let programs;
-  let executions;
-  let equipment;
-
-  if (!rpc.fallback) {
-    const rows = Array.isArray(rpc.data) ? rpc.data : [];
-    programs = rows.map(r => mapProgram(r));
-    executions = rows.flatMap(r => (r.execucoes || []).map(e => ({ ...e, programacao_id: r.id })));
-    equipment = rows.filter(r => r.equipamento).map(r => r.equipamento);
-  } else {
-    const sb = requireDb();
-    const query = () => {
-      let q = sb.from("tb_programacoes").select(PROGRAM_COLUMNS).eq("semana", weekNum);
-      if (state.user.equipeId) q = q.eq("equipe_id", state.user.equipeId);
-      return q.order("created_at").order("id");
-    };
-    programs = (await fetchAll(query)).map(mapProgram);
-    const ids = programs.map(p => p.id);
-    [executions, equipment] = await Promise.all([
-      ids.length ? fetchIn("tb_execucoes", "id,programacao_id,executante_id,executado_em,observacao", "programacao_id", ids) : [],
-      fetchIn("tb_equipamentos", "id,tag,forn,sys,subsys,loop,service,tipe,descricao", "id", programs.map(p => p.equipmentId))
-    ]);
-  }
+  const rows = await fieldRpc("tecnico_programacao", { p_semana: state.field.weekNum }) || [];
+  const programs = rows.map(r => mapProgram(r));
+  const executions = rows.flatMap(r => (r.execucoes || []).map(e => ({ ...e, programacao_id: r.id })));
+  const equipment = rows.filter(r => r.equipamento).map(r => r.equipamento);
+  // Pessoa sem equipe vê todas as equipes: guarda os nomes que vieram junto.
+  rows.forEach(r => {
+    if (r.equipe_id && r.equipe_nome && !teamById(r.equipe_id)) state.teams.push({ id: r.equipe_id, nome: r.equipe_nome, ativo: true });
+  });
 
   const activeIds = new Set(state.activities.map(a => a.id));
   state.field.programs = programs.filter(p => activeIds.has(p.activityId));
@@ -2072,29 +2080,23 @@ async function loadFieldWeek() {
   if (!visible.has(state.field.activeId)) state.field.activeId = null;
 }
 
-async function fieldRegister(ids, observacao) {
-  const rpc = await callFieldRpc("tecnico_registrar_execucao", { p_cracha: fieldCode(), p_programacao_ids: ids, p_observacao: observacao || null });
-  if (!rpc.fallback) return Array.isArray(rpc.data) ? rpc.data : [];
-
-  const sb = requireDb();
-  const now = new Date().toISOString();
-  const { data, error } = await sb.from("tb_execucoes")
-    .insert(ids.map(id => ({ programacao_id: id, executante_id: state.user.id, executado_em: now, observacao: observacao || null })))
-    .select("id,programacao_id,executante_id,executado_em,observacao");
-  if (error) throw error;
-  const { error: statusError } = await sb.from("tb_programacoes").update({ status: "EXECUTADO", updated_at: now }).in("id", ids);
-  if (statusError) console.warn("Execução gravada, mas o status da programação não foi atualizado:", statusError.message);
-  return data || [];
+async function fieldRegister(ids, observacao, executadoEm) {
+  const data = await fieldRpc("tecnico_registrar_execucao", {
+    p_programacao_ids: ids, p_observacao: observacao || null, p_executado_em: executadoEm || null
+  });
+  return Array.isArray(data) ? data : [];
 }
 
 async function fieldSaveFields(program, values) {
-  const rpc = await callFieldRpc("tecnico_salvar_campos", { p_cracha: fieldCode(), p_programacao_id: program.id, p_dados: values });
-  if (!rpc.fallback) return rpc.data && typeof rpc.data === "object" ? rpc.data : { ...program.customData, ...values };
+  const data = await fieldRpc("tecnico_salvar_campos", { p_programacao_id: program.id, p_dados: values });
+  return data && typeof data === "object" ? data : { ...program.customData, ...values };
+}
 
-  const merged = { ...program.customData, ...values };
-  const { error } = await requireDb().from("tb_programacoes").update({ dados_personalizados: merged, updated_at: new Date().toISOString() }).eq("id", program.id);
-  if (error) throw error;
-  return merged;
+// Data escolhida no registro: hoje = agora; outro dia = meio-dia daquele dia (evita virar a data no fuso).
+function executionTimestamp(isoDate) {
+  if (!isoDate || isoDate === toISODate(new Date())) return null;
+  const [y, m, d] = isoDate.split("-").map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0).toISOString();
 }
 
 /* =========================================================
@@ -2164,7 +2166,7 @@ function renderField() {
     </article>`;
   }).join("");
   $("fieldEmpty").classList.toggle("hidden", rows.length > 0);
-  setText("fieldEmptyText", all.length ? "Ajuste a busca ou os filtros." : `Não há programação para ${teamName(state.user.equipeId) || "a equipe"} em ${weekLabel(f.weekNum)}.`);
+  setText("fieldEmptyText", state.loadError || (all.length ? "Ajuste a busca ou os filtros." : `Não há programação para ${teamName(state.user.equipeId) || "a equipe"} em ${weekLabel(f.weekNum)}.`));
 
   const selectable = rows.filter(p => !isDone(p));
   const allSel = $("fieldSelectAll");
@@ -2177,6 +2179,9 @@ function renderField() {
 
 function renderBulkBar() {
   const n = state.field.selected.size;
+  const today = toISODate(new Date());
+  $("bulkDate").max = today;
+  if (!$("bulkDate").value) $("bulkDate").value = today;
   $("bulkBar").classList.toggle("hidden", n === 0 || currentScreen() !== "campo");
   setText("bulkCount", n);
 }
@@ -2230,7 +2235,11 @@ function renderFieldDetail() {
 }
 
 function openFieldItem(id) {
-  if (state.field.activeId !== id) $("detailObs").value = "";
+  if (state.field.activeId !== id) {
+    $("detailObs").value = "";
+    $("detailDate").value = toISODate(new Date());
+  }
+  $("detailDate").max = toISODate(new Date());
   state.field.activeId = id;
   document.querySelectorAll(".task").forEach(el => el.classList.toggle("active", el.dataset.task === id));
   renderFieldDetail();
@@ -2253,10 +2262,13 @@ async function registerExecution(ids, button) {
     const ok = await confirmDialog({ title: "Registrar nova execução?", text: "Este item já possui registro. Um novo registro será acrescentado ao histórico.", okLabel: "Registrar" });
     if (!ok) return;
   }
-  const obs = programs.length === 1 ? $("detailObs").value.trim() : "";
+  const single = programs.length === 1;
+  const obs = single ? $("detailObs").value.trim() : "";
+  const date = single ? $("detailDate").value : $("bulkDate").value;
+  if (date && date > toISODate(new Date())) return toast("A data da execução não pode ser futura.", "error");
   await withButton(button, async () => {
     try {
-      const created = await withBusy(() => fieldRegister(programs.map(p => p.id), obs));
+      const created = await withBusy(() => fieldRegister(programs.map(p => p.id), obs, executionTimestamp(date)));
       created.forEach(e => {
         const list = state.executions.get(e.programacao_id) || [];
         list.push(e);
@@ -2293,8 +2305,8 @@ async function changeFieldWeek(delta) {
   state.field.selected.clear();
   state.field.activeId = null;
   setText("fieldWeek", weekLabel(state.field.weekNum));
-  try { await withBusy(loadFieldWeek); }
-  catch (error) { toast(dbErrorMessage(error), "error"); state.field.programs = []; }
+  try { await withBusy(loadFieldWeek); state.loadError = ""; }
+  catch (error) { state.loadError = dbErrorMessage(error); toast(state.loadError, "error"); state.field.programs = []; }
   renderScreen();
 }
 
@@ -2538,7 +2550,7 @@ function bindEvents() {
   document.querySelectorAll(".nav-item[data-screen]").forEach(b => b.addEventListener("click", () => goTo(b.dataset.screen)));
   $("sidebarToggle").addEventListener("click", () => {
     const collapsed = $("appShell").classList.toggle("collapsed");
-    localStorage.setItem("ppaSidebarCollapsed", collapsed ? "1" : "0");
+    storageSet(localStorage, "ppaSidebarCollapsed", collapsed ? "1" : "0");
   });
   $("mobileMenuBtn").addEventListener("click", () => { $("sidebar").classList.add("open"); $("sidebarOverlay").classList.add("show"); });
   $("sidebarOverlay").addEventListener("click", () => { closeSidebar(); closeFieldSheet(); });
@@ -2693,7 +2705,7 @@ function bindEvents() {
   $("bulkRegister").addEventListener("click", async e => {
     const button = e.currentTarget;
     const ids = [...state.field.selected];
-    const ok = await confirmDialog({ title: `Registrar ${ids.length} execução(ões)?`, text: "Todos os itens selecionados serão marcados como executados agora, em seu nome.", okLabel: "Registrar" });
+    const ok = await confirmDialog({ title: `Registrar ${ids.length} execução(ões)?`, text: `Todos os itens selecionados serão marcados como executados em ${fmtDate($("bulkDate").value || toISODate(new Date()))}, em seu nome.`, okLabel: "Registrar" });
     if (ok) registerExecution(ids, button);
   });
   $("detailRegister").addEventListener("click", e => registerExecution([state.field.activeId], e.currentTarget));
@@ -2708,12 +2720,12 @@ function bindEvents() {
 async function init() {
   applyTheme();
   loadSettings();
-  if (localStorage.getItem("ppaSidebarCollapsed") === "1") $("appShell").classList.add("collapsed");
+  if (storageGet(localStorage, "ppaSidebarCollapsed") === "1") $("appShell").classList.add("collapsed");
   bindEvents();
 
   // Remove chaves de versões antigas que guardavam dados de negócio no navegador.
   ["ppaModules", "ppaModuleRecords", "ppaProgramacoes", "ppaImportedRows", "ppaProgramHistory", "ppaSession", "ppaCurrentWeek", "ppaColumnViewMode"]
-    .forEach(key => { localStorage.removeItem(key); sessionStorage.removeItem(key); });
+    .forEach(key => { storageRemove(localStorage, key); storageRemove(sessionStorage, key); });
 
   if (!db()) {
     showLoginStep("chooser");
@@ -2722,9 +2734,15 @@ async function init() {
     return;
   }
 
-  const user = await restoreSession();
-  if (user) await enterApp(user);
-  else showLoginStep("chooser");
+  const restored = await restoreSession();
+  if (restored?.error) {
+    showLoginStep("chooser");
+    toast(restored.error, "error");
+  } else if (restored) {
+    await enterApp(restored);
+  } else {
+    showLoginStep("chooser");
+  }
 }
 
 init().catch(error => {

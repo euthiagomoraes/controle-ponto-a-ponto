@@ -555,7 +555,10 @@ button { cursor: pointer; }
   background: var(--text); color: var(--bg); border-radius: 14px; box-shadow: var(--shadow-lg);
 }
 .shell:not(.collapsed) .bulk-bar { margin-left: calc(var(--sidebar-w) / 2); }
-.bulk-bar .btn.ghost { background: transparent; color: inherit; border-color: color-mix(in srgb, var(--bg) 35%, transparent); }
+.bulk-date { height: 32px; padding: 0 8px; border-radius: var(--radius-sm); border: 1px solid color-mix(in srgb, var(--bg) 35%, transparent); background: transparent; color: inherit; color-scheme: dark; font-size: 13px; }
+:root[data-theme="dark"] .bulk-date { color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .bulk-date { color-scheme: light; } }
+.bulk-bar .btn.ghost {background: transparent; color: inherit; border-color: color-mix(in srgb, var(--bg) 35%, transparent); }
 
 /* =========================================================
    MODAL / TOAST
