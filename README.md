@@ -12,7 +12,7 @@ O planejamento importa a programação da semana por Excel; a equipe de campo v�
    - O arquivo é validado inteiro antes de gravar: todos os erros aparecem por linha e nada é gravado enquanto houver erro.
    - **Incluir na programação**: acrescenta as linhas.
    - **Nova programação**: substitui os itens **pendentes** daquela atividade nas semanas do arquivo; itens executados são preservados.
-4. **Campo** — a pessoa entra com o código, vê a semana atual da sua equipe, registra a execução com a **data em que foi feita** (individual ou em lote, com observação) e preenche as colunas liberadas (ex.: colunas do tipo Data marcadas como "Equipe de campo pode alterar"). O login de campo continua ativo ao atualizar a página, até clicar em Sair. A equipe também tem o **Dashboard** com os indicadores da própria equipe (programadas, executadas, realização, tendência, backlog e apontamentos), via migration `012`.
+4. **Campo** — a pessoa entra com o código, vê a semana atual da sua equipe, registra a execução com a **data em que foi feita** (individual ou em lote, com observação) e preenche as colunas liberadas (ex.: colunas do tipo Data marcadas como "Equipe de campo pode alterar"). O login de campo continua ativo ao atualizar a página, até clicar em Sair. A primeira tela do campo é o **Dashboard**, com os indicadores da própria equipe (programadas, executadas, realização, tendência, backlog e apontamentos), seguido de Atividades da semana e Histórico. Usa as funções da `008`, com paginação (semanas com mais de 1000 itens chegam completas).
    O planejamento vê a situação e a data de execução de cada item na tela **Programação**.
 5. **Editar e reprogramar** — na Programação, cada item tem **Editar** (semana, equipe e colunas da atividade) e **Reprogramar**; marcando várias linhas aparece a barra de ações em lote (reprogramar ou excluir). Só itens pendentes podem ser reprogramados. O histórico de semanas fica no próprio item (`dados_personalizados._semanas_anteriores`) e aparece como "↻ W136" na tabela e "Reprogramado de W136" no campo.
 6. **Backlog** — itens não executados de semanas anteriores à atual. A tela Backlog lista, filtra e reprograma em lote (sugere a próxima semana). O menu mostra a quantidade.
@@ -74,7 +74,7 @@ Migrations em `supabase/migrations/`, na ordem (todas podem ser executadas mais 
 | `008_tecnico_rpc_seguro.sql` | **Obrigatória para o campo.** Funções `tecnico_contexto`, `tecnico_programacao`, `tecnico_registrar_execucao` e `tecnico_salvar_campos`: validam o código, limitam à equipe, só alteram colunas editáveis e não aceitam data futura |
 | `010_equipamento_tag_por_sistema.sql` | Equipamento identificado por TAG + SYS + SUBSYS |
 | `011_programacao_sem_unicidade_equipamento.sql` | Permite o mesmo equipamento mais de uma vez na semana (duplicados liberados) |
-| `012_identidade_e_dashboard_campo.sql` | Tabela `tb_configuracoes` (logo e cores do sistema, legível na tela de login) e função `tecnico_programacao_periodo` para o Dashboard de campo |
+| `012_identidade_e_dashboard_campo.sql` | Tabela `tb_configuracoes`: logo e cores do sistema, legíveis na tela de login de qualquer aparelho; só administradores gravam. Ao entrar, o admin publica automaticamente a identidade salva no navegador se o banco ainda não tiver |
 
 ### Segurança
 

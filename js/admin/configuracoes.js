@@ -24,16 +24,35 @@ function cacheSettings() {
   storageSet(localStorage, "ppaSettings", JSON.stringify(state.settings));
 }
 
+// Origem da identidade: "db" (lida do banco), "empty" (tabela existe, sem registro) ou "unavailable" (sem a 012).
+let settingsSource = "unavailable";
+const SETTINGS_TABLE_MISSING = "A identidade visual ainda não está no banco: execute 012_identidade_e_dashboard_campo.sql no SQL Editor do Supabase. Até lá, a logo aparece só neste navegador (não aparece no celular nem na tela de login de outros aparelhos).";
+
 // Lê a identidade do banco (disponível também antes do login).
 async function loadSystemSettings() {
   const sb = db();
   if (!sb) return;
   const { data, error } = await sb.from("tb_configuracoes").select("valor").eq("chave", SETTINGS_KEY).maybeSingle();
-  if (error) { console.warn("Identidade visual do banco indisponível (execute a migration 012):", error.message); return; }
-  if (!data?.valor) return;
+  if (error) { settingsSource = "unavailable"; console.warn("Identidade visual do banco indisponível:", error.message); return; }
+  if (!data?.valor) { settingsSource = "empty"; return; }
+  settingsSource = "db";
   state.settings = pickSettings(data.valor);
   cacheSettings();
   applySettings();
+}
+
+// Ao entrar como admin: se o banco ainda não tem a identidade, publica a deste navegador
+// (logo/cores salvas antes da 012), para que o login de todos os aparelhos passe a mostrá-la.
+async function publishSettingsIfNeeded() {
+  if (state.user?.role !== "admin" || settingsSource !== "empty") return;
+  if (JSON.stringify(state.settings) === JSON.stringify(DEFAULT_SETTINGS)) return;
+  try {
+    await saveSettings();
+    settingsSource = "db";
+    toast("Identidade visual publicada: a logo agora aparece no login de todos os aparelhos.");
+  } catch (error) {
+    console.warn("Não foi possível publicar a identidade visual:", error.message);
+  }
 }
 
 async function saveSettings() {
@@ -44,6 +63,7 @@ async function saveSettings() {
       ? "A tabela de configurações não existe. Execute 012_identidade_e_dashboard_campo.sql no SQL Editor do Supabase."
       : dbErrorMessage(error));
   }
+  settingsSource = "db";
   cacheSettings();
   applySettings();
 }
@@ -69,6 +89,9 @@ function applySettings() {
 
 function renderSettings() {
   const s = state.settings;
+  const warn = $("settingsDbWarn");
+  warn.classList.toggle("hidden", settingsSource !== "unavailable");
+  warn.textContent = settingsSource === "unavailable" ? SETTINGS_TABLE_MISSING : "";
   $("settingsPrimary").value = s.primary;
   $("settingsHeader").value = s.header;
   $("settingsPlanned").value = s.chartPlanned;

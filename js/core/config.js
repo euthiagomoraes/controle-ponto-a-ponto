@@ -60,7 +60,8 @@ const DEFAULT_ACTIVITIES = [
 const DEFAULT_SETTINGS = { primary: "#1f5eff", header: "#0f1b2d", chartPlanned: "#1f5eff", chartDone: "#12895a", logo: "" };
 
 const ADMIN_SCREENS = ["dashboard", "programacao", "backlog", "importacoes", "relatorios", "atividades", "equipes", "configuracoes", "perfil"];
-const FIELD_SCREENS = ["campo", "dashboard", "historico", "perfil"];
+// A primeira tela é a inicial do perfil.
+const FIELD_SCREENS = ["dashboard", "campo", "historico", "perfil"];
 
 /* =========================================================
    ESTADO

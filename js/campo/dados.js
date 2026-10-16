@@ -31,20 +31,32 @@ async function loadFieldContext() {
   state.teams = ctx.equipe ? [{ ...ctx.equipe, ativo: true }] : [];
 }
 
-async function loadFieldWeek() {
-  const rows = await fieldRpc("tecnico_programacao", { p_semana: state.field.weekNum }) || [];
-  const programs = rows.map(r => mapProgram(r));
-  const executions = rows.flatMap(r => (r.execucoes || []).map(e => ({ ...e, programacao_id: r.id })));
-  const equipment = rows.filter(r => r.equipamento).map(r => r.equipamento);
+// Programação de uma semana da equipe. Paginado: o Supabase devolve no máximo 1000 linhas por
+// requisição, também em funções; sem isso uma semana com 1948 itens chegava cortada em 1000.
+async function fetchFieldWeekRows(weekNum) {
+  try {
+    return await fetchAll(() => requireDb().rpc("tecnico_programacao", { p_cracha: fieldCode(), p_semana: weekNum }));
+  } catch (error) {
+    if (isMissingFunction(error)) throw new Error(MISSING_008);
+    throw error;
+  }
+}
+
+// Converte as linhas da função para o estado local; devolve os itens de atividades ativas.
+function ingestFieldRows(rows) {
   // Pessoa sem equipe vê todas as equipes: guarda os nomes que vieram junto.
   rows.forEach(r => {
     if (r.equipe_id && r.equipe_nome && !teamById(r.equipe_id)) state.teams.push({ id: r.equipe_id, nome: r.equipe_nome, ativo: true });
+    if (r.equipamento) state.equipment.set(r.equipamento.id, r.equipamento);
   });
-
   const activeIds = new Set(state.activities.map(a => a.id));
-  state.field.programs = programs.filter(p => activeIds.has(p.activityId));
-  mergeExecutions(programs, executions);
-  equipment.forEach(e => state.equipment.set(e.id, e));
+  const programs = rows.map(r => mapProgram(r)).filter(p => activeIds.has(p.activityId));
+  mergeExecutions(programs, rows.flatMap(r => (r.execucoes || []).map(e => ({ ...e, programacao_id: r.id }))));
+  return programs;
+}
+
+async function loadFieldWeek() {
+  state.field.programs = ingestFieldRows(await fetchFieldWeekRows(state.field.weekNum));
   const visible = new Set(state.field.programs.map(p => p.id));
   state.field.selected = new Set([...state.field.selected].filter(id => visible.has(id) && !isDone(state.field.programs.find(p => p.id === id))));
   if (!visible.has(state.field.activeId)) state.field.activeId = null;
@@ -56,27 +68,21 @@ function mergeExecutions(programs, executions) {
   programs.forEach(p => state.executions.set(p.id, grouped.get(p.id) || []));
 }
 
-// Semanas carregadas no Dashboard de campo: 12 anteriores, a atual e 2 seguintes.
-const FIELD_DASHBOARD_BACK = 12;
-const FIELD_DASHBOARD_AHEAD = 2;
-const MISSING_012 = "O Dashboard da equipe de campo precisa da migration 012_identidade_e_dashboard_campo.sql. Peça ao administrador para executá-la no Supabase.";
+// Semanas do Dashboard de campo: 8 anteriores, a atual e a seguinte.
+const FIELD_DASHBOARD_BACK = 8;
+const FIELD_DASHBOARD_AHEAD = 1;
 
-// Programação da equipe em várias semanas, para os indicadores (fica em state.programs, como no planejamento).
+// Indicadores da equipe: usa a mesma função segura da migration 008, semana a semana (4 em paralelo).
+// Os itens ficam em state.programs, como no planejamento, e o Dashboard é o mesmo.
 async function loadFieldDashboard() {
   const current = currentWeekNumber();
-  const { data, error } = await requireDb().rpc("tecnico_programacao_periodo", {
-    p_cracha: fieldCode(), p_semana_de: current - FIELD_DASHBOARD_BACK, p_semana_ate: current + FIELD_DASHBOARD_AHEAD
-  });
-  if (error && isMissingFunction(error)) throw new Error(MISSING_012);
-  if (error) throw error;
-  const rows = Array.isArray(data) ? data : [];
-  rows.forEach(r => {
-    if (r.equipe_id && r.equipe_nome && !teamById(r.equipe_id)) state.teams.push({ id: r.equipe_id, nome: r.equipe_nome, ativo: true });
-  });
-  const activeIds = new Set(state.activities.map(a => a.id));
-  const programs = rows.map(r => mapProgram(r)).filter(p => activeIds.has(p.activityId));
-  mergeExecutions(programs, rows.flatMap(r => (r.execucoes || []).map(e => ({ ...e, programacao_id: r.id }))));
-  state.programs = programs;
+  const weeks = [];
+  for (let w = current - FIELD_DASHBOARD_BACK; w <= current + FIELD_DASHBOARD_AHEAD; w++) weeks.push(w);
+  const rows = [];
+  for (const part of chunk(weeks, 4)) {
+    (await Promise.all(part.map(fetchFieldWeekRows))).forEach(list => rows.push(...list));
+  }
+  state.programs = ingestFieldRows(rows);
 }
 
 async function fieldRegister(ids, observacao, executadoEm) {

@@ -157,6 +157,7 @@ async function enterApp(user) {
   renderUserChrome();
   updateBacklogBadge();
   await syncAll();
+  publishSettingsIfNeeded();
   route();
 }
 

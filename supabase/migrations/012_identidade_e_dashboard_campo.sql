@@ -1,18 +1,14 @@
--- Planning Pro — 012: identidade visual compartilhada + dashboard da equipe de campo
+-- Planning Pro — 012: identidade visual compartilhada (logo e cores)
 --
--- 1. tb_configuracoes: guarda a identidade visual (logo e cores) definida pelo Administrador.
---    Leitura liberada também para a role anon, porque a tela de login usa a logo antes de qualquer acesso.
---    Somente administradores (public.eh_admin()) podem gravar.
--- 2. tecnico_programacao_periodo: programação de várias semanas da equipe do técnico, para o Dashboard
---    de campo (indicadores, tendência, backlog e apontamentos). Mesmas regras de segurança da 008.
+-- tb_configuracoes guarda a identidade visual definida pelo Administrador em Configurações.
+-- A leitura é liberada também para a role anon, porque a tela de login (inclusive no celular)
+-- mostra a logo antes de qualquer acesso. Só administradores ativos podem gravar.
 --
+-- O Dashboard da equipe de campo NÃO depende desta migration: ele usa a função da 008.
 -- Não apaga dados. Pode ser executada mais de uma vez.
 
 begin;
 
--- ---------------------------------------------------------------------------
--- 1. Identidade visual
--- ---------------------------------------------------------------------------
 create table if not exists public.tb_configuracoes (
   chave text primary key,
   valor jsonb not null default '{}'::jsonb,
@@ -28,52 +24,25 @@ drop policy if exists tb_configuracoes_leitura on public.tb_configuracoes;
 create policy tb_configuracoes_leitura on public.tb_configuracoes
   for select to anon, authenticated using (true);
 
+-- Administrador = pessoa ativa com perfil ADMINISTRADOR vinculada ao usuário do Supabase Auth.
 drop policy if exists tb_configuracoes_admin on public.tb_configuracoes;
 create policy tb_configuracoes_admin on public.tb_configuracoes
-  for all to authenticated using (public.eh_admin()) with check (public.eh_admin());
+  for all to authenticated
+  using (exists (
+    select 1 from public.tb_pessoas p
+    where p.auth_user_id = auth.uid() and p.ativo = true and p.perfil = 'ADMINISTRADOR'
+  ))
+  with check (exists (
+    select 1 from public.tb_pessoas p
+    where p.auth_user_id = auth.uid() and p.ativo = true and p.perfil = 'ADMINISTRADOR'
+  ));
 
--- ---------------------------------------------------------------------------
--- 2. Dashboard de campo: programação de um intervalo de semanas (máx. 26)
--- ---------------------------------------------------------------------------
-create or replace function public.tecnico_programacao_periodo(p_cracha text, p_semana_de integer, p_semana_ate integer)
-returns setof jsonb
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  with tec as (
-    select id, equipe_id
-    from public.tb_pessoas
-    where cracha = trim(p_cracha) and ativo = true and perfil <> 'ADMINISTRADOR'
-    limit 1
-  )
-  select to_jsonb(p) || jsonb_build_object(
-    'equipe_nome', (select eq.nome from public.tb_equipes eq where eq.id = p.equipe_id),
-    'execucoes', coalesce((
-      select jsonb_agg(jsonb_build_object(
-        'id', x.id,
-        'programacao_id', x.programacao_id,
-        'executante_id', x.executante_id,
-        'executante_nome', pe.nome,
-        'executado_em', x.executado_em,
-        'observacao', x.observacao
-      ) order by x.executado_em)
-      from public.tb_execucoes x
-      left join public.tb_pessoas pe on pe.id = x.executante_id
-      where x.programacao_id = p.id
-    ), '[]'::jsonb)
-  )
-  from public.tb_programacoes p
-  cross join tec
-  where p.semana::integer between p_semana_de and least(p_semana_ate, p_semana_de + 25)
-    and (tec.equipe_id is null or p.equipe_id = tec.equipe_id)
-  order by p.semana, p.created_at, p.id;
-$$;
-
-revoke all on function public.tecnico_programacao_periodo(text, integer, integer) from public;
-grant execute on function public.tecnico_programacao_periodo(text, integer, integer) to anon, authenticated;
+-- Versão anterior desta migration criava uma função que o app não usa mais.
+drop function if exists public.tecnico_programacao_periodo(text, integer, integer);
 
 commit;
 
 notify pgrst, 'reload schema';
+
+-- Conferência: deve retornar 1 linha depois que o Administrador abrir o sistema ou salvar Configurações.
+select chave, updated_at, (valor ? 'logo') as tem_logo from public.tb_configuracoes;
