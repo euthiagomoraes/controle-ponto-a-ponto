@@ -171,16 +171,12 @@ button { cursor: pointer; }
 }
 .field input:disabled, .field select:disabled, .field textarea:disabled { background: var(--surface-3); color: var(--muted); cursor: not-allowed; }
 .field small { font-weight: 500; font-size: 11.5px; text-transform: none; letter-spacing: 0; }
-.field.invalid input, .field.invalid select { border-color: var(--danger); }
 
 .search { position: relative; display: flex; align-items: center; min-width: 0; }
 .search .icon { position: absolute; left: 11px; color: var(--subtle); pointer-events: none; }
 .search input { padding-left: 36px; }
 .search.sm input { min-height: 34px; font-size: 13px; }
 
-.prefixed { display: flex; }
-.prefixed b { display: grid; place-items: center; padding: 0 11px; border: 1px solid var(--line-strong); border-right: 0; border-radius: var(--radius-sm) 0 0 var(--radius-sm); background: var(--surface-2); color: var(--muted); font-family: var(--mono); }
-.prefixed input { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
 .input-action { display: flex; gap: 6px; }
 .input-action .btn { height: 40px; }
 
@@ -217,7 +213,6 @@ button { cursor: pointer; }
 .chip.warn { background: var(--warn-soft); color: var(--warn); }
 .chip.danger { background: var(--danger-soft); color: var(--danger); }
 .chip button { border: 0; background: none; padding: 0; color: inherit; display: grid; }
-.chip-list { display: flex; flex-wrap: wrap; gap: 6px; }
 
 .status { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 999px; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
 .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
@@ -268,7 +263,6 @@ button { cursor: pointer; }
 .data-table .chip { height: 20px; font-size: 10.5px; margin-left: 6px; }
 .data-table.preview th, .data-table.preview td { padding: 8px 12px; }
 .data-table.preview tbody td { color: var(--subtle); font-style: italic; }
-.data-table .req { color: var(--danger); }
 .pager { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
 .pager:empty { display: none; }
 

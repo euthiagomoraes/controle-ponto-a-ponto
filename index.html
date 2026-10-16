@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./css/styles.css">
 </head>
 <body>
 
@@ -23,7 +23,6 @@
     <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14a6 6 0 0 1 3.5 6"/></symbol>
     <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V11M10 20V5M16 20v-6M21 20H3"/></symbol>
     <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></symbol>
-    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></symbol>
     <symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 10h6M9 14h6M9 18h3"/></symbol>
     <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></symbol>
     <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v12M7 11l5 5 5-5M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></symbol>
@@ -702,7 +701,6 @@
         <span><strong>Nova programação</strong><small id="importReplaceHint">Substitui os itens <b>pendentes</b> desta atividade nas semanas do arquivo. Itens já executados são mantidos.</small></span>
       </label>
     </div>
-    <label id="importDupWrap" class="check hidden" style="margin-top:12px"><input id="importSkipDup" type="checkbox" checked><span id="importDupText"></span></label>
     <p id="importMessage" class="form-message" role="alert"></p>
     <div class="modal-actions">
       <button class="btn ghost" type="button" data-close-modal>Cancelar</button>
@@ -799,7 +797,6 @@
       <label class="field">Nova semana<select id="reprogramWeek"></select></label>
       <label class="field">Equipe<select id="reprogramTeam"></select></label>
     </div>
-    <div id="reprogramWarn" class="alert warn hidden"></div>
     <p id="reprogramMessage" class="form-message" role="alert"></p>
     <div class="modal-actions">
       <button class="btn ghost" type="button" data-close-modal>Cancelar</button>
@@ -825,7 +822,28 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="./supabase-config.js"></script>
-<script src="./app.js"></script>
+<script src="./js/supabase-config.js"></script>
+<!-- Aplicação: a ordem importa (config → utilitários → telas → app.js por último). -->
+<script src="./js/core/config.js"></script>
+<script src="./js/core/utils.js"></script>
+<script src="./js/core/db.js"></script>
+<script src="./js/core/ui.js"></script>
+<script src="./js/admin/configuracoes.js"></script>
+<script src="./js/core/auth.js"></script>
+<script src="./js/core/dados.js"></script>
+<script src="./js/core/navegacao.js"></script>
+<script src="./js/core/graficos.js"></script>
+<script src="./js/admin/dashboard.js"></script>
+<script src="./js/admin/programacao.js"></script>
+<script src="./js/admin/importacao-excel.js"></script>
+<script src="./js/admin/historico-importacoes.js"></script>
+<script src="./js/admin/relatorios.js"></script>
+<script src="./js/admin/atividades.js"></script>
+<script src="./js/admin/equipes.js"></script>
+<script src="./js/core/perfil.js"></script>
+<script src="./js/campo/dados.js"></script>
+<script src="./js/campo/telas.js"></script>
+<script src="./js/core/exportacao.js"></script>
+<script src="./js/app.js"></script>
 </body>
 </html>
