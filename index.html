@@ -47,6 +47,8 @@
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/></symbol>
     <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
     <symbol id="i-logout" viewBox="0 0 24 24"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-forward" viewBox="0 0 24 24"><path d="M4 12h13M13 7l5 5-5 5"/><path d="M20 5v14"/></symbol>
     <symbol id="i-collapse" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 10l-2 2 2 2"/></symbol>
   </defs>
 </svg>
@@ -120,6 +122,7 @@
       <span class="nav-section">Planejamento</span>
       <button class="nav-item" data-screen="dashboard" title="Dashboard"><svg class="icon"><use href="#i-dashboard"/></svg><span>Dashboard</span></button>
       <button class="nav-item" data-screen="programacao" title="Programação"><svg class="icon"><use href="#i-calendar"/></svg><span>Programação</span></button>
+      <button class="nav-item" data-screen="backlog" title="Backlog"><svg class="icon"><use href="#i-clock"/></svg><span>Backlog</span><b id="navBacklogCount" class="nav-count hidden">0</b></button>
       <button class="nav-item" data-screen="importacoes" title="Importações"><svg class="icon"><use href="#i-history"/></svg><span>Importações</span></button>
       <button class="nav-item" data-screen="relatorios" title="Relatórios"><svg class="icon"><use href="#i-chart"/></svg><span>Relatórios</span></button>
       <span class="nav-section">Cadastros</span>
@@ -176,13 +179,14 @@
         <div class="kpi ok"><span>Executadas</span><strong id="kpiDone">0</strong><small>com registro de campo</small></div>
         <div class="kpi warn"><span>Pendentes</span><strong id="kpiPending">0</strong><small>aguardando execução</small></div>
         <div class="kpi accent"><span>Realização</span><strong id="kpiRate">0%</strong><div class="meter"><i id="kpiRateBar"></i></div></div>
+        <button id="kpiBacklogCard" class="kpi danger kpi-link" type="button" title="Abrir backlog"><span>Backlog</span><strong id="kpiBacklog">0</strong><small id="kpiBacklogText">pendentes de semanas anteriores</small></button>
       </div>
 
       <div class="grid-2-1">
         <section class="card">
           <div class="card-head">
             <div><h3>Evolução semanal</h3><p class="muted sm">Últimas semanas com programação</p></div>
-            <div class="legend"><span><i class="dot planned"></i>Previsto</span><span><i class="dot done"></i>Realizado</span></div>
+            <div class="legend"><span><i class="dot planned"></i>Previsto</span><span><i class="dot done"></i>Realizado</span><span><i class="trend-swatch planned"></i>Tendências</span></div>
           </div>
           <div id="dashboardWeekly" class="bar-chart"></div>
         </section>
@@ -196,6 +200,20 @@
         <div class="card-head"><div><h3>Por atividade</h3><p class="muted sm">Semana selecionada</p></div></div>
         <div id="dashboardActivities" class="progress-list cols"></div>
       </section>
+
+      <div class="grid-2">
+        <section class="card">
+          <div class="card-head">
+            <div><h3>Backlog por semana de origem</h3><p class="muted sm">Itens não executados de semanas anteriores à selecionada</p></div>
+            <button id="dashboardBacklogBtn" class="btn ghost sm" type="button"><svg class="icon"><use href="#i-forward"/></svg><span>Reprogramar</span></button>
+          </div>
+          <div id="dashboardBacklog" class="progress-list"></div>
+        </section>
+        <section class="card">
+          <div class="card-head"><div><h3>Últimos apontamentos</h3><p class="muted sm">Execuções registradas pelas equipes de campo</p></div></div>
+          <div id="dashboardApontamentos" class="timeline"></div>
+        </section>
+      </div>
     </section>
 
     <!-- ===================== ADMIN · PROGRAMAÇÃO ===================== -->
@@ -218,7 +236,7 @@
         <label class="field compact">Semana <select id="programWeekFilter"></select></label>
         <label class="field compact">Equipe <select id="programTeamFilter"></select></label>
         <label class="field compact">Situação
-          <select id="programStatusFilter"><option value="">Todas</option><option value="pending">Pendentes</option><option value="done">Executadas</option></select>
+          <select id="programStatusFilter"><option value="">Todas</option><option value="pending">Pendentes</option><option value="backlog">Backlog (semanas anteriores)</option><option value="done">Executadas</option></select>
         </label>
         <label class="field compact grow-2">Busca
           <span class="search"><svg class="icon"><use href="#i-search"/></svg><input id="programSearch" type="search" placeholder="TAG, equipe, observação…"></span>
@@ -243,6 +261,62 @@
         </div>
         <div id="programPager" class="pager"></div>
       </section>
+
+      <div id="programBulk" class="bulk-bar hidden">
+        <span><b id="programBulkCount">0</b> selecionado(s)</span>
+        <button id="programBulkClear" class="btn ghost sm" type="button">Limpar</button>
+        <button id="programBulkDelete" class="btn ghost sm" type="button"><svg class="icon"><use href="#i-trash"/></svg><span>Excluir</span></button>
+        <button id="programBulkMove" class="btn primary" type="button"><svg class="icon"><use href="#i-forward"/></svg><span>Reprogramar</span></button>
+      </div>
+    </section>
+
+    <!-- ===================== ADMIN · BACKLOG ===================== -->
+    <section id="screen-backlog" class="screen" data-title="Backlog" data-kicker="Planejamento">
+      <div class="page-head">
+        <div>
+          <h2>Backlog</h2>
+          <p class="muted">Itens de semanas anteriores à atual (<span id="backlogCurrentWeek">W—</span>) que não foram executados. Selecione e reprograme para outra semana.</p>
+        </div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi danger"><span>Em backlog</span><strong id="backlogTotal">0</strong><small>itens não executados</small></div>
+        <div class="kpi warn"><span>Mais antigo</span><strong id="backlogOldest">—</strong><small id="backlogOldestText">semana de origem</small></div>
+        <div class="kpi"><span>Equipes</span><strong id="backlogTeams">0</strong><small>com backlog</small></div>
+        <div class="kpi accent"><span>Já reprogramados</span><strong id="backlogMoved">0</strong><small>e ainda pendentes</small></div>
+      </div>
+
+      <div class="toolbar card">
+        <label class="field compact">Atividade <select id="backlogActivity"></select></label>
+        <label class="field compact">Equipe <select id="backlogTeam"></select></label>
+        <label class="field compact">Semana <select id="backlogWeek"></select></label>
+        <label class="field compact grow-2">Busca
+          <span class="search"><svg class="icon"><use href="#i-search"/></svg><input id="backlogSearch" type="search" placeholder="TAG ou qualquer campo"></span>
+        </label>
+      </div>
+
+      <section class="card flush">
+        <div class="card-head padded">
+          <div><h3>Itens em backlog</h3><p id="backlogMeta" class="muted sm">—</p></div>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr><th class="check-col"><input id="backlogSelectAll" type="checkbox" aria-label="Selecionar todos"></th><th>Semana</th><th>Atraso</th><th>Atividade</th><th>Item</th><th>Equipe</th><th>Histórico</th><th></th></tr></thead>
+            <tbody id="backlogBody"></tbody>
+          </table>
+        </div>
+        <div id="backlogEmpty" class="empty hidden">
+          <svg class="icon xl"><use href="#i-check"/></svg>
+          <strong>Sem backlog</strong>
+          <span>Todos os itens de semanas anteriores foram executados ou reprogramados.</span>
+        </div>
+      </section>
+
+      <div id="backlogBulk" class="bulk-bar hidden">
+        <span><b id="backlogBulkCount">0</b> selecionado(s)</span>
+        <button id="backlogBulkClear" class="btn ghost sm" type="button">Limpar</button>
+        <button id="backlogBulkMove" class="btn primary" type="button"><svg class="icon"><use href="#i-forward"/></svg><span>Reprogramar</span></button>
+      </div>
     </section>
 
     <!-- ===================== ADMIN · IMPORTAÇÕES ===================== -->
@@ -284,7 +358,7 @@
       <section class="card">
         <div class="card-head">
           <div><h3>Evolução por semana</h3></div>
-          <div class="legend"><span><i class="dot planned"></i>Previsto</span><span><i class="dot done"></i>Realizado</span></div>
+          <div class="legend"><span><i class="dot planned"></i>Previsto</span><span><i class="dot done"></i>Realizado</span><span><i class="trend-swatch planned"></i>Tendências</span></div>
         </div>
         <div id="reportWeekly" class="bar-chart"></div>
       </section>
@@ -587,7 +661,7 @@
   <div class="modal-box wide">
     <button class="icon-btn modal-close" type="button" data-close-modal aria-label="Fechar"><svg class="icon"><use href="#i-x"/></svg></button>
     <h3 id="programModalTitle">Nova programação</h3>
-    <p class="muted sm">Lançamento manual de um item. Para cargas grandes, use a importação de Excel.</p>
+    <p id="programModalText" class="muted sm">Lançamento manual de um item. Para cargas grandes, use a importação de Excel.</p>
     <form id="programForm" novalidate>
       <div class="form-grid">
         <label class="field">Atividade<select id="pfActivity"></select></label>
@@ -598,7 +672,7 @@
       <p id="programFormMessage" class="form-message" role="alert"></p>
       <div class="modal-actions">
         <button class="btn ghost" type="button" data-close-modal>Cancelar</button>
-        <button class="btn primary" type="submit">Salvar programação</button>
+        <button id="programFormSubmit" class="btn primary" type="submit">Salvar programação</button>
       </div>
     </form>
   </div>
@@ -712,6 +786,25 @@
         <button class="btn primary" type="submit">Salvar</button>
       </div>
     </form>
+  </div>
+</div>
+
+<div id="reprogramModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="reprogramTitle">
+  <div class="modal-backdrop" data-close-modal></div>
+  <div class="modal-box">
+    <button class="icon-btn modal-close" type="button" data-close-modal aria-label="Fechar"><svg class="icon"><use href="#i-x"/></svg></button>
+    <h3 id="reprogramTitle">Reprogramar</h3>
+    <p id="reprogramText" class="muted sm">—</p>
+    <div class="form-grid">
+      <label class="field">Nova semana<select id="reprogramWeek"></select></label>
+      <label class="field">Equipe<select id="reprogramTeam"></select></label>
+    </div>
+    <div id="reprogramWarn" class="alert warn hidden"></div>
+    <p id="reprogramMessage" class="form-message" role="alert"></p>
+    <div class="modal-actions">
+      <button class="btn ghost" type="button" data-close-modal>Cancelar</button>
+      <button id="reprogramConfirm" class="btn primary" type="button"><svg class="icon"><use href="#i-forward"/></svg><span>Reprogramar</span></button>
+    </div>
   </div>
 </div>
 

@@ -69,7 +69,7 @@ const DEFAULT_ACTIVITIES = [
 
 const DEFAULT_SETTINGS = { primary: "#1f5eff", header: "#0f1b2d", chartPlanned: "#1f5eff", chartDone: "#12895a", logo: "" };
 
-const ADMIN_SCREENS = ["dashboard", "programacao", "importacoes", "relatorios", "atividades", "equipes", "configuracoes", "perfil"];
+const ADMIN_SCREENS = ["dashboard", "programacao", "backlog", "importacoes", "relatorios", "atividades", "equipes", "configuracoes", "perfil"];
 const FIELD_SCREENS = ["campo", "historico", "perfil"];
 
 /* =========================================================
@@ -89,7 +89,10 @@ const state = {
   loadError: "",
 
   dashboardWeek: null,
-  program: { activityId: null, week: "", team: "", status: "", search: "", page: 0 },
+  program: { activityId: null, week: "", team: "", status: "", search: "", page: 0, selected: new Set() },
+  backlog: { activity: "", team: "", week: "", search: "", selected: new Set() },
+  editingProgramId: null,
+  reprogramIds: [],
   activityId: null,
   editingActivityId: null,
   editingColumnId: null,
@@ -259,7 +262,7 @@ function isMissingFunction(error) {
 function dbErrorMessage(error, fallback = "Não foi possível concluir a operação.") {
   const msg = error?.message || (typeof error === "string" ? error : "");
   if (error?.code === "42501" || /row-level security|permission denied/i.test(msg)) return "O banco bloqueou a operação (permissões/RLS). Verifique as policies do Supabase para este perfil.";
-  if (error?.code === "23505") return "Já existe um registro com esse valor.";
+  if (error?.code === "23505") return `Já existe um registro com esse valor${error.details ? ` (${error.details})` : ""}.`;
   if (error?.code === "23503") return "Este registro está vinculado a outros dados (ex.: execuções) e não pode ser removido.";
   if (/null value in column "equipamento_id"/i.test(msg)) return "O banco exige um equipamento para cada programação. Inclua a coluna TAG nesta atividade e preencha-a.";
   if (/tb_equipes_disciplina_check/i.test(msg)) return "Disciplina rejeitada pelo banco. Execute a migration 006_corrigir_disciplina_equipes.sql.";
@@ -593,6 +596,7 @@ async function enterApp(user) {
   $("appShell").classList.remove("hidden");
   document.querySelectorAll("[data-nav-role]").forEach(nav => nav.classList.toggle("active", nav.dataset.navRole === user.role));
   renderUserChrome();
+  updateBacklogBadge();
   await syncAll();
   route();
 }
@@ -726,6 +730,13 @@ async function loadAdminPrograms() {
 const executionsOf = programId => state.executions.get(programId) || [];
 const isDone = p => executionsOf(p.id).length > 0 || p.status === "EXECUTADO";
 
+// Histórico de reprogramação guardado no próprio item (chave interna, não é coluna da atividade).
+const HISTORY_KEY = "_semanas_anteriores";
+const previousWeeks = p => (Array.isArray(p.customData?.[HISTORY_KEY]) ? p.customData[HISTORY_KEY] : []).map(Number).filter(Boolean);
+
+// Backlog: item ainda não executado cuja semana já passou (em relação à semana de referência).
+const isBacklog = (p, refWeek = currentWeekNumber()) => !isDone(p) && p.weekNum < refWeek;
+
 async function syncAll() {
   await withBusy(async () => {
     try {
@@ -747,6 +758,7 @@ async function syncAll() {
     }
   });
   renderUserChrome();
+  updateBacklogBadge();
 }
 
 /* =========================================================
@@ -785,8 +797,10 @@ function renderScreen(screen = currentScreen()) {
     configuracoes: renderSettings,
     perfil: renderProfile,
     campo: renderField,
-    historico: renderFieldHistory
+    historico: renderFieldHistory,
+    backlog: renderBacklog
   })[screen]?.();
+  updateBacklogBadge();
 }
 
 function goTo(screen) {
@@ -829,18 +843,54 @@ function allWeeks() {
   return sortWeeks([...state.programs.map(p => p.week), weekLabel(currentWeekNumber())]);
 }
 
+// Reta de mínimos quadrados sobre os valores semanais (x = posição da semana no gráfico).
+function linearTrend(values) {
+  const n = values.length;
+  if (n < 2) return null;
+  const mx = (n - 1) / 2;
+  const my = values.reduce((a, b) => a + b, 0) / n;
+  const den = values.reduce((acc, _, i) => acc + (i - mx) ** 2, 0);
+  const slope = values.reduce((acc, v, i) => acc + (i - mx) * (v - my), 0) / den;
+  return { slope, at: i => my + slope * (i - mx) };
+}
+
+const fmtSlope = v => `${v > 0.05 ? "+" : v < -0.05 ? "−" : "±"}${Math.abs(v).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}`;
+
+const CHART_AREA = 170;   // altura da área das barras (px)
+const CHART_BAR_MAX = 150; // altura da maior barra (px)
+
 function renderBarChart(host, series, currentWeek) {
   if (!host) return;
   if (!series.length) { host.innerHTML = `<div class="empty inline"><span>Sem programação no período.</span></div>`; return; }
   const max = Math.max(1, ...series.flatMap(s => [s.total, s.done]));
-  host.innerHTML = series.map(s => `
-    <div class="bar-group ${s.week === currentWeek ? "current" : ""}" title="${escapeHTML(s.week)}: ${s.done} de ${s.total} (${s.rate}%)">
-      <div class="bar-pair">
-        <i class="bar planned" style="height:${Math.round(s.total / max * 150)}px"><b>${s.total}</b></i>
-        <i class="bar done" style="height:${Math.round(s.done / max * 150)}px"><b>${s.done}</b></i>
+  const n = series.length;
+  const y = v => Math.max(0, CHART_AREA - Math.min(Math.max(v, 0), max * CHART_AREA / CHART_BAR_MAX) / max * CHART_BAR_MAX);
+  const x = i => (i + 0.5) / n * 100;
+
+  const trends = [
+    { key: "planned", label: "previsto", trend: linearTrend(series.map(s => s.total)) },
+    { key: "done", label: "realizado", trend: linearTrend(series.map(s => s.done)) }
+  ];
+  const lines = trends.filter(t => t.trend).map(t => {
+    const coords = `x1="${x(0)}" y1="${y(t.trend.at(0))}" x2="${x(n - 1)}" y2="${y(t.trend.at(n - 1))}"`;
+    return `<line class="trend-halo" ${coords}/><line class="trend-line ${t.key}" ${coords}><title>Tendência ${t.label}: ${fmtSlope(t.trend.slope)} item(ns)/semana</title></line>`;
+  }).join("");
+
+  host.innerHTML = `
+    <div class="bar-plot" style="min-width:${n * 56}px">
+      <div class="bar-area">
+        ${series.map(s => `
+          <div class="bar-slot ${s.week === currentWeek ? "current" : ""}" title="${escapeHTML(s.week)}: ${s.done} de ${s.total} (${s.rate}%)">
+            <i class="bar planned" style="height:${Math.round(s.total / max * CHART_BAR_MAX)}px"><b>${s.total}</b></i>
+            <i class="bar done" style="height:${Math.round(s.done / max * CHART_BAR_MAX)}px"><b>${s.done}</b></i>
+          </div>`).join("")}
+        <svg class="trend-svg" viewBox="0 0 100 ${CHART_AREA}" preserveAspectRatio="none" aria-hidden="true">${lines}</svg>
       </div>
-      <small>${escapeHTML(s.week)}</small>
-    </div>`).join("");
+      <div class="bar-labels">${series.map(s => `<small class="${s.week === currentWeek ? "current" : ""}">${escapeHTML(s.week)}</small>`).join("")}</div>
+    </div>
+    <p class="trend-note">${n < 2
+      ? "A tendência aparece a partir de 2 semanas com programação."
+      : trends.map(t => `<span><i class="trend-swatch ${t.key}"></i><span>Tendência ${t.label}: <b>${fmtSlope(t.trend.slope)}</b> item(ns)/semana</span></span>`).join("")}</p>`;
 }
 
 function renderProgressList(host, groups, emptyText = "Sem dados.") {
@@ -882,6 +932,46 @@ function renderDashboard() {
   renderBarChart($("dashboardWeekly"), weeklySeries(state.programs, withData.slice(-10)), week);
   renderProgressList($("dashboardTeams"), byTeam(programs), "Nenhuma equipe programada nesta semana.");
   renderProgressList($("dashboardActivities"), byActivity(programs), "Nenhuma atividade programada nesta semana.");
+
+  // Backlog: tudo que ficou pendente em semanas anteriores à selecionada.
+  const backlog = state.programs.filter(p => isBacklog(p, n));
+  setText("kpiBacklog", backlog.length);
+  setText("kpiBacklogText", backlog.length ? `pendentes antes de ${week}` : "nada pendente antes desta semana");
+  const origin = groupBy(backlog, p => p.week, w => w).sort((a, b) => weekToNumber(a.key) - weekToNumber(b.key));
+  const maxOrigin = Math.max(1, ...origin.map(g => g.total));
+  $("dashboardBacklog").innerHTML = origin.length ? origin.map(g => {
+    const teams = byTeam(backlog.filter(p => p.week === g.key)).map(t => `${t.label} ${t.total}`).join(" · ");
+    return `<div class="progress-row">
+      <strong class="mono">${escapeHTML(g.key)}</strong>
+      <span><b>${g.total}</b> item(ns) · ${n - weekToNumber(g.key)} sem. de atraso</span>
+      <div class="meter"><i style="width:${Math.round(g.total / maxOrigin * 100)}%;background:var(--danger)"></i></div>
+      <small class="muted sm" style="grid-column:1/-1">${escapeHTML(teams)}</small>
+    </div>`;
+  }).join("") : `<div class="empty inline"><span>Sem backlog até ${escapeHTML(week)}.</span></div>`;
+  $("dashboardBacklogBtn").disabled = !backlog.length;
+
+  // Apontamentos: registros de execução mais recentes.
+  const byId = new Map(state.programs.map(p => [p.id, p]));
+  const latest = [...state.executions.values()].flat()
+    .filter(e => byId.has(e.programacao_id))
+    .sort((a, b) => String(b.executado_em).localeCompare(String(a.executado_em)))
+    .slice(0, 8);
+  $("dashboardApontamentos").innerHTML = latest.map(e => {
+    const p = byId.get(e.programacao_id);
+    return `<div class="timeline-item"><div>
+      <strong>${escapeHTML(programTitle(p))} <span class="muted sm">· ${escapeHTML(activityById(p.activityId)?.name || "")} · ${escapeHTML(p.week)}</span></strong>
+      <small>${escapeHTML(fmtDateTime(e.executado_em))} · ${escapeHTML(executorName(e))} · ${escapeHTML(teamName(p.teamId) || "sem equipe")}</small>
+      ${e.observacao ? `<p>${escapeHTML(e.observacao)}</p>` : ""}
+    </div></div>`;
+  }).join("");
+}
+
+function updateBacklogBadge() {
+  const badge = $("navBacklogCount");
+  if (!badge) return;
+  const count = state.user?.role === "admin" ? state.programs.filter(p => isBacklog(p)).length : 0;
+  badge.textContent = count > 99 ? "99+" : String(count);
+  badge.classList.toggle("hidden", !count);
 }
 
 /* =========================================================
@@ -935,8 +1025,9 @@ function filteredAdminPrograms() {
     if (f.team && p.teamId !== f.team) return false;
     if (f.status === "done" && !isDone(p)) return false;
     if (f.status === "pending" && isDone(p)) return false;
+    if (f.status === "backlog" && !isBacklog(p)) return false;
     if (q) {
-      const hay = [p.week, teamName(p.teamId), p.note, personById(p.responsibleId)?.nome, ...cols.map(c => columnValue(p, c))].map(normalizeText).join(" ");
+      const hay = [p.week, teamName(p.teamId), p.note, ...cols.map(c => columnValue(p, c))].map(normalizeText).join(" ");
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -966,20 +1057,29 @@ function renderProgramacao() {
   setText("programTableTitle", activity ? activity.name : "Programações");
   setText("programTableMeta", activity ? `${rows.length} item(ns) · ${s.done} executado(s) · ${s.pending} pendente(s)` : "Cadastre uma atividade para começar.");
 
-  $("programTableHead").innerHTML = `<tr><th>Semana</th><th>Equipe</th>${cols.map(c => `<th>${escapeHTML(c.label)}</th>`).join("")}<th>Situação</th><th>Executado em</th><th></th></tr>`;
+  const sel = state.program.selected;
+  const allOnPage = pageRows.length > 0 && pageRows.every(p => sel.has(p.id));
+  $("programTableHead").innerHTML = `<tr><th class="check-col"><input type="checkbox" data-select-page ${allOnPage ? "checked" : ""} aria-label="Selecionar página"></th><th>Semana</th><th>Equipe</th>${cols.map(c => `<th>${escapeHTML(c.label)}</th>`).join("")}<th>Situação</th><th>Executado em</th><th></th></tr>`;
   $("programTableBody").innerHTML = pageRows.map(p => {
     const done = isDone(p);
     const last = executionsOf(p.id).at(-1);
-    return `<tr>
-      <td class="mono">${escapeHTML(p.week)}</td>
+    return `<tr class="${sel.has(p.id) ? "selected" : ""}">
+      <td class="check-col"><input type="checkbox" data-select-program="${escapeHTML(p.id)}" ${sel.has(p.id) ? "checked" : ""} aria-label="Selecionar"></td>
+      <td class="mono">${escapeHTML(p.week)}${reprogramChip(p)}</td>
       <td>${escapeHTML(dash(teamName(p.teamId)))}</td>
       ${cols.map(c => `<td title="${escapeHTML(columnValue(p, c))}">${escapeHTML(formatColumnValue(c, columnValue(p, c)))}</td>`).join("")}
-      <td><span class="status ${done ? "done" : "pending"}">${done ? "Executado" : "Pendente"}</span></td>
+      <td>${statusBadge(p)}</td>
       <td title="${last ? escapeHTML(`${fmtDateTime(last.executado_em)} · ${executorName(last)}`) : ""}">${last ? `${escapeHTML(fmtDate(toISODate(new Date(last.executado_em))))}${executionsOf(p.id).length > 1 ? ` <span class="chip">${executionsOf(p.id).length}x</span>` : ""}` : "—"}</td>
-      <td class="actions-cell"><button class="icon-btn sm danger" type="button" data-delete-program="${escapeHTML(p.id)}" title="Excluir"><svg class="icon"><use href="#i-trash"/></svg></button></td>
+      <td class="actions-cell"><span class="row-actions">
+        <button class="icon-btn sm" type="button" data-edit-program="${escapeHTML(p.id)}" title="Editar"><svg class="icon"><use href="#i-edit"/></svg></button>
+        <button class="icon-btn sm" type="button" data-move-program="${escapeHTML(p.id)}" title="Reprogramar" ${done ? "disabled" : ""}><svg class="icon"><use href="#i-forward"/></svg></button>
+        <button class="icon-btn sm danger" type="button" data-delete-program="${escapeHTML(p.id)}" title="Excluir"><svg class="icon"><use href="#i-trash"/></svg></button>
+      </span></td>
     </tr>`;
   }).join("");
   $("programEmpty").classList.toggle("hidden", rows.length > 0);
+  setText("programBulkCount", sel.size);
+  $("programBulk").classList.toggle("hidden", !sel.size);
 
   $("programPager").innerHTML = pages > 1 ? `
     <span>Página ${state.program.page + 1} de ${pages} · ${rows.length} itens</span>
@@ -1047,12 +1147,26 @@ function collectCustomInputs(host) {
   return { data };
 }
 
-function openProgramModal() {
+function openProgramModal(id = null) {
   if (!state.activities.length) return toast("Cadastre uma atividade primeiro.", "error");
-  fillSelect($("pfActivity"), state.activities.map(a => ({ value: a.id, label: a.name })), { value: state.program.activityId });
-  fillSelect($("pfWeek"), weekOptionsForForm(), { value: state.program.week || weekLabel(currentWeekNumber()) });
-  fillSelect($("pfTeam"), state.teams.filter(t => t.ativo).map(t => ({ value: t.id, label: t.nome })), { value: state.program.team, placeholder: "Selecione a equipe" });
-  renderCustomInputs($("pfCustom"), activityById($("pfActivity").value));
+  const editing = id ? state.programs.find(p => p.id === id) : null;
+  state.editingProgramId = editing?.id || null;
+  setText("programModalTitle", editing ? `Editar · ${programTitle(editing)}` : "Nova programação");
+  setText("programModalText", editing
+    ? `${activityById(editing.activityId)?.name || ""} · ${isDone(editing) ? "item já executado: a alteração não muda os registros de campo." : "altere a semana, a equipe ou os dados do item."}`
+    : "Lançamento manual de um item. Para cargas grandes, use a importação de Excel.");
+  setText("programFormSubmit", editing ? "Salvar alterações" : "Salvar programação");
+
+  fillSelect($("pfActivity"), state.activities.map(a => ({ value: a.id, label: a.name })), { value: editing?.activityId || state.program.activityId });
+  $("pfActivity").disabled = Boolean(editing);
+  const weeks = weekOptionsForForm();
+  if (editing && !weeks.some(w => w.value === editing.week)) weeks.unshift({ value: editing.week, label: editing.week });
+  fillSelect($("pfWeek"), sortWeeks(weeks.map(w => w.value)).map(w => ({ value: w, label: w })), { value: editing?.week || state.program.week || weekLabel(currentWeekNumber()) });
+  const teams = state.teams.filter(t => t.ativo || t.id === editing?.teamId);
+  fillSelect($("pfTeam"), teams.map(t => ({ value: t.id, label: t.nome })), { value: editing?.teamId || state.program.team, placeholder: "Selecione a equipe" });
+  const activity = activityById($("pfActivity").value);
+  const values = editing ? Object.fromEntries(activityColumns(activity).map(c => [c.key, columnValue(editing, c)])) : {};
+  renderCustomInputs($("pfCustom"), activity, values);
   setMessage("programFormMessage", "");
   openModal("programModal");
 }
@@ -1064,6 +1178,8 @@ async function saveProgramForm(event) {
   const team = teamById($("pfTeam").value);
   const { data: customData } = collectCustomInputs($("pfCustom"));
   if (!activity || !weekNum || !team) return setMessage("programFormMessage", "Escolha atividade, semana e equipe.");
+  const editing = state.programs.find(p => p.id === state.editingProgramId) || null;
+  if (editing) return updateProgram(event.submitter, editing, { weekNum, team, customData });
 
   await withButton(event.submitter, async () => {
     try {
@@ -1097,6 +1213,238 @@ async function saveProgramForm(event) {
       setMessage("programFormMessage", dbErrorMessage(error));
     }
   });
+}
+
+/* ---------- edição, reprogramação e backlog ---------- */
+
+function statusBadge(p) {
+  if (isDone(p)) return `<span class="status done">Executado</span>`;
+  if (isBacklog(p)) return `<span class="status late" title="Semana já passou e o item não foi executado">Backlog</span>`;
+  return `<span class="status pending">Pendente</span>`;
+}
+
+function reprogramChip(p) {
+  const prev = previousWeeks(p);
+  if (!prev.length) return "";
+  return `<span class="chip warn" title="Reprogramado de ${escapeHTML(prev.map(weekLabel).join(" → "))}">↻ ${escapeHTML(weekLabel(prev.at(-1)))}</span>`;
+}
+
+// Atualiza um item no banco e no estado local. Mudar a semana de um item pendente registra o histórico.
+function programUpdatePayload(p, { weekNum, teamId, customData, equipmentId }) {
+  const data = { ...p.customData, ...(customData || {}) };
+  if (weekNum !== p.weekNum && !isDone(p)) data[HISTORY_KEY] = [...previousWeeks(p), p.weekNum];
+  return {
+    semana: weekNum,
+    equipe_id: teamId,
+    dados_personalizados: data,
+    ...(equipmentId !== undefined ? { equipamento_id: equipmentId } : {}),
+    updated_at: new Date().toISOString()
+  };
+}
+
+async function updateProgram(button, p, { weekNum, team, customData }) {
+  await withButton(button, async () => {
+    try {
+      await withBusy(async () => {
+        let equipmentId;
+        const newTag = tagOf(customData);
+        if (normalizeText(newTag) !== normalizeText(tagOf(p.customData))) {
+          equipmentId = newTag ? (await resolveEquipment([customData])).get(newTag) || null : null;
+        }
+        const payload = programUpdatePayload(p, { weekNum, teamId: team.id, customData, equipmentId });
+        const { data, error } = await requireDb().from("tb_programacoes").update(payload).eq("id", p.id).select(PROGRAM_COLUMNS).single();
+        if (error) throw error;
+        Object.assign(p, mapProgram(data));
+      });
+      closeModal("programModal");
+      renderScreen();
+      updateBacklogBadge();
+      toast("Programação atualizada.");
+    } catch (error) {
+      setMessage("programFormMessage", error?.code === "23505"
+        ? `Esta TAG já está programada em ${weekLabel(weekNum)}. Escolha outra semana ou ajuste o item existente.`
+        : dbErrorMessage(error));
+    }
+  });
+}
+
+function suggestedTargetWeek(programs) {
+  const current = currentWeekNumber();
+  const latest = Math.max(...programs.map(p => p.weekNum));
+  return Math.max(current, latest) + 1;
+}
+
+function openReprogram(ids) {
+  const programs = ids.map(id => state.programs.find(p => p.id === id)).filter(Boolean);
+  const pending = programs.filter(p => !isDone(p));
+  if (!pending.length) return toast("Os itens selecionados já foram executados; não há o que reprogramar.", "error");
+  state.reprogramIds = pending.map(p => p.id);
+  const skipped = programs.length - pending.length;
+  setText("reprogramTitle", pending.length === 1 ? `Reprogramar ${programTitle(pending[0])}` : `Reprogramar ${pending.length} itens`);
+  const fromWeeks = sortWeeks(pending.map(p => p.week)).join(", ");
+  setText("reprogramText", `Origem: ${fromWeeks}.${skipped ? ` ${skipped} item(ns) já executado(s) ficam onde estão.` : ""} O histórico da semana original fica registrado no item.`);
+
+  const target = suggestedTargetWeek(pending);
+  const current = currentWeekNumber();
+  const options = [];
+  for (let w = current; w <= Math.max(target, current) + 6; w++) options.push({ value: String(w), label: `${weekLabel(w)}${w === current ? " · atual" : w === current + 1 ? " · próxima" : ""}` });
+  fillSelect($("reprogramWeek"), options, { value: String(target) });
+  fillSelect($("reprogramTeam"), state.teams.filter(t => t.ativo).map(t => ({ value: t.id, label: t.nome })), { value: "", placeholder: "Manter a equipe de cada item" });
+  setMessage("reprogramMessage", "");
+  renderReprogramWarning();
+  openModal("reprogramModal");
+}
+
+// O banco não aceita a mesma TAG duas vezes na mesma semana: detecta antes de gravar.
+function reprogramConflicts(targetWeek) {
+  const moving = new Set(state.reprogramIds);
+  const occupied = new Set(state.programs.filter(p => p.weekNum === targetWeek && !moving.has(p.id) && p.equipmentId).map(p => p.equipmentId));
+  const seen = new Set();
+  const conflicts = [];
+  state.reprogramIds.forEach(id => {
+    const p = state.programs.find(x => x.id === id);
+    if (!p?.equipmentId) return;
+    if (occupied.has(p.equipmentId) || seen.has(p.equipmentId)) conflicts.push(p);
+    seen.add(p.equipmentId);
+  });
+  return conflicts;
+}
+
+function renderReprogramWarning() {
+  const target = Number($("reprogramWeek").value);
+  const conflicts = reprogramConflicts(target);
+  const warn = $("reprogramWarn");
+  warn.classList.toggle("hidden", !conflicts.length);
+  warn.textContent = conflicts.length
+    ? `${conflicts.length} item(ns) já têm a mesma TAG programada em ${weekLabel(target)} e serão mantidos na semana atual: ${conflicts.slice(0, 8).map(programTitle).join(", ")}${conflicts.length > 8 ? "…" : ""}.`
+    : "";
+}
+
+async function confirmReprogram() {
+  const target = Number($("reprogramWeek").value);
+  const teamId = $("reprogramTeam").value || null;
+  const blocked = new Set(reprogramConflicts(target).map(p => p.id));
+  const programs = state.reprogramIds.map(id => state.programs.find(p => p.id === id)).filter(p => p && !blocked.has(p.id) && p.weekNum !== target);
+  if (!programs.length) return setMessage("reprogramMessage", "Nenhum item pode ser movido para esta semana.");
+
+  await withButton($("reprogramConfirm"), async () => {
+    const failed = [];
+    let moved = 0;
+    await withBusy(async () => {
+      const sb = requireDb();
+      for (const part of chunk(programs, 10)) {
+        const results = await Promise.all(part.map(async p => {
+          const payload = programUpdatePayload(p, { weekNum: target, teamId: teamId || p.teamId });
+          payload.status = "PROGRAMADO";
+          const { data, error } = await sb.from("tb_programacoes").update(payload).eq("id", p.id).select(PROGRAM_COLUMNS).single();
+          return { p, data, error };
+        }));
+        results.forEach(({ p, data, error }) => {
+          if (error) failed.push(`${programTitle(p)}: ${error.code === "23505" ? `TAG já programada em ${weekLabel(target)}` : dbErrorMessage(error)}`);
+          else { Object.assign(p, mapProgram(data)); moved++; }
+        });
+      }
+    });
+    state.program.selected.clear();
+    state.backlog.selected.clear();
+    updateBacklogBadge();
+    renderScreen();
+    if (failed.length) {
+      setMessage("reprogramMessage", `${moved} reprogramado(s). Não foi possível mover ${failed.length}: ${failed.slice(0, 5).join("; ")}${failed.length > 5 ? "…" : ""}`);
+    } else {
+      closeModal("reprogramModal");
+      toast(`${moved} item(ns) reprogramado(s) para ${weekLabel(target)}${blocked.size ? ` · ${blocked.size} mantido(s) por conflito de TAG` : ""}.`);
+    }
+  });
+}
+
+async function deleteSelectedPrograms() {
+  const ids = [...state.program.selected];
+  if (!ids.length) return;
+  const executed = ids.filter(id => executionsOf(id).length).length;
+  const ok = await confirmDialog({
+    title: `Excluir ${ids.length} programação(ões)?`,
+    text: executed ? `${executed} delas têm registro de execução e o banco pode recusar a exclusão desses itens.` : "Os itens serão removidos da programação.",
+    okLabel: "Excluir", danger: true
+  });
+  if (!ok) return;
+  const removed = new Set();
+  const failed = [];
+  await withBusy(async () => {
+    const sb = requireDb();
+    for (const part of chunk(ids, IN_CHUNK)) {
+      const { error } = await sb.from("tb_programacoes").delete().in("id", part);
+      if (!error) { part.forEach(id => removed.add(id)); continue; }
+      // Algum item do lote está vinculado (ex.: execução): tenta um a um para remover os demais.
+      for (const id of part) {
+        const { error: one } = await sb.from("tb_programacoes").delete().eq("id", id);
+        if (one) failed.push(id); else removed.add(id);
+      }
+    }
+  });
+  state.programs = state.programs.filter(p => !removed.has(p.id));
+  state.program.selected = new Set(failed);
+  updateBacklogBadge();
+  renderProgramacao();
+  toast(failed.length ? `${removed.size} excluída(s); ${failed.length} não puderam ser excluídas (possuem execuções).` : `${removed.size} programação(ões) excluída(s).`, failed.length ? "error" : "");
+}
+
+function filteredBacklog() {
+  const f = state.backlog;
+  const q = normalizeText(f.search);
+  return state.programs.filter(p => isBacklog(p)
+    && (!f.activity || p.activityId === f.activity)
+    && (!f.team || p.teamId === f.team)
+    && (!f.week || p.week === f.week)
+    && (!q || [programTitle(p), teamName(p.teamId), activityById(p.activityId)?.name, ...activityColumns(activityById(p.activityId)).map(c => columnValue(p, c))].map(normalizeText).join(" ").includes(q)))
+    .sort((a, b) => a.weekNum - b.weekNum || teamName(a.teamId).localeCompare(teamName(b.teamId), "pt-BR") || String(programTitle(a)).localeCompare(String(programTitle(b)), "pt-BR", { numeric: true }));
+}
+
+function renderBacklog() {
+  const current = currentWeekNumber();
+  const all = state.programs.filter(p => isBacklog(p));
+  setText("backlogCurrentWeek", weekLabel(current));
+  setText("backlogTotal", all.length);
+  const oldest = all.reduce((min, p) => Math.min(min, p.weekNum), Infinity);
+  setText("backlogOldest", Number.isFinite(oldest) ? weekLabel(oldest) : "—");
+  setText("backlogOldestText", Number.isFinite(oldest) ? `${current - oldest} semana(s) de atraso` : "semana de origem");
+  setText("backlogTeams", new Set(all.map(p => p.teamId)).size);
+  setText("backlogMoved", all.filter(p => previousWeeks(p).length).length);
+
+  const f = state.backlog;
+  fillSelect($("backlogActivity"), state.activities.filter(a => all.some(p => p.activityId === a.id)).map(a => ({ value: a.id, label: a.name })), { value: f.activity, placeholder: "Todas" });
+  fillSelect($("backlogTeam"), state.teams.filter(t => all.some(p => p.teamId === t.id)).map(t => ({ value: t.id, label: t.nome })), { value: f.team, placeholder: "Todas" });
+  fillSelect($("backlogWeek"), sortWeeks(all.map(p => p.week)).map(w => ({ value: w, label: w })), { value: f.week, placeholder: "Todas" });
+  Object.assign(f, { activity: $("backlogActivity").value, team: $("backlogTeam").value, week: $("backlogWeek").value });
+
+  const visibleIds = new Set(all.map(p => p.id));
+  f.selected = new Set([...f.selected].filter(id => visibleIds.has(id)));
+  const rows = filteredBacklog();
+  setText("backlogMeta", `${rows.length} de ${all.length} item(ns)`);
+  $("backlogBody").innerHTML = rows.slice(0, 500).map(p => {
+    const activity = activityById(p.activityId);
+    const details = activityColumns(activity).filter(c => c !== titleColumn(activity)).map(c => [c, columnValue(p, c)]).filter(([, v]) => v !== "").slice(0, 3);
+    const prev = previousWeeks(p);
+    return `<tr class="${f.selected.has(p.id) ? "selected" : ""}">
+      <td class="check-col"><input type="checkbox" data-select-backlog="${escapeHTML(p.id)}" ${f.selected.has(p.id) ? "checked" : ""} aria-label="Selecionar"></td>
+      <td class="mono">${escapeHTML(p.week)}</td>
+      <td><span class="chip danger">${current - p.weekNum} sem.</span></td>
+      <td>${escapeHTML(activity?.name || "—")}</td>
+      <td class="wrap"><strong class="mono">${escapeHTML(programTitle(p))}</strong><br><small class="muted">${details.map(([c, v]) => `${escapeHTML(c.label)} ${escapeHTML(formatColumnValue(c, v))}`).join(" · ")}</small></td>
+      <td>${escapeHTML(dash(teamName(p.teamId)))}</td>
+      <td>${prev.length ? `<span class="muted sm">${escapeHTML([...prev, p.weekNum].map(weekLabel).join(" → "))}</span>` : `<span class="muted sm">—</span>`}</td>
+      <td class="actions-cell"><span class="row-actions">
+        <button class="icon-btn sm" type="button" data-edit-program="${escapeHTML(p.id)}" title="Editar"><svg class="icon"><use href="#i-edit"/></svg></button>
+        <button class="icon-btn sm" type="button" data-move-program="${escapeHTML(p.id)}" title="Reprogramar"><svg class="icon"><use href="#i-forward"/></svg></button>
+      </span></td>
+    </tr>`;
+  }).join("");
+  $("backlogEmpty").classList.toggle("hidden", rows.length > 0);
+  const allSel = $("backlogSelectAll");
+  allSel.checked = rows.length > 0 && rows.every(p => f.selected.has(p.id));
+  allSel.indeterminate = !allSel.checked && rows.some(p => f.selected.has(p.id));
+  setText("backlogBulkCount", f.selected.size);
+  $("backlogBulk").classList.toggle("hidden", !f.selected.size);
 }
 
 /* ---------- equipamentos (TAG) ---------- */
@@ -1267,15 +1615,56 @@ function parseProgramRows(rows, activity) {
     records.push({ line, weekNum, week: weekLabel(weekNum), team, customData });
   });
 
+  // Cada TAG vira um equipamento; o banco não aceita o mesmo equipamento duas vezes na mesma semana.
+  const byKey = new Map();
+  records.forEach(r => {
+    const key = duplicateKey(r.weekNum, r.customData);
+    if (key) byKey.set(key, [...(byKey.get(key) || []), r]);
+  });
+  byKey.forEach(list => {
+    if (list.length < 2) return;
+    errors.push(`TAG “${tagOf(list[0].customData)}” repetida em ${list[0].week} nas linhas ${list.map(r => r.line).join(", ")}. Deixe uma linha por TAG em cada semana.`);
+  });
+
   if (!records.length && !errors.length) throw new Error("O arquivo não possui linhas de dados.");
   return { records, errors };
 }
 
-// Chave de duplicidade: mesma atividade, semana, equipe e TAG/título.
-function duplicateKey(activityId, weekNum, teamId, customData, activity) {
-  const col = titleColumn(activity);
-  const ident = col ? normalizeText(customData?.[col.key]) : "";
-  return ident ? `${activityId}|${weekNum}|${teamId}|${ident}` : null;
+// Identifica o item programado: mesma semana e mesma TAG (equipamento).
+function duplicateKey(weekNum, customData) {
+  const tag = normalizeText(tagOf(customData));
+  return tag ? `${weekNum}|${tag}` : null;
+}
+
+// Converte de volta para linha do banco (usado para restaurar itens em caso de falha).
+function programToRow(p) {
+  return {
+    id: p.id, equipamento_id: p.equipmentId, semana: p.weekNum, status: p.status, atividade_id: p.activityId,
+    data_programacao: p.date || null, equipe_id: p.teamId, responsavel_id: p.responsibleId || null, quantidade: 1,
+    observacao: p.note || null, dados_personalizados: p.customData, modo_importacao: p.mode || MODE_APPEND,
+    arquivo_importacao: p.file || null, usuario_importacao: p.importedBy || null, created_at: p.createdAt
+  };
+}
+
+const DB_COLUMN_LABELS = { equipamento_id: "TAG", semana: "SEMANA", atividade_id: "ATIVIDADE", equipe_id: "EQUIPE" };
+
+// Traduz a recusa de chave duplicada (23505) indicando quais linhas do arquivo causaram o conflito.
+function describeUniqueViolation(error, records, equipmentIds) {
+  const m = String(error?.details || "").match(/Key \(([^)]+)\)=\(([^)]*)\)/);
+  const constraint = String(error?.message || "").match(/constraint "([^"]+)"/)?.[1] || "";
+  if (!m) return `O banco recusou itens duplicados${constraint ? ` (restrição ${constraint})` : ""}. ${error?.details || error?.message || ""}`;
+  const cols = m[1].split(",").map(s => s.trim());
+  const vals = m[2].split(",").map(s => s.trim());
+  const tagById = new Map([...equipmentIds.entries()].map(([tag, id]) => [String(id), tag]));
+  const readable = cols.map((c, i) => `${DB_COLUMN_LABELS[c] || c} ${c === "equipamento_id" ? (tagById.get(vals[i]) || vals[i]) : c === "semana" ? weekLabel(vals[i]) : c === "equipe_id" ? (teamName(vals[i]) || vals[i]) : vals[i]}`);
+  const lines = records.filter(r => cols.every((c, i) =>
+    c === "equipamento_id" ? String(equipmentIds.get(tagOf(r.customData))) === vals[i]
+      : c === "semana" ? String(r.weekNum) === vals[i]
+      : c === "equipe_id" ? String(r.team.id) === vals[i]
+      : true)).map(r => r.line);
+  return `O banco não aceita duas programações com a mesma combinação ${cols.map(c => DB_COLUMN_LABELS[c] || c).join(" + ")} (restrição ${constraint}). `
+    + `Conflito: ${readable.join(", ")}${lines.length ? ` — linha(s) ${lines.join(", ")} do arquivo` : ""}. `
+    + "Esse item já está programado no banco ou repetido no arquivo.";
 }
 
 async function handleProgramFile(file) {
@@ -1284,9 +1673,11 @@ async function handleProgramFile(file) {
   if (!activity) return toast("Selecione uma atividade antes de importar.", "error");
   try {
     const rows = await readSheetRows(file);
+    // Recarrega do banco: a base pode ter sido alterada fora do app (ex.: limpeza via SQL).
+    await withBusy(loadAdminPrograms);
     const { records, errors } = parseProgramRows(rows, activity);
-    const existingKeys = new Set(state.programs.filter(p => p.activityId === activity.id).map(p => duplicateKey(p.activityId, p.weekNum, p.teamId, p.customData, activity)).filter(Boolean));
-    const duplicates = records.filter(r => existingKeys.has(duplicateKey(activity.id, r.weekNum, r.team.id, r.customData, activity))).length;
+    const existingKeys = new Set(state.programs.filter(p => p.activityId === activity.id).map(p => duplicateKey(p.weekNum, p.customData)).filter(Boolean));
+    const duplicates = records.filter(r => existingKeys.has(duplicateKey(r.weekNum, r.customData))).length;
     state.pendingImport = { file: file.name, activityId: activity.id, records, errors, duplicates };
     renderImportModal();
     openModal("importModal");
@@ -1313,7 +1704,7 @@ function renderImportModal() {
   const errorsBox = $("importErrors");
   errorsBox.classList.toggle("hidden", !pending.errors.length);
   if (pending.errors.length) {
-    errorsBox.innerHTML = `<strong>${pending.errors.length} linha(s) com erro. Corrija o arquivo e importe novamente — nenhuma linha será gravada enquanto houver erros.</strong><ul>${pending.errors.slice(0, 200).map(e => `<li>${escapeHTML(e)}</li>`).join("")}</ul>${pending.errors.length > 200 ? `<p>… e mais ${pending.errors.length - 200}.</p>` : ""}`;
+    errorsBox.innerHTML = `<strong>${pending.errors.length} problema(s) no arquivo. Corrija o arquivo e importe novamente — nenhuma linha será gravada enquanto houver erros.</strong><ul>${pending.errors.slice(0, 200).map(e => `<li>${escapeHTML(e)}</li>`).join("")}</ul>${pending.errors.length > 200 ? `<p>… e mais ${pending.errors.length - 200}.</p>` : ""}`;
   }
 
   const cols = templateColumns(activity);
@@ -1328,7 +1719,7 @@ function renderImportModal() {
   const replaceCount = replaceCandidates(pending).length;
   $("importReplaceHint").innerHTML = `Remove <b>${replaceCount}</b> item(ns) <b>pendente(s)</b> de ${escapeHTML(activity?.name || "")} em ${escapeHTML(weeks.join(", ") || "—")} e grava o arquivo. Itens já executados são mantidos.`;
   $("importDupWrap").classList.toggle("hidden", !pending.duplicates);
-  setText("importDupText", `Ignorar ${pending.duplicates} linha(s) que já existem (mesma semana, equipe e ${titleColumn(activity)?.label || "identificação"})`);
+  setText("importDupText", `Ignorar ${pending.duplicates} linha(s) que já estão programadas (mesma semana e TAG)`);
   setMessage("importMessage", "");
   $("importConfirm").disabled = Boolean(pending.errors.length) || !pending.records.length;
   $("importModes").classList.toggle("hidden", Boolean(pending.errors.length));
@@ -1347,16 +1738,17 @@ async function confirmImport() {
     if (!ok) return;
   }
 
+  let records = pending.records;
+  let equipmentIds = new Map();
   await withButton($("importConfirm"), async () => {
     try {
       const inserted = await withBusy(async () => {
         const sb = requireDb();
-        let records = pending.records;
         if (skipDuplicates) {
-          const existing = new Set(state.programs.filter(p => p.activityId === activity.id).map(p => duplicateKey(p.activityId, p.weekNum, p.teamId, p.customData, activity)).filter(Boolean));
-          records = records.filter(r => !existing.has(duplicateKey(activity.id, r.weekNum, r.team.id, r.customData, activity)));
+          const existing = new Set(state.programs.filter(p => p.activityId === activity.id).map(p => duplicateKey(p.weekNum, p.customData)).filter(Boolean));
+          records = records.filter(r => !existing.has(duplicateKey(r.weekNum, r.customData)));
         }
-        const equipmentIds = await resolveEquipment(records.map(r => r.customData));
+        equipmentIds = await resolveEquipment(records.map(r => r.customData));
         const payloads = records.map(r => ({
           equipamento_id: equipmentIds.get(tagOf(r.customData)) || null,
           semana: r.weekNum,
@@ -1372,19 +1764,27 @@ async function confirmImport() {
           arquivo_importacao: pending.file,
           usuario_importacao: state.user.authUserId
         }));
+        // Remove os pendentes substituídos ANTES de gravar: a nova carga normalmente traz as mesmas
+        // TAGs/semanas, e o banco recusaria duplicidade. Se qualquer etapa falhar, tudo é desfeito.
+        const removed = state.programs.filter(p => toReplace.includes(p.id));
         const created = [];
-        // Insere primeiro; só remove os itens substituídos depois que a nova carga foi gravada.
-        for (const part of chunk(payloads, 500)) {
-          const { data, error } = await sb.from("tb_programacoes").insert(part).select(PROGRAM_COLUMNS);
-          if (error) throw error;
-          created.push(...(data || []).map(mapProgram));
+        try {
+          for (const part of chunk(toReplace, IN_CHUNK)) {
+            const { error } = await sb.from("tb_programacoes").delete().in("id", part);
+            if (error) throw error;
+          }
+          for (const part of chunk(payloads, 500)) {
+            const { data, error } = await sb.from("tb_programacoes").insert(part).select(PROGRAM_COLUMNS);
+            if (error) throw error;
+            created.push(...(data || []).map(mapProgram));
+          }
+        } catch (error) {
+          const rollbackFailed = await rollbackImport(created, removed);
+          if (rollbackFailed) error.rollbackFailed = rollbackFailed;
+          throw error;
         }
-        for (const part of chunk(toReplace, IN_CHUNK)) {
-          const { error } = await sb.from("tb_programacoes").delete().in("id", part);
-          if (error) throw new Error(`A nova carga foi gravada, mas não foi possível remover os itens antigos: ${dbErrorMessage(error)}`);
-        }
-        const removed = new Set(toReplace);
-        state.programs = [...state.programs.filter(p => !removed.has(p.id)), ...created];
+        const removedIds = new Set(toReplace);
+        state.programs = [...state.programs.filter(p => !removedIds.has(p.id)), ...created];
         return { created: created.length, skipped: pending.records.length - records.length };
       });
       closeModal("importModal");
@@ -1395,9 +1795,30 @@ async function confirmImport() {
       if (inserted.skipped) parts.push(`${inserted.skipped} duplicado(s) ignorado(s)`);
       toast(parts.join(" · ") + ".");
     } catch (error) {
-      setMessage("importMessage", dbErrorMessage(error, "Não foi possível gravar a importação."));
+      console.warn("Importação recusada:", error?.code, error?.message, error?.details);
+      const base = error?.code === "23505"
+        ? describeUniqueViolation(error, records, equipmentIds)
+        : dbErrorMessage(error, "Não foi possível gravar a importação.");
+      setMessage("importMessage", error?.rollbackFailed
+        ? `${base} ATENÇÃO: não foi possível desfazer totalmente (${error.rollbackFailed}). Clique em Atualizar e confira a programação.`
+        : `${base} Nenhuma programação foi alterada.`);
     }
   });
+}
+
+// Desfaz uma importação que falhou no meio: apaga o que foi gravado e restaura os itens substituídos.
+async function rollbackImport(created, removed) {
+  const sb = requireDb();
+  const problems = [];
+  for (const part of chunk(created.map(p => p.id), IN_CHUNK)) {
+    const { error } = await sb.from("tb_programacoes").delete().in("id", part);
+    if (error) problems.push(`remover itens novos: ${error.message}`);
+  }
+  for (const part of chunk(removed.map(programToRow), 500)) {
+    const { error } = await sb.from("tb_programacoes").upsert(part, { onConflict: "id", ignoreDuplicates: true });
+    if (error) problems.push(`restaurar itens substituídos: ${error.message}`);
+  }
+  return problems.join("; ");
 }
 
 function exportProgramList() {
@@ -2082,7 +2503,7 @@ function renderField() {
     return `<article class="task ${done ? "done" : ""} ${p.id === f.activeId ? "active" : ""}" data-task="${escapeHTML(p.id)}">
       <label class="check" title="${done ? "Já executada" : "Selecionar"}"><input type="checkbox" data-select="${escapeHTML(p.id)}" ${f.selected.has(p.id) ? "checked" : ""} ${done ? "disabled" : ""} aria-label="Selecionar"></label>
       <div>
-        <div class="task-head"><span class="chip primary">${escapeHTML(activity?.name || "")}</span></div>
+        <div class="task-head"><span class="chip primary">${escapeHTML(activity?.name || "")}</span>${previousWeeks(p).length ? `<span class="chip warn" title="Reprogramado de ${escapeHTML(previousWeeks(p).map(weekLabel).join(", "))}">Reprogramado de ${escapeHTML(weekLabel(previousWeeks(p).at(-1)))}</span>` : ""}</div>
         <div class="task-title">${escapeHTML(programTitle(p))}</div>
         <div class="task-fields">${fields.map(([c, v]) => `<span>${escapeHTML(c.label)} <b>${escapeHTML(formatColumnValue(c, v))}</b></span>`).join("")}</div>
       </div>
@@ -2506,7 +2927,7 @@ function bindEvents() {
   $("dashboardJpeg").addEventListener("click", exportDashboardJPEG);
 
   // Programação
-  $("programActivity").addEventListener("change", e => { Object.assign(state.program, { activityId: e.target.value, week: "", page: 0 }); renderProgramacao(); });
+  $("programActivity").addEventListener("change", e => { Object.assign(state.program, { activityId: e.target.value, week: "", page: 0 }); state.program.selected.clear(); renderProgramacao(); });
   $("programWeekFilter").addEventListener("change", e => { state.program.week = e.target.value; state.program.page = 0; renderProgramacao(); });
   $("programTeamFilter").addEventListener("change", e => { state.program.team = e.target.value; state.program.page = 0; renderProgramacao(); });
   $("programStatusFilter").addEventListener("change", e => { state.program.status = e.target.value; state.program.page = 0; renderProgramacao(); });
@@ -2515,10 +2936,54 @@ function bindEvents() {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => { state.program.search = e.target.value; state.program.page = 0; renderProgramacao(); }, 200);
   });
-  $("programTableBody").addEventListener("click", e => {
+  // Ações por linha (Programação e Backlog usam os mesmos atributos).
+  const rowActions = e => {
     const del = e.target.closest("[data-delete-program]");
+    const edit = e.target.closest("[data-edit-program]");
+    const move = e.target.closest("[data-move-program]");
     if (del) deleteProgram(del.dataset.deleteProgram);
+    if (edit) openProgramModal(edit.dataset.editProgram);
+    if (move) openReprogram([move.dataset.moveProgram]);
+  };
+  $("programTableBody").addEventListener("click", rowActions);
+  $("backlogBody").addEventListener("click", rowActions);
+  $("programTableBody").addEventListener("change", e => {
+    const box = e.target.closest("[data-select-program]");
+    if (!box) return;
+    box.checked ? state.program.selected.add(box.dataset.selectProgram) : state.program.selected.delete(box.dataset.selectProgram);
+    renderProgramacao();
   });
+  $("programTableHead").addEventListener("change", e => {
+    if (!e.target.matches("[data-select-page]")) return;
+    const ids = [...$("programTableBody").querySelectorAll("[data-select-program]")].map(b => b.dataset.selectProgram);
+    ids.forEach(id => e.target.checked ? state.program.selected.add(id) : state.program.selected.delete(id));
+    renderProgramacao();
+  });
+  $("programBulkClear").addEventListener("click", () => { state.program.selected.clear(); renderProgramacao(); });
+  $("programBulkMove").addEventListener("click", () => openReprogram([...state.program.selected]));
+  $("programBulkDelete").addEventListener("click", deleteSelectedPrograms);
+
+  // Backlog
+  $("backlogBody").addEventListener("change", e => {
+    const box = e.target.closest("[data-select-backlog]");
+    if (!box) return;
+    box.checked ? state.backlog.selected.add(box.dataset.selectBacklog) : state.backlog.selected.delete(box.dataset.selectBacklog);
+    renderBacklog();
+  });
+  $("backlogSelectAll").addEventListener("change", e => {
+    filteredBacklog().forEach(p => e.target.checked ? state.backlog.selected.add(p.id) : state.backlog.selected.delete(p.id));
+    renderBacklog();
+  });
+  [["backlogActivity", "activity"], ["backlogTeam", "team"], ["backlogWeek", "week"]].forEach(([id, key]) =>
+    $(id).addEventListener("change", e => { state.backlog[key] = e.target.value; renderBacklog(); }));
+  let backlogTimer;
+  $("backlogSearch").addEventListener("input", e => { clearTimeout(backlogTimer); backlogTimer = setTimeout(() => { state.backlog.search = e.target.value; renderBacklog(); }, 200); });
+  $("backlogBulkClear").addEventListener("click", () => { state.backlog.selected.clear(); renderBacklog(); });
+  $("backlogBulkMove").addEventListener("click", () => openReprogram([...state.backlog.selected]));
+  $("reprogramWeek").addEventListener("change", renderReprogramWarning);
+  $("reprogramConfirm").addEventListener("click", confirmReprogram);
+  $("kpiBacklogCard").addEventListener("click", () => goTo("backlog"));
+  $("dashboardBacklogBtn").addEventListener("click", () => goTo("backlog"));
   $("programPager").addEventListener("click", e => {
     const b = e.target.closest("[data-page]");
     if (!b) return;
@@ -2534,7 +2999,7 @@ function bindEvents() {
   });
   $("programFileInput").addEventListener("change", e => handleProgramFile(e.target.files?.[0]));
   $("programExportBtn").addEventListener("click", exportProgramList);
-  $("programNewBtn").addEventListener("click", openProgramModal);
+  $("programNewBtn").addEventListener("click", () => openProgramModal());
   $("pfActivity").addEventListener("change", e => renderCustomInputs($("pfCustom"), activityById(e.target.value)));
   $("programForm").addEventListener("submit", saveProgramForm);
   $("importConfirm").addEventListener("click", confirmImport);

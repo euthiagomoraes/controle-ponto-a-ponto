@@ -14,7 +14,9 @@ O planejamento importa a programação da semana por Excel; a equipe de campo v�
    - **Nova programação**: substitui os itens **pendentes** daquela atividade nas semanas do arquivo; itens executados são preservados.
 4. **Campo** — a pessoa entra com o código, vê a semana atual da sua equipe, registra a execução com a **data em que foi feita** (individual ou em lote, com observação) e preenche as colunas liberadas (ex.: colunas do tipo Data marcadas como "Equipe de campo pode alterar"). O login de campo continua ativo ao atualizar a página, até clicar em Sair.
    O planejamento vê a situação e a data de execução de cada item na tela **Programação**.
-5. **Dashboard / Relatórios / Importações** — previsto x realizado por semana, equipe e atividade; exportação PDF/JPEG; histórico das cargas calculado a partir do banco.
+5. **Editar e reprogramar** — na Programação, cada item tem **Editar** (semana, equipe e colunas da atividade) e **Reprogramar**; marcando várias linhas aparece a barra de ações em lote (reprogramar ou excluir). Só itens pendentes podem ser reprogramados. O app avisa e mantém na semana original os itens cuja TAG já está programada na semana de destino. O histórico de semanas fica no próprio item (`dados_personalizados._semanas_anteriores`) e aparece como "↻ W136" na tabela e "Reprogramado de W136" no campo.
+6. **Backlog** — itens não executados de semanas anteriores à atual. A tela Backlog lista, filtra e reprograma em lote (sugere a próxima semana). O menu mostra a quantidade.
+7. **Dashboard / Relatórios / Importações** — previsto x realizado, **backlog** (KPI e quantidade por semana de origem) e **últimos apontamentos** (execuções registradas pelo campo); exportação PDF/JPEG; histórico das cargas calculado a partir do banco. Detalhe: previsto x realizado por semana, equipe e atividade; exportação PDF/JPEG; histórico das cargas calculado a partir do banco.
 
 ### Template Excel
 
