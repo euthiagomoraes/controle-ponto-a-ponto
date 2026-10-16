@@ -7,7 +7,7 @@ O planejamento importa a programação da semana por Excel; a equipe de campo v�
 ## Fluxo
 
 1. **Atividades** — crie a atividade e suas colunas (tipo, obrigatória, editável em campo, opções de lista). Arraste para ordenar.
-2. **Equipes e acessos** — cadastre equipes, pessoas (com código de acesso de 6 dígitos) e semanas.
+2. **Equipes e acessos** — cadastre equipes e pessoas (com código de acesso de 6 dígitos). Semanas não são cadastradas: vêm da coluna SEMANA do Excel.
 3. **Programação** — escolha a atividade, baixe o **Template Excel**, preencha e use **Importar Excel**.
    - O arquivo é validado inteiro antes de gravar: todos os erros aparecem por linha e nada é gravado enquanto houver erro.
    - **Incluir na programação**: acrescenta as linhas (com opção de ignorar linhas que já existem: mesma semana, equipe e TAG).
@@ -20,7 +20,7 @@ O planejamento importa a programação da semana por Excel; a equipe de campo v�
 
 Colunas fixas: `SEMANA *`, `ATIVIDADE *`, `EQUIPE *`, `DATA PREVISTA`, `RESPONSÁVEL`, `OBSERVAÇÃO`, mais as colunas da atividade. A aba **Leia-me** traz os tipos, as opções aceitas e as equipes cadastradas.
 
-- Semana: `W137` ou `137`.
+- Semana: `W137` ou só `137` (também aceita `w137`, `W-137`, `Semana 137`); é sempre gravada como W137.
 - Equipe: nome cadastrado (aceita `A` para `Equipe A` quando não houver ambiguidade).
 - Datas: `DD/MM/AAAA` ou data nativa do Excel.
 - Listas: o valor precisa estar entre as opções (maiúsculas/acentos são normalizados). Sim/Não aceita `SIM`, `S`, `X`, `NÃO`, `N`.
@@ -39,7 +39,7 @@ Bibliotecas via CDN com versão fixa: supabase-js 2.45.4, xlsx-js-style 1.2.0, j
 
 ## Banco de dados (Supabase)
 
-Tabelas usadas: `tb_atividades`, `tb_atividade_colunas`, `tb_programacoes` (colunas da atividade em `dados_personalizados`), `tb_execucoes`, `tb_equipamentos`, `tb_equipes`, `tb_pessoas`, `tb_semanas`.
+Tabelas usadas: `tb_atividades`, `tb_atividade_colunas`, `tb_programacoes` (colunas da atividade em `dados_personalizados`), `tb_execucoes`, `tb_equipamentos`, `tb_equipes`, `tb_pessoas`. (`tb_semanas` não é mais usada.)
 
 Migrations, em ordem:
 

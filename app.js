@@ -85,8 +85,6 @@ const state = {
   activities: [],            // [{ id, name, description, columns: [...] }]
   teams: [],
   people: [],
-  weeks: [],                 // ["W137", ...] cadastradas em tb_semanas
-  weekRows: [],
   programs: [],              // admin: toda a programação
   executions: new Map(),     // programacao_id -> [execuções]
   equipment: new Map(),      // id -> equipamento
@@ -160,9 +158,15 @@ function currentWeekNumber() {
   return WEEK_ANCHOR_NUMBER + Math.floor(Math.round((start - WEEK_ANCHOR) / 86400000) / 7);
 }
 
+// Aceita W137, w137, W 137, W-137, Semana 137, 137 e o número 137 do Excel. Tudo vira 137 (exibido como W137).
 function weekToNumber(value) {
-  const m = String(value ?? "").trim().toUpperCase().match(/^W?\s*(\d+)$/);
-  return m ? Number(m[1]) : null;
+  if (typeof value === "number") return Number.isInteger(value) && value > 0 ? value : null;
+  const s = normalizeText(value).toUpperCase()
+    .replace(/^(SEMANA|SEM|WEEK|WK)\.?/, "W")
+    .replace(/[\s_-]+/g, "")
+    .replace(/[.,]0+$/, "");
+  const m = s.match(/^W?(\d{1,4})$/);
+  return m && Number(m[1]) > 0 ? Number(m[1]) : null;
 }
 
 const weekLabel = n => `W${n}`;
@@ -678,13 +682,6 @@ async function loadPeople() {
   state.people = data.map(p => ({ ...p, ativo: p.ativo !== false }));
 }
 
-async function loadWeeks() {
-  const { data, error } = await requireDb().from("tb_semanas").select("id,semana,ativa").order("semana");
-  if (error) { console.warn("tb_semanas indisponível:", error.message); state.weekRows = []; state.weeks = []; return; }
-  state.weekRows = data || [];
-  state.weeks = sortWeeks(state.weekRows.filter(w => w.ativa !== false).map(w => w.semana));
-}
-
 const PROGRAM_COLUMNS = "id,equipamento_id,semana,status,atividade_id,data_programacao,equipe_id,responsavel_id,quantidade,observacao,dados_personalizados,modo_importacao,arquivo_importacao,usuario_importacao,created_at";
 
 function mapProgram(row) {
@@ -738,7 +735,7 @@ async function syncAll() {
       if (state.user.role === "admin") {
         await loadActivities();
         if (!state.activities.length) { await seedDefaultActivities(); await loadActivities(); }
-        await Promise.all([loadTeams(), loadPeople(), loadWeeks()]);
+        await Promise.all([loadTeams(), loadPeople()]);
         await loadAdminPrograms();
       } else {
         if (state.field.weekNum === null) state.field.weekNum = currentWeekNumber();
@@ -831,7 +828,8 @@ const byActivity = programs => groupBy(programs, p => p.activityId, id => activi
 const byTeam = programs => groupBy(programs, p => p.teamId, id => teamName(id) || "Sem equipe");
 
 function allWeeks() {
-  return sortWeeks([...state.weeks, ...state.programs.map(p => p.week), weekLabel(currentWeekNumber())]);
+  // As semanas vêm da própria programação importada (coluna SEMANA do Excel).
+  return sortWeeks([...state.programs.map(p => p.week), weekLabel(currentWeekNumber())]);
 }
 
 function renderBarChart(host, series, currentWeek) {
@@ -1034,7 +1032,7 @@ async function deleteProgram(id) {
 function weekOptionsForForm() {
   const current = currentWeekNumber();
   const near = [current - 1, current, current + 1, current + 2].map(weekLabel);
-  return sortWeeks([...state.weeks, ...near]).map(w => ({ value: w, label: w }));
+  return sortWeeks([...state.programs.map(p => p.week), ...near]).map(w => ({ value: w, label: w }));
 }
 
 function renderCustomInputs(host, activity, values = {}, { prefix = "pf", editableOnly = false } = {}) {
@@ -1201,7 +1199,7 @@ function downloadTemplate(activity) {
       [],
       ["Como preencher"],
       ["1", "Não altere nem renomeie os cabeçalhos. Colunas com * são obrigatórias."],
-      ["2", "SEMANA no formato W137 (ou apenas 137)."],
+      ["2", "SEMANA: escreva a semana em cada linha, como W137 ou apenas 137 (o sistema grava como W137). Não é preciso cadastrar a semana antes."],
       ["3", "EQUIPE deve ser o nome de uma equipe cadastrada (lista abaixo)."],
       ["4", "Datas em DD/MM/AAAA ou como data do Excel."],
       ["5", "Cada linha vira um item programado para a equipe de campo."],
@@ -1264,7 +1262,7 @@ function parseProgramRows(rows, activity) {
     const rowErrors = [];
 
     const weekNum = weekToNumber(cellText(at(row, fixed.week)));
-    if (!weekNum) rowErrors.push("SEMANA inválida (use W137)");
+    if (!weekNum) rowErrors.push(`SEMANA “${cellText(at(row, fixed.week)) || "vazia"}” inválida (use W137 ou 137)`);
 
     const activityName = cellText(at(row, fixed.activity));
     if (activityName && makeKey(activityName) !== makeKey(activity.name)) rowErrors.push(`ATIVIDADE “${activityName}” diferente de “${activity.name}”`);
@@ -1893,10 +1891,6 @@ function renderEquipes() {
       <button class="btn ghost sm" type="button" data-toggle-team="${escapeHTML(t.id)}">${t.ativo ? "Desativar" : "Reativar"}</button>
     </div>`;
   }).join("");
-
-  setText("weekCount", state.weeks.length);
-  const current = weekLabel(currentWeekNumber());
-  $("weekList").innerHTML = state.weeks.slice().reverse().map(w => `<span class="chip ${w === current ? "primary" : ""}">${escapeHTML(w)}</span>`).join("") || `<span class="muted sm">Nenhuma semana cadastrada.</span>`;
 }
 
 async function saveTeam(event) {
@@ -1936,27 +1930,6 @@ async function toggleTeam(id) {
   }
 }
 
-async function saveWeek(event) {
-  event.preventDefault();
-  const n = Number($("weekNumber").value);
-  if (!Number.isInteger(n) || n < 1) return setMessage("weekMessage", "Informe um número de semana válido.");
-  const semana = weekLabel(n);
-  if (state.weeks.includes(semana)) return setMessage("weekMessage", `${semana} já está cadastrada.`);
-  await withButton(event.submitter, async () => {
-    try {
-      await withBusy(async () => {
-        const { error } = await requireDb().from("tb_semanas").insert({ semana, ativa: true });
-        if (error) throw error;
-      });
-      state.weeks = sortWeeks([...state.weeks, semana]);
-      $("weekForm").reset();
-      setMessage("weekMessage", `${semana} criada.`, true);
-      renderEquipes();
-    } catch (error) {
-      setMessage("weekMessage", dbErrorMessage(error));
-    }
-  });
-}
 
 function randomAccessCode() {
   const used = new Set(state.people.map(p => String(p.cracha)));
@@ -2659,7 +2632,6 @@ function bindEvents() {
   $("personForm").addEventListener("submit", savePerson);
   $("psGenerate").addEventListener("click", () => { $("psCode").value = randomAccessCode(); });
   $("teamForm").addEventListener("submit", saveTeam);
-  $("weekForm").addEventListener("submit", saveWeek);
 
   // Configurações
   $("settingsLogo").addEventListener("change", async e => {
