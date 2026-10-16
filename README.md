@@ -6,7 +6,7 @@ O planejamento importa a programação da semana por Excel; a equipe de campo v�
 
 ## Fluxo
 
-1. **Atividades** — crie a atividade e suas colunas (tipo, obrigatória, editável em campo, opções de lista). Arraste para ordenar.
+1. **Atividades** — crie a atividade e suas colunas (tipo, editável em campo, opções de lista). Arraste para ordenar. Nenhuma coluna é obrigatória.
 2. **Equipes e acessos** — cadastre equipes e pessoas (com código de acesso de 6 dígitos). Semanas não são cadastradas: vêm da coluna SEMANA do Excel.
 3. **Programação** — escolha a atividade, baixe o **Template Excel**, preencha e use **Importar Excel**.
    - O arquivo é validado inteiro antes de gravar: todos os erros aparecem por linha e nada é gravado enquanto houver erro.
@@ -18,7 +18,9 @@ O planejamento importa a programação da semana por Excel; a equipe de campo v�
 
 ### Template Excel
 
-Colunas fixas: `SEMANA *`, `ATIVIDADE *`, `EQUIPE *`, `DATA PREVISTA`, `RESPONSÁVEL`, `OBSERVAÇÃO`, mais as colunas da atividade. A aba **Leia-me** traz os tipos, as opções aceitas e as equipes cadastradas.
+O template tem as colunas padrão `SEMANA` e `EQUIPE` e, em seguida, exatamente as colunas criadas na atividade, na mesma ordem. A atividade é a escolhida na tela de Programação; colunas extras no arquivo são ignoradas. A aba **Leia-me** traz os tipos, as opções aceitas e as equipes cadastradas.
+
+As colunas da atividade podem ficar em branco. SEMANA e EQUIPE precisam estar preenchidas em cada linha, porque definem quando e para qual equipe o item aparece.
 
 - Semana: `W137` ou só `137` (também aceita `w137`, `W-137`, `Semana 137`); é sempre gravada como W137.
 - Equipe: nome cadastrado (aceita `A` para `Equipe A` quando não houver ambiguidade).

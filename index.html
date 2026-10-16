@@ -333,7 +333,7 @@
 
             <div class="mini-stats">
               <div><span>Colunas</span><strong id="activityColCount">0</strong></div>
-              <div><span>Obrigatórias</span><strong id="activityReqCount">0</strong></div>
+              
               <div><span>Editáveis em campo</span><strong id="activityEditCount">0</strong></div>
               <div><span>Programações</span><strong id="activityProgCount">0</strong></div>
             </div>
@@ -351,8 +351,8 @@
             </div>
 
             <div class="fixed-columns">
-              <span class="muted sm">Colunas fixas do template:</span>
-              <span class="chip">SEMANA *</span><span class="chip">ATIVIDADE *</span><span class="chip">EQUIPE *</span><span class="chip">DATA PREVISTA</span><span class="chip">RESPONSÁVEL</span><span class="chip">OBSERVAÇÃO</span>
+              <span class="muted sm">Colunas padrão do template (antes das colunas abaixo):</span>
+              <span class="chip">SEMANA</span><span class="chip">EQUIPE</span>
             </div>
 
             <div id="columnList" class="column-list"></div>
@@ -590,14 +590,11 @@
     <p class="muted sm">Lançamento manual de um item. Para cargas grandes, use a importação de Excel.</p>
     <form id="programForm" novalidate>
       <div class="form-grid">
-        <label class="field">Atividade *<select id="pfActivity" required></select></label>
-        <label class="field">Semana *<select id="pfWeek" required></select></label>
-        <label class="field">Equipe *<select id="pfTeam" required></select></label>
-        <label class="field">Data prevista<input id="pfDate" type="date"></label>
-        <label class="field">Responsável<select id="pfResponsible"></select></label>
+        <label class="field">Atividade<select id="pfActivity"></select></label>
+        <label class="field">Semana<select id="pfWeek"></select></label>
+        <label class="field">Equipe<select id="pfTeam"></select></label>
       </div>
       <div id="pfCustom" class="form-grid"></div>
-      <label class="field">Observação<textarea id="pfNote" rows="2" maxlength="500"></textarea></label>
       <p id="programFormMessage" class="form-message" role="alert"></p>
       <div class="modal-actions">
         <button class="btn ghost" type="button" data-close-modal>Cancelar</button>
@@ -678,7 +675,6 @@
       </div>
       <label id="cfOptionsWrap" class="field hidden">Opções (separadas por vírgula)<input id="cfOptions" maxlength="500" placeholder="APROVADO, REPROVADO, PENDENTE"></label>
       <div class="check-row">
-        <label class="check"><input id="cfRequired" type="checkbox"><span>Obrigatória na importação</span></label>
         <label class="check"><input id="cfEditable" type="checkbox"><span>Equipe de campo pode alterar</span></label>
       </div>
       <p id="columnFormMessage" class="form-message" role="alert"></p>

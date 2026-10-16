@@ -38,18 +38,15 @@ const DISCIPLINE_LABELS = {
 
 const COLUMN_TYPES = { text: "Texto", number: "Número", date: "Data", select: "Lista", boolean: "Sim/Não" };
 
-// Colunas fixas de toda programação (sempre presentes no template).
+// Colunas padrão de toda programação. O restante do template é exatamente
+// a lista de colunas criada na atividade, na mesma ordem.
 const FIXED_COLUMNS = [
-  { key: "week", label: "SEMANA", required: true, aliases: ["semana", "week", "sem"] },
-  { key: "activity", label: "ATIVIDADE", required: true, aliases: ["atividade", "activity", "modulo"] },
-  { key: "team", label: "EQUIPE", required: true, aliases: ["equipe", "team"] },
-  { key: "date", label: "DATA PREVISTA", aliases: ["data_prevista", "data_programacao", "data_programada"] },
-  { key: "responsible", label: "RESPONSÁVEL", aliases: ["responsavel", "responsible"] },
-  { key: "note", label: "OBSERVAÇÃO", aliases: ["observacao", "obs", "observacoes", "note"] }
+  { key: "week", label: "SEMANA", aliases: ["semana", "week", "sem"] },
+  { key: "team", label: "EQUIPE", aliases: ["equipe", "team"] }
 ];
 
-// Chaves de colunas antigas que duplicam campos fixos ou são derivadas da execução.
-const RESERVED_COLUMN_KEYS = new Set(["week", "semana", "activity", "atividade", "team", "equipe", "logs"]);
+// Chaves de colunas antigas que duplicam as colunas padrão ou são derivadas da execução.
+const RESERVED_COLUMN_KEYS = new Set(["week", "semana", "team", "equipe", "logs"]);
 
 // Estrutura inicial, criada no banco apenas se não houver nenhuma atividade.
 const DEFAULT_ACTIVITIES = [
@@ -896,20 +893,11 @@ function activityColumns(activity) {
   return (activity?.columns || []).filter(c => !RESERVED_COLUMN_KEYS.has(c.key));
 }
 
-// Colunas fixas que não colidem com colunas da atividade de mesmo nome.
-function fixedColumnsFor(activity) {
-  const used = new Set(activityColumns(activity).flatMap(c => [makeKey(c.label), c.key]));
-  return FIXED_COLUMNS.filter(f => f.required || !used.has(makeKey(f.label)));
-}
-
+// SEMANA, EQUIPE e depois as colunas da atividade, na ordem configurada.
 function templateColumns(activity) {
-  const fixed = fixedColumnsFor(activity);
-  const head = fixed.filter(f => ["week", "activity", "team"].includes(f.key));
-  const tail = fixed.filter(f => !["week", "activity", "team"].includes(f.key));
   return [
-    ...head.map(f => ({ ...f, fixed: true })),
-    ...activityColumns(activity).map(c => ({ ...c, fixed: false })),
-    ...tail.map(f => ({ ...f, fixed: true }))
+    ...FIXED_COLUMNS.map(f => ({ ...f, fixed: true })),
+    ...activityColumns(activity).map(c => ({ ...c, fixed: false }))
   ];
 }
 
@@ -978,7 +966,7 @@ function renderProgramacao() {
   setText("programTableTitle", activity ? activity.name : "Programações");
   setText("programTableMeta", activity ? `${rows.length} item(ns) · ${s.done} executado(s) · ${s.pending} pendente(s)` : "Cadastre uma atividade para começar.");
 
-  $("programTableHead").innerHTML = `<tr><th>Semana</th><th>Equipe</th>${cols.map(c => `<th>${escapeHTML(c.label)}</th>`).join("")}<th>Data prevista</th><th>Responsável</th><th>Situação</th><th>Executado em</th><th>Observação</th><th></th></tr>`;
+  $("programTableHead").innerHTML = `<tr><th>Semana</th><th>Equipe</th>${cols.map(c => `<th>${escapeHTML(c.label)}</th>`).join("")}<th>Situação</th><th>Executado em</th><th></th></tr>`;
   $("programTableBody").innerHTML = pageRows.map(p => {
     const done = isDone(p);
     const last = executionsOf(p.id).at(-1);
@@ -986,11 +974,8 @@ function renderProgramacao() {
       <td class="mono">${escapeHTML(p.week)}</td>
       <td>${escapeHTML(dash(teamName(p.teamId)))}</td>
       ${cols.map(c => `<td title="${escapeHTML(columnValue(p, c))}">${escapeHTML(formatColumnValue(c, columnValue(p, c)))}</td>`).join("")}
-      <td>${escapeHTML(fmtDate(p.date))}</td>
-      <td>${escapeHTML(dash(personById(p.responsibleId)?.nome))}</td>
       <td><span class="status ${done ? "done" : "pending"}">${done ? "Executado" : "Pendente"}</span></td>
       <td title="${last ? escapeHTML(`${fmtDateTime(last.executado_em)} · ${executorName(last)}`) : ""}">${last ? `${escapeHTML(fmtDate(toISODate(new Date(last.executado_em))))}${executionsOf(p.id).length > 1 ? ` <span class="chip">${executionsOf(p.id).length}x</span>` : ""}` : "—"}</td>
-      <td class="wrap">${escapeHTML(dash(p.note))}</td>
       <td class="actions-cell"><button class="icon-btn sm danger" type="button" data-delete-program="${escapeHTML(p.id)}" title="Excluir"><svg class="icon"><use href="#i-trash"/></svg></button></td>
     </tr>`;
   }).join("");
@@ -1039,8 +1024,8 @@ function renderCustomInputs(host, activity, values = {}, { prefix = "pf", editab
   host.innerHTML = activityColumns(activity).map(c => {
     const value = values[c.key] ?? "";
     const disabled = editableOnly && !c.technicianEditable ? "disabled" : "";
-    const attrs = `data-custom-key="${escapeHTML(c.key)}" data-type="${c.type}" ${c.required ? "data-required" : ""} ${disabled}`;
-    const label = `${escapeHTML(c.label)}${c.required ? " *" : ""}`;
+    const attrs = `data-custom-key="${escapeHTML(c.key)}" data-type="${c.type}" ${disabled}`;
+    const label = escapeHTML(c.label);
     let control;
     if (c.type === "select" || c.type === "boolean") {
       const opts = c.type === "boolean" ? ["SIM", "NÃO"] : c.options;
@@ -1056,15 +1041,10 @@ function renderCustomInputs(host, activity, values = {}, { prefix = "pf", editab
 
 function collectCustomInputs(host) {
   const data = {};
-  const missing = [];
   host.querySelectorAll("[data-custom-key]").forEach(input => {
-    const value = String(input.value ?? "").trim();
-    data[input.dataset.customKey] = value;
-    const invalid = input.hasAttribute("data-required") && !value && !input.disabled;
-    input.closest(".field")?.classList.toggle("invalid", invalid);
-    if (invalid) missing.push(input.closest(".field")?.firstChild?.textContent?.replace(" *", "") || input.dataset.customKey);
+    data[input.dataset.customKey] = String(input.value ?? "").trim();
   });
-  return { data, missing };
+  return { data };
 }
 
 function openProgramModal() {
@@ -1072,9 +1052,6 @@ function openProgramModal() {
   fillSelect($("pfActivity"), state.activities.map(a => ({ value: a.id, label: a.name })), { value: state.program.activityId });
   fillSelect($("pfWeek"), weekOptionsForForm(), { value: state.program.week || weekLabel(currentWeekNumber()) });
   fillSelect($("pfTeam"), state.teams.filter(t => t.ativo).map(t => ({ value: t.id, label: t.nome })), { value: state.program.team, placeholder: "Selecione a equipe" });
-  fillSelect($("pfResponsible"), state.people.filter(p => p.ativo).sort(sortByName).map(p => ({ value: p.id, label: p.nome })), { value: "", placeholder: "Sem responsável" });
-  $("pfDate").value = "";
-  $("pfNote").value = "";
   renderCustomInputs($("pfCustom"), activityById($("pfActivity").value));
   setMessage("programFormMessage", "");
   openModal("programModal");
@@ -1085,9 +1062,8 @@ async function saveProgramForm(event) {
   const activity = activityById($("pfActivity").value);
   const weekNum = weekToNumber($("pfWeek").value);
   const team = teamById($("pfTeam").value);
-  const { data: customData, missing } = collectCustomInputs($("pfCustom"));
-  if (!activity || !weekNum || !team) return setMessage("programFormMessage", "Preencha atividade, semana e equipe.");
-  if (missing.length) return setMessage("programFormMessage", `Preencha: ${missing.join(", ")}.`);
+  const { data: customData } = collectCustomInputs($("pfCustom"));
+  if (!activity || !weekNum || !team) return setMessage("programFormMessage", "Escolha atividade, semana e equipe.");
 
   await withButton(event.submitter, async () => {
     try {
@@ -1099,11 +1075,11 @@ async function saveProgramForm(event) {
           semana: weekNum,
           status: "PROGRAMADO",
           atividade_id: activity.id,
-          data_programacao: $("pfDate").value || null,
+          data_programacao: null,
           equipe_id: team.id,
-          responsavel_id: $("pfResponsible").value || null,
+          responsavel_id: null,
           quantidade: 1,
-          observacao: $("pfNote").value.trim() || null,
+          observacao: null,
           dados_personalizados: customData,
           modo_importacao: MODE_APPEND,
           arquivo_importacao: null,
@@ -1181,10 +1157,9 @@ function downloadTemplate(activity) {
   try {
     requireXLSX();
     const cols = templateColumns(activity);
-    const headers = cols.map(c => `${c.label}${c.required ? " *" : ""}`);
+    const headers = cols.map(c => c.label);
     const example = cols.map(c => {
       if (c.key === "week") return weekLabel(currentWeekNumber());
-      if (c.key === "activity") return activity.name;
       if (c.key === "team") return state.teams.find(t => t.ativo)?.nome || "Equipe A";
       return "";
     });
@@ -1198,21 +1173,21 @@ function downloadTemplate(activity) {
       ["Gerado em", nowStamp()],
       [],
       ["Como preencher"],
-      ["1", "Não altere nem renomeie os cabeçalhos. Colunas com * são obrigatórias."],
-      ["2", "SEMANA: escreva a semana em cada linha, como W137 ou apenas 137 (o sistema grava como W137). Não é preciso cadastrar a semana antes."],
-      ["3", "EQUIPE deve ser o nome de uma equipe cadastrada (lista abaixo)."],
-      ["4", "Datas em DD/MM/AAAA ou como data do Excel."],
+      ["1", "Não altere nem renomeie os cabeçalhos. SEMANA e EQUIPE são as colunas padrão; as demais são as colunas da atividade."],
+      ["2", "SEMANA: escreva a semana em cada linha, como W137 ou apenas 137 (o sistema grava como W137)."],
+      ["3", "EQUIPE: nome de uma equipe cadastrada (lista abaixo)."],
+      ["4", "As colunas da atividade podem ficar em branco. Datas em DD/MM/AAAA ou como data do Excel."],
       ["5", "Cada linha vira um item programado para a equipe de campo."],
       [],
-      ["Coluna", "Tipo", "Obrigatória", "Equipe de campo edita", "Opções aceitas"],
-      ...cols.map(c => [c.label, c.fixed ? "Fixa" : COLUMN_TYPES[c.type], c.required ? "Sim" : "Não", c.technicianEditable ? "Sim" : "Não",
+      ["Coluna", "Tipo", "Equipe de campo edita", "Opções aceitas"],
+      ...cols.map(c => [c.label, c.fixed ? "Padrão" : COLUMN_TYPES[c.type], c.technicianEditable ? "Sim" : "Não",
         c.type === "select" ? c.options.join(", ") : c.type === "boolean" ? "SIM, NÃO" : ""]),
       [],
       ["Equipes cadastradas"],
       ...state.teams.filter(t => t.ativo).map(t => [t.nome, DISCIPLINE_LABELS[t.disciplina] || t.disciplina || ""])
     ];
     const infoSheet = XLSX.utils.aoa_to_sheet(info);
-    infoSheet["!cols"] = [{ wch: 26 }, { wch: 60 }, { wch: 12 }, { wch: 22 }, { wch: 40 }];
+    infoSheet["!cols"] = [{ wch: 26 }, { wch: 60 }, { wch: 22 }, { wch: 40 }];
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, sheet, "Programação");
@@ -1244,13 +1219,11 @@ function parseProgramRows(rows, activity) {
   };
 
   const customCols = activityColumns(activity).map(c => ({ col: c, index: findIndex([makeKey(c.label), c.key]) }));
-  const fixed = Object.fromEntries(fixedColumnsFor(activity).map(f => [f.key, findIndex([makeKey(f.label), ...f.aliases])]));
+  const fixed = Object.fromEntries(FIXED_COLUMNS.map(f => [f.key, findIndex([makeKey(f.label), ...f.aliases])]));
 
-  const missingHeaders = [
-    ...FIXED_COLUMNS.filter(f => f.required && fixed[f.key] < 0).map(f => f.label),
-    ...customCols.filter(x => x.col.required && x.index < 0).map(x => x.col.label)
-  ];
-  if (missingHeaders.length) throw new Error(`Colunas obrigatórias ausentes no arquivo: ${missingHeaders.join(", ")}. Baixe o template da atividade “${activity.name}”.`);
+  // SEMANA e EQUIPE definem para quem e quando o item aparece: sem elas a linha não tem destino.
+  const missingHeaders = FIXED_COLUMNS.filter(f => fixed[f.key] < 0).map(f => f.label);
+  if (missingHeaders.length) throw new Error(`O arquivo precisa das colunas padrão ${missingHeaders.join(" e ")}. Baixe o template da atividade “${activity.name}”.`);
 
   const errors = [];
   const records = [];
@@ -1264,24 +1237,11 @@ function parseProgramRows(rows, activity) {
     const weekNum = weekToNumber(cellText(at(row, fixed.week)));
     if (!weekNum) rowErrors.push(`SEMANA “${cellText(at(row, fixed.week)) || "vazia"}” inválida (use W137 ou 137)`);
 
-    const activityName = cellText(at(row, fixed.activity));
-    if (activityName && makeKey(activityName) !== makeKey(activity.name)) rowErrors.push(`ATIVIDADE “${activityName}” diferente de “${activity.name}”`);
-
     const teamText = cellText(at(row, fixed.team));
     const team = teamByName(teamText);
     if (!teamText) rowErrors.push("EQUIPE vazia");
     else if (!team) rowErrors.push(`equipe “${teamText}” não cadastrada`);
     else if (!team.ativo) rowErrors.push(`equipe “${team.nome}” está inativa`);
-
-    const respText = fixed.responsible >= 0 ? cellText(at(row, fixed.responsible)) : "";
-    const person = respText ? personByName(respText) : null;
-    if (respText && !person) rowErrors.push(`responsável “${respText}” não encontrado`);
-
-    let date = "";
-    if (fixed.date >= 0 && cellText(at(row, fixed.date))) {
-      date = normalizeDateValue(at(row, fixed.date));
-      if (date === null) rowErrors.push("DATA PREVISTA inválida");
-    }
 
     const customData = {};
     customCols.forEach(({ col, index }) => {
@@ -1300,15 +1260,11 @@ function parseProgramRows(rows, activity) {
         const match = col.options.find(o => normalizeText(o) === normalizeText(value));
         if (!match) rowErrors.push(`${col.label}: “${value}” fora da lista (${col.options.join(", ")})`); else value = match;
       }
-      if (col.required && !value) rowErrors.push(`${col.label} obrigatório`);
       customData[col.key] = value;
     });
 
     if (rowErrors.length) { errors.push(`Linha ${line}: ${rowErrors.join("; ")}.`); return; }
-    records.push({
-      line, weekNum, week: weekLabel(weekNum), team, person, date: date || "",
-      note: fixed.note >= 0 ? cellText(at(row, fixed.note)) : "", customData
-    });
+    records.push({ line, weekNum, week: weekLabel(weekNum), team, customData });
   });
 
   if (!records.length && !errors.length) throw new Error("O arquivo não possui linhas de dados.");
@@ -1360,10 +1316,10 @@ function renderImportModal() {
     errorsBox.innerHTML = `<strong>${pending.errors.length} linha(s) com erro. Corrija o arquivo e importe novamente — nenhuma linha será gravada enquanto houver erros.</strong><ul>${pending.errors.slice(0, 200).map(e => `<li>${escapeHTML(e)}</li>`).join("")}</ul>${pending.errors.length > 200 ? `<p>… e mais ${pending.errors.length - 200}.</p>` : ""}`;
   }
 
-  const cols = templateColumns(activity).filter(c => !["activity"].includes(c.key));
+  const cols = templateColumns(activity);
   const preview = pending.records.slice(0, 6);
   $("importPreview").innerHTML = `<thead><tr><th>Linha</th>${cols.map(c => `<th>${escapeHTML(c.label)}</th>`).join("")}</tr></thead><tbody>${preview.map(r => `<tr><td class="mono">${r.line}</td>${cols.map(c => {
-    const v = c.key === "week" ? r.week : c.key === "team" ? r.team.nome : c.key === "responsible" ? r.person?.nome : c.key === "date" ? fmtDate(r.date) : c.key === "note" ? r.note : formatColumnValue(c, r.customData[c.key]);
+    const v = c.key === "week" ? r.week : c.key === "team" ? r.team.nome : formatColumnValue(c, r.customData[c.key]);
     return `<td>${escapeHTML(dash(v))}</td>`;
   }).join("")}</tr>`).join("")}</tbody>`;
   $("importPreview").querySelectorAll("tbody td").forEach(td => { td.style.fontStyle = "normal"; td.style.color = "var(--text)"; });
@@ -1406,11 +1362,11 @@ async function confirmImport() {
           semana: r.weekNum,
           status: "PROGRAMADO",
           atividade_id: activity.id,
-          data_programacao: r.date || null,
+          data_programacao: null,
           equipe_id: r.team.id,
-          responsavel_id: r.person?.id || null,
+          responsavel_id: null,
           quantidade: 1,
-          observacao: r.note || null,
+          observacao: null,
           dados_personalizados: r.customData,
           modo_importacao: mode,
           arquivo_importacao: pending.file,
@@ -1451,11 +1407,11 @@ function exportProgramList() {
     requireXLSX();
     const cols = activityColumns(activity);
     const rows = filteredAdminPrograms();
-    const headers = ["SEMANA", "EQUIPE", ...cols.map(c => c.label), "DATA PREVISTA", "RESPONSÁVEL", "OBSERVAÇÃO", "SITUAÇÃO", "ÚLTIMA EXECUÇÃO", "EXECUÇÕES"];
+    const headers = ["SEMANA", "EQUIPE", ...cols.map(c => c.label), "SITUAÇÃO", "ÚLTIMA EXECUÇÃO", "EXECUTADO POR", "EXECUÇÕES"];
     const data = rows.map(p => {
       const ex = executionsOf(p.id);
-      return [p.week, teamName(p.teamId), ...cols.map(c => columnValue(p, c)), fmtDate(p.date).replace("—", ""), personById(p.responsibleId)?.nome || "", p.note,
-        isDone(p) ? "EXECUTADO" : "PENDENTE", ex.length ? fmtDateTime(ex.at(-1).executado_em) : "", ex.length];
+      return [p.week, teamName(p.teamId), ...cols.map(c => columnValue(p, c)),
+        isDone(p) ? "EXECUTADO" : "PENDENTE", ex.length ? fmtDateTime(ex.at(-1).executado_em) : "", ex.length ? executorName(ex.at(-1)) : "", ex.length];
     });
     const sheet = XLSX.utils.aoa_to_sheet([headers, ...data]);
     sheet["!cols"] = headers.map(h => ({ wch: Math.max(12, Math.min(34, h.length + 6)) }));
@@ -1583,7 +1539,6 @@ function renderActivities() {
   setText("activityTitle", activity.name);
   setText("activityDescription", activity.description || "Sem descrição.");
   setText("activityColCount", cols.length);
-  setText("activityReqCount", cols.filter(c => c.required).length);
   setText("activityEditCount", cols.filter(c => c.technicianEditable).length);
   setText("activityProgCount", state.programs.filter(p => p.activityId === activity.id).length);
   setText("templateFileName", `template_${makeKey(activity.name)}.xlsx`);
@@ -1596,10 +1551,9 @@ function renderActivities() {
       <div class="name"><strong>${escapeHTML(c.label)}</strong><small>${escapeHTML(c.key)}</small></div>
       <span class="type"><span class="chip">${COLUMN_TYPES[c.type]}</span></span>
       <div class="flags">
-        ${c.required ? `<span class="chip danger">Obrigatória</span>` : ""}
         ${c.technicianEditable ? `<span class="chip primary">Editável em campo</span>` : ""}
         ${c.type === "select" ? `<span class="chip" title="${escapeHTML(c.options.join(", "))}">${c.options.length} opções</span>` : ""}
-        ${reserved ? `<span class="chip warn" title="Coberta pelas colunas fixas SEMANA/ATIVIDADE/EQUIPE ou pelos registros de execução">Ignorada no template</span>` : ""}
+        ${reserved ? `<span class="chip warn" title="Coberta pelas colunas padrão SEMANA/EQUIPE ou pelos registros de execução">Ignorada no template</span>` : ""}
       </div>
       <div class="row-actions">
         <button class="icon-btn sm" type="button" data-move="-1" data-col="${escapeHTML(c.id)}" ${i === 0 ? "disabled" : ""} title="Subir"><svg class="icon"><use href="#i-up"/></svg></button>
@@ -1611,8 +1565,8 @@ function renderActivities() {
   }).join("");
 
   const tcols = templateColumns(activity);
-  $("templatePreview").innerHTML = `<thead><tr>${tcols.map(c => `<th>${escapeHTML(c.label)}${c.required ? ' <span class="req">*</span>' : ""}</th>`).join("")}</tr></thead>
-    <tbody><tr>${tcols.map(c => `<td>${escapeHTML(c.key === "week" ? weekLabel(currentWeekNumber()) : c.key === "activity" ? activity.name : c.fixed ? "" : c.type === "select" ? (c.options[0] || "opção") : c.type === "date" ? "DD/MM/AAAA" : c.type === "number" ? "0" : c.type === "boolean" ? "SIM" : "")}</td>`).join("")}</tr></tbody>`;
+  $("templatePreview").innerHTML = `<thead><tr>${tcols.map(c => `<th>${escapeHTML(c.label)}</th>`).join("")}</tr></thead>
+    <tbody><tr>${tcols.map(c => `<td>${escapeHTML(c.key === "week" ? weekLabel(currentWeekNumber()) : c.key === "team" ? "Equipe A" :c.type === "select" ? (c.options[0] || "opção") : c.type === "date" ? "DD/MM/AAAA" : c.type === "number" ? "0" : c.type === "boolean" ? "SIM" : "")}</td>`).join("")}</tr></tbody>`;
 }
 
 function openActivityModal(id = null) {
@@ -1693,7 +1647,6 @@ function openColumnModal(id = null) {
   setText("cfKeyHint", column ? "A chave não pode ser alterada: os dados já gravados usam este identificador." : "Gerada a partir do nome. Identificador usado no banco.");
   $("cfType").value = column?.type || "text";
   $("cfOptions").value = (column?.options || []).join(", ");
-  $("cfRequired").checked = Boolean(column?.required);
   $("cfEditable").checked = Boolean(column?.technicianEditable);
   $("cfOptionsWrap").classList.toggle("hidden", $("cfType").value !== "select");
   setMessage("columnFormMessage", "");
@@ -1715,12 +1668,13 @@ async function saveColumn(event) {
   if (activity.columns.some(c => c.id !== editing?.id && (c.key === key || makeKey(c.label) === makeKey(label)))) {
     return setMessage("columnFormMessage", "Já existe uma coluna com esse nome ou chave nesta atividade.");
   }
-  if (!editing && FIXED_COLUMNS.some(f => makeKey(f.label) === makeKey(label) || f.key === key)) {
-    return setMessage("columnFormMessage", `“${label}” já é uma coluna fixa do template.`);
+  if (!editing && FIXED_COLUMNS.some(f => f.key === key || [makeKey(f.label), ...f.aliases].includes(makeKey(label)))) {
+    return setMessage("columnFormMessage", `“${label}” já é uma coluna padrão do template (SEMANA e EQUIPE).`);
   }
 
+  // Nenhuma coluna é obrigatória: a importação aceita células em branco.
   const payload = {
-    rotulo: label, tipo: type, obrigatorio: $("cfRequired").checked, editavel_tecnico: $("cfEditable").checked,
+    rotulo: label, tipo: type, obrigatorio: false, editavel_tecnico: $("cfEditable").checked,
     opcoes: options, updated_at: new Date().toISOString()
   };
 

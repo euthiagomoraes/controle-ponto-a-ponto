@@ -428,7 +428,7 @@ button { cursor: pointer; }
 .select-item.active strong { color: var(--primary); }
 .select-item small { color: var(--muted); font-size: 12px; }
 
-.mini-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+.mini-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
 .mini-stats div { background: var(--surface-2); padding: 10px 14px; }
 .mini-stats span { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--subtle); }
 .mini-stats strong { font-size: 20px; font-variant-numeric: tabular-nums; }
