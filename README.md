@@ -1,193 +1,57 @@
-# Controle Ponto a Ponto — Rev. 7
+# Planning Pro
 
-Esta revisão evolui a Rev. 3 para uma arquitetura administrativa modular, mantendo o fluxo de campo de Ponto a Ponto.
+Programação de atividades para equipes de execução em campo.
 
-## 1. Dashboard — Previsto x Realizado
+O planejamento importa a programação da semana por Excel; a equipe de campo vê os itens da sua equipe, registra a execução e, quando permitido, atualiza campos. Cada **atividade** (Ponto a Ponto, Loop Teste, Preservação…) tem **colunas próprias**, e essas colunas definem o template Excel, a tabela de programação e a tela de campo.
 
-A área administrativa mantém o painel de acompanhamento com filtros de **Semana**, **Atividade** e **Equipe**, além de exportação de relatório em PDF personalizado com gráfico, filtros, data/hora e responsável logado. O painel mantém:
-- previsto, realizado, saldo e percentual;
-- evolução semanal;
-- progresso da semana;
-- comparação por atividade;
-- últimas execuções.
+## Fluxo
 
-## 2. Programação
+1. **Atividades** — crie a atividade e suas colunas (tipo, obrigatória, editável em campo, opções de lista). Arraste para ordenar.
+2. **Equipes e acessos** — cadastre equipes, pessoas (com código de acesso de 6 dígitos) e semanas.
+3. **Programação** — escolha a atividade, baixe o **Template Excel**, preencha e use **Importar Excel**.
+   - O arquivo é validado inteiro antes de gravar: todos os erros aparecem por linha e nada é gravado enquanto houver erro.
+   - **Incluir na programação**: acrescenta as linhas (com opção de ignorar linhas que já existem: mesma semana, equipe e TAG).
+   - **Nova programação**: substitui os itens **pendentes** daquela atividade nas semanas do arquivo; itens executados são preservados.
+4. **Campo** — a pessoa entra com o código, vê a semana atual da sua equipe, registra execução (individual ou em lote, com observação) e edita as colunas liberadas.
+5. **Dashboard / Relatórios / Importações** — previsto x realizado por semana, equipe e atividade; exportação PDF/JPEG; histórico das cargas calculado a partir do banco.
 
-A programação agora trabalha com o ID do módulo/atividade e pode receber campos personalizados definidos na configuração do próprio módulo.
+### Template Excel
 
-Campos de planejamento fixos:
-- Semana;
-- Data prevista;
-- Atividade;
-- Equipe;
-- Responsável;
-- Quantidade prevista;
-- Observação.
+Colunas fixas: `SEMANA *`, `ATIVIDADE *`, `EQUIPE *`, `DATA PREVISTA`, `RESPONSÁVEL`, `OBSERVAÇÃO`, mais as colunas da atividade. A aba **Leia-me** traz os tipos, as opções aceitas e as equipes cadastradas.
 
-Depois dos campos fixos, o formulário adiciona dinamicamente as colunas personalizadas do módulo selecionado.
+- Semana: `W137` ou `137`.
+- Equipe: nome cadastrado (aceita `A` para `Equipe A` quando não houver ambiguidade).
+- Datas: `DD/MM/AAAA` ou data nativa do Excel.
+- Listas: o valor precisa estar entre as opções (maiúsculas/acentos são normalizados). Sim/Não aceita `SIM`, `S`, `X`, `NÃO`, `N`.
 
-## 3. Atividades e módulos
+## Arquivos
 
-Nova área administrativa: **Atividades e módulos**.
+| Arquivo | Conteúdo |
+|---|---|
+| `index.html` | Estrutura das telas e modais |
+| `styles.css` | Design system (tokens, tema claro/escuro, layout responsivo) |
+| `app.js` | Aplicação (Supabase, importação, campo, dashboards, exportações) |
+| `supabase-config.js` | URL e chave publicável do projeto Supabase |
+| `00x_*.sql` | Migrations para rodar no SQL Editor do Supabase |
 
-Cada atividade é tratada como um módulo independente. Os exemplos iniciais são:
-- Ponto a Ponto;
-- Loop Teste;
-- Preservação.
+Bibliotecas via CDN com versão fixa: supabase-js 2.45.4, xlsx-js-style 1.2.0, jsPDF 2.5.1.
 
-Para cada módulo o administrador pode:
-- criar uma nova atividade;
-- editar nome e descrição;
-- excluir a atividade;
-- criar colunas personalizadas;
-- editar colunas;
-- excluir colunas;
-- reordenar colunas por arrastar e soltar;
-- definir tipo do campo: Texto, Número, Data, Lista ou Sim/Não;
-- definir campo obrigatório;
-- definir opções para campos do tipo Lista.
+## Banco de dados (Supabase)
 
-## 4. Máscara de Excel por módulo
+Tabelas usadas: `tb_atividades`, `tb_atividade_colunas`, `tb_programacoes` (colunas da atividade em `dados_personalizados`), `tb_execucoes`, `tb_equipamentos`, `tb_equipes`, `tb_pessoas`, `tb_semanas`.
 
-Cada atividade possui sua própria máscara.
+Migrations, em ordem:
 
-O botão **Exportar máscara** gera um arquivo `.xlsx` com:
-- planilha **Importação** contendo os cabeçalhos na ordem configurada;
-- segunda planilha **Leia-me** com instruções e tipos de campo.
+- `001_programacao_supabase.sql` — **histórico**; a estrutura atual de `tb_programacoes` usa `semana`, `atividade_id`, `equipe_id`, `dados_personalizados` etc.
+- `003` a `007` — grants, semanas, login por código, disciplinas e modo de importação.
+- `008_tecnico_rpc_seguro.sql` — **recomendada**. Cria funções para a equipe de campo (`tecnico_programacao`, `tecnico_registrar_execucao`, `tecnico_salvar_campos`) que validam o código a cada chamada, limitam os dados à equipe da pessoa e só aceitam alteração em colunas marcadas como editáveis. O app usa essas funções automaticamente quando existem.
 
-O botão **Importar Excel** lê a primeira planilha do arquivo, valida as colunas obrigatórias e grava os registros no módulo.
+### Segurança
 
-Para o módulo **Ponto a Ponto**, os campos compatíveis também são normalizados para o fluxo técnico existente.
+- Administradores entram com Supabase Auth; o perfil vem de `tb_pessoas.perfil = 'ADMINISTRADOR'` vinculado por `auth_user_id`.
+- A equipe de campo entra por código (role `anon`). Sem a migration 008, o app acessa as tabelas diretamente e depende de policies `anon` abertas. Depois de aplicar a 008 e validar o login de campo, rode a **parte 2** dela para remover essas policies.
+- Os códigos podem ser testados por força bruta via `login_tecnico_por_cracha`. Use 6 dígitos (padrão do gerador) e considere limitar tentativas.
 
-A exportação/importação usa o SheetJS Community Edition 0.20.3 no navegador, conforme a instalação standalone publicada pela documentação oficial. Para estabilidade em produção, a própria documentação recomenda versionar/venderizar a biblioteca em vez de depender de CDN. citeturn426366search3turn426366search14
+## Preferências locais
 
-## 5. Visualização modular das colunas
-
-Na configuração de cada atividade, o administrador pode visualizar e editar a estrutura em dois modos:
-- **Empilhadas** — uma coluna por linha, melhor para edição e telas menores;
-- **Lado a lado** — cartões em grade, melhor para conferência horizontal.
-
-A revisão elimina a duplicação visual que ocorria entre a prévia e a lista editável: a própria lista de colunas muda de layout conforme o modo escolhido. A preferência fica gravada no navegador em `ppaColumnViewMode`. A ordem mostrada é exatamente a ordem usada na máscara do Excel.
-
-## 6. Fluxo de importação Excel
-
-Ao selecionar um arquivo no módulo, o sistema primeiro valida a primeira planilha contra as colunas configuradas. Depois abre uma escolha obrigatória:
-- **Nova importação**: substitui os registros já carregados daquele módulo;
-- **Inclusão**: mantém a base atual e acrescenta os registros do novo arquivo.
-
-A opção escolhida fica registrada no processamento e os registros recebem identificação da importação/linha do Excel. Na integração definitiva, este ponto deve chamar a rotina de gravação transacional do Supabase para que `tb_modulo_registros`/`tb_ponto_a_ponto` receba a operação de substituição ou inclusão sem duplicar dados de forma acidental.
-
-## 5. Pessoas e códigos de acesso
-
-Nova área administrativa: **Pessoas & Acessos**.
-
-Permite cadastrar:
-- nome;
-- função;
-- e-mail;
-- código de acesso;
-- perfil;
-- equipe;
-- status.
-
-Também permite:
-- gerar código automaticamente;
-- editar cadastro;
-- excluir cadastro;
-- bloquear/desbloquear acesso.
-
-O Login do Técnico consulta os cadastros ativos por código. Nesta revisão, o armazenamento ainda é local para permitir validação visual e funcional.
-
-
-## 6. Execução múltipla no Técnico de Campo
-
-A tela do Técnico de Campo agora possui uma caixa de seleção em cada TAG, opção **Selecionar todos** para os resultados filtrados e o botão **Registrar selecionados**. Os registros são gravados individualmente em sequência, mantendo data/hora, usuário logado e equipe no histórico.
-
-O fluxo individual de seleção/registro continua disponível para operações unitárias.
-
-## 8. Persistência atual
-
-Nesta entrega, as novas configurações são armazenadas em `localStorage`:
-
-- `ppaModules` — módulos/atividades e suas colunas;
-- `ppaAccesses` — pessoas e códigos;
-- `ppaModuleRecords` — registros importados por módulo;
-- `ppaProgramacoes` — programação;
-- `ppaImportedRows` — base importada do Ponto a Ponto.
-
-Isso permite testar toda a interface antes de conectar definitivamente o Supabase.
-
-## 9. Próxima integração de backend
-
-A arquitetura final deve substituir o `localStorage` pelas tabelas existentes do ecossistema Supabase, mantendo RLS e isolamento por família/projeto.
-
-A proposta funcional é:
-
-- `tb_pessoas` → pessoas;
-- `tb_acessos` → códigos de acesso e status;
-- `tb_permissoes` → permissões por usuário/equipe/módulo;
-- `tb_atividades` → módulos;
-- tabela de configuração de colunas → definição da máscara de cada atividade;
-- `tb_programacoes` → planejamento + dados personalizados;
-- `tb_execucoes_campo` → execução real.
-
-A integração SQL deve ser feita após conferir os nomes/tipos das colunas atuais, sem substituir a estrutura existente às cegas.
-
-## 10. Git
-
-```powershell
-cd "C:\Users\thiago.moraes\Downloads\controle-ponto-a-ponto"
-git status
-git add index.html app.js styles.css README.md
- git commit -m "Cria arquitetura modular, acessos e mascaras Excel"
-git push origin main
-```
-
-## Observação de segurança
-
-A separação Administrador x Técnico no frontend é apenas de interface. Em produção, a autorização real deve ser garantida por Supabase Auth, RLS e permissões no backend.
-
-
-## Rev. 8 — Ajustes de navegação e importação da Programação
-
-### 11. Barra lateral desktop
-- Ícones da navegação substituídos por SVGs vetoriais.
-- Botão no cabeçalho da barra lateral permite expandir/recolher o menu.
-- O estado expandido/recolhido fica salvo em `localStorage` (`ppaSidebarCollapsed`).
-- Ao recolher, os textos somem e os ícones permanecem centralizados; o conteúdo principal ocupa o espaço liberado.
-
-### 12. Importação Excel na Programação
-A tela **Programação de atividades** agora possui:
-- **Baixar template Excel**;
-- **Importar Excel**;
-- importação vinculada à atividade selecionada no filtro **ATIVIDADE**;
-- template composto pelos campos fixos da programação e pelas colunas personalizadas configuradas na atividade em **Atividades**;
-- validação dos cabeçalhos e dos campos obrigatórios;
-- importação **cumulativa**, acrescentando novas linhas sem apagar as programações existentes.
-
-O template gera as planilhas `Programação` e `Leia-me`. A atividade selecionada é identificada no template e usada como referência durante a importação.
-
-
-## Rev. 13 — Programação persistida no Supabase
-
-### 1. Banco de dados
-Execute no SQL Editor do Supabase o arquivo `001_programacao_supabase.sql`. Ele cria:
-- `tb_atividades`: atividades/módulos;
-- `tb_atividade_colunas`: estrutura das colunas e o flag `editavel_tecnico`;
-- `tb_programacoes`: programação importada, incluindo `custom_data` JSONB.
-
-### 2. Configuração do frontend
-Edite `supabase-config.js` e informe a **anon key** do projeto. A URL já está configurada para o projeto utilizado pelo sistema.
-
-### 3. Regra de edição
-Em **Atividades > Colunas**, cada coluna possui o campo **Técnico pode alterar**.
-- Marcado: o Técnico pode alterar o valor no registro de campo.
-- Desmarcado: o campo aparece bloqueado.
-
-A importação do Excel grava os valores das colunas em `tb_programacoes.custom_data`. O Técnico recebe a programação do banco ao entrar e pode alterar somente os campos autorizados.
-
-### 4. Nova programação x inclusão
-- **Nova programação**: remove a programação atual e grava a nova carga.
-- **Incluir na Programação**: acrescenta os novos registros.
-
-> As policies `anon` do SQL são provisórias para compatibilizar com o login local atual. Ao migrar o login para Supabase Auth, substitua-as por policies baseadas no usuário/perfil.
+Ficam no navegador apenas: cores/logo dos documentos (`ppaSettings`), tema (`ppaTheme`), menu recolhido (`ppaSidebarCollapsed`) e o código da sessão de campo (`sessionStorage`). Chaves de versões antigas que guardavam dados de negócio são apagadas ao abrir o app.

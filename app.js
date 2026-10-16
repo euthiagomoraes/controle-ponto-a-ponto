@@ -1,3911 +1,2734 @@
 /*
- * Planning Pro — app.js consolidado
- * Rev. 14 — Supabase real + autenticação + dashboard + programação + módulos
+ * Planning Pro — app.js
  *
- * Compatível com o index.html atual do projeto.
- * Dados administrativos e operacionais usam o Supabase quando configurado.
- * localStorage fica apenas como cache/estado visual auxiliar.
+ * Fluxo do produto:
+ *   1. Planejamento cadastra ATIVIDADES, cada uma com suas COLUNAS (estrutura modular).
+ *   2. O template Excel de cada atividade = colunas fixas + colunas da atividade.
+ *   3. A importação grava cada linha em tb_programacoes (colunas da atividade em dados_personalizados).
+ *   4. A equipe de campo vê a programação da sua equipe na semana e registra a execução (tb_execucoes).
+ *   5. Dashboard e relatórios comparam programado x executado.
+ *
+ * Supabase é a fonte de verdade. localStorage guarda apenas preferências visuais.
  */
 
-const CONFIG = {
-  SUPABASE_URL: window.PPA_SUPABASE_CONFIG?.url || "",
-  SUPABASE_ANON_KEY: window.PPA_SUPABASE_CONFIG?.anonKey || "",
-  DATA_URL: "",
-  WRITE_URL: "",
-  TABLE_NAME: "tbPontoAPonto",
-  LOGIN_TABLE: "tbLogin"
-};
+"use strict";
 
+/* =========================================================
+   CONSTANTES
+   ========================================================= */
+
+const SUPABASE_URL = window.PPA_SUPABASE_CONFIG?.url || "";
+const SUPABASE_KEY = window.PPA_SUPABASE_CONFIG?.anonKey || "";
+
+// Referência de numeração das semanas: segunda-feira 07/09/2026 = W132.
 const WEEK_ANCHOR = new Date(2026, 8, 7);
 const WEEK_ANCHOR_NUMBER = 132;
 
-const ROLE_LABELS = {
-  admin: "Administrador",
-  technician: "Técnico de campo"
+const PAGE_SIZE = 50;
+const DB_PAGE = 1000;   // limite padrão de linhas do PostgREST
+const IN_CHUNK = 150;   // ids por filtro .in() para não estourar a URL
+
+const MODE_APPEND = "INCLUIR_NA_PROGRAMACAO";
+const MODE_REPLACE = "NOVA_PROGRAMACAO";
+
+const DISCIPLINE_LABELS = {
+  ELETRICA: "Elétrica", INSTRUMENTACAO: "Instrumentação", TUBULACAO: "Tubulação",
+  MECANICA: "Mecânica", AUTOMACAO: "Automação", CIVIL: "Civil"
 };
 
-const DISCIPLINES = [
-  "ELÉTRICA",
-  "INSTRUMENTAÇÃO",
-  "TUBULAÇÃO",
-  "MECÂNICA",
-  "AUTOMAÇÃO",
-  "CIVIL"
+const COLUMN_TYPES = { text: "Texto", number: "Número", date: "Data", select: "Lista", boolean: "Sim/Não" };
+
+// Colunas fixas de toda programação (sempre presentes no template).
+const FIXED_COLUMNS = [
+  { key: "week", label: "SEMANA", required: true, aliases: ["semana", "week", "sem"] },
+  { key: "activity", label: "ATIVIDADE", required: true, aliases: ["atividade", "activity", "modulo"] },
+  { key: "team", label: "EQUIPE", required: true, aliases: ["equipe", "team"] },
+  { key: "date", label: "DATA PREVISTA", aliases: ["data_prevista", "data_programacao", "data_programada"] },
+  { key: "responsible", label: "RESPONSÁVEL", aliases: ["responsavel", "responsible"] },
+  { key: "note", label: "OBSERVAÇÃO", aliases: ["observacao", "obs", "observacoes", "note"] }
 ];
+
+// Chaves de colunas antigas que duplicam campos fixos ou são derivadas da execução.
+const RESERVED_COLUMN_KEYS = new Set(["week", "semana", "activity", "atividade", "team", "equipe", "logs"]);
+
+// Estrutura inicial, criada no banco apenas se não houver nenhuma atividade.
+const DEFAULT_ACTIVITIES = [
+  {
+    name: "Ponto a Ponto", description: "Verificação ponto a ponto de equipamentos em campo.",
+    columns: [["tag", "TAG", "text", true], ["forn", "FORN.", "text"], ["sys", "SYS", "text"], ["subsys", "SUBSYS", "text"],
+      ["loop", "LOOP", "text"], ["service", "SERVICE", "text"], ["tipe", "TIPE", "text"], ["descricao", "DESCRIÇÃO", "text"]]
+  },
+  {
+    name: "Loop Teste", description: "Testes de loop e registro do resultado.",
+    columns: [["tag", "TAG", "text", true], ["loop", "LOOP", "text", true], ["sys", "SYS", "text"], ["subsys", "SUBSYS", "text"],
+      ["teste", "TESTE", "text"], ["resultado", "RESULTADO", "select", false, true, ["APROVADO", "REPROVADO", "PENDENTE"]]]
+  },
+  {
+    name: "Preservação", description: "Preservação de equipamentos e acompanhamento de status.",
+    columns: [["tag", "TAG", "text", true], ["equipamento", "EQUIPAMENTO", "text"], ["sys", "SYS", "text"], ["metodo", "MÉTODO", "text"],
+      ["status_preservacao", "STATUS", "select", false, true, ["ATIVO", "PRESERVADO", "BLOQUEADO", "LIBERADO"]]]
+  }
+];
+
+const DEFAULT_SETTINGS = { primary: "#1f5eff", header: "#0f1b2d", chartPlanned: "#1f5eff", chartDone: "#12895a", logo: "" };
+
+const ADMIN_SCREENS = ["dashboard", "programacao", "importacoes", "relatorios", "atividades", "equipes", "configuracoes", "perfil"];
+const FIELD_SCREENS = ["campo", "historico", "perfil"];
+
+/* =========================================================
+   ESTADO
+   ========================================================= */
 
 const state = {
-  currentUser: null,
-  role: null,
-  supabase: null,
-  selectedTag: null,
-  selectedTags: new Set(),
-  rows: [],
-  programacoes: [],
+  sb: null,
+  user: null,                // { id, nome, cracha, perfil, role: "admin"|"technician", equipeId, disciplina, email, authUserId }
+  activities: [],            // [{ id, name, description, columns: [...] }]
   teams: [],
-  weeks: [],
-  peopleRecords: [],
-  accesses: [],
-  moduleCatalog: [],
-  selectedModuleId: null,
-  editingModuleId: null,
+  people: [],
+  weeks: [],                 // ["W137", ...] cadastradas em tb_semanas
+  weekRows: [],
+  programs: [],              // admin: toda a programação
+  executions: new Map(),     // programacao_id -> [execuções]
+  equipment: new Map(),      // id -> equipamento
+  settings: { ...DEFAULT_SETTINGS },
+  rpcAvailable: true,
+
+  dashboardWeek: null,
+  program: { activityId: null, week: "", team: "", status: "", search: "", page: 0 },
+  activityId: null,
+  editingActivityId: null,
   editingColumnId: null,
+  editingPersonId: null,
   pendingImport: null,
-  pendingProgramImport: null,
-  pendingDeleteModuleId: null,
-  programHistory: [],
-  moduleRecords: {},
-  columnViewMode: localStorage.getItem("ppaColumnViewMode") || "stacked",
-  settings: {
-    primary: "#0b5cff",
-    accent: "#12a66a",
-    header: "#07111f",
-    background: "#f6f8fb",
-    chartPlanned: "#0b5cff",
-    chartDone: "#12a66a",
-    logo: ""
-  },
-  dashboardSeed: [
-    { week: "W133", planned: 42, done: 39 },
-    { week: "W134", planned: 48, done: 44 },
-    { week: "W135", planned: 56, done: 38 },
-    { week: "W136", planned: 60, done: 35 }
-  ],
-  activityStats: [
-    { name: "Ponto a Ponto", planned: 32, done: 21 },
-    { name: "Loop Teste", planned: 16, done: 10 },
-    { name: "Preservação", planned: 12, done: 4 }
-  ],
-  mockRows: [],
-  mockProgramacoes: []
+
+  field: { weekNum: null, programs: [], status: "", activity: "", search: "", selected: new Set(), activeId: null }
 };
 
-const MODULE_DEFAULTS = [
-  {
-    id: "ppa",
-    name: "Ponto a Ponto",
-    description: "Execução e controle dos pontos a ponto de campo.",
-    dbId: null,
-    columns: [
-      ["forn", "FORN.", "text", false],
-      ["sys", "SYS", "text", false],
-      ["subsys", "SUBSYS", "text", false],
-      ["loop", "LOOP", "text", false],
-      ["tag", "TAG", "text", true],
-      ["service", "SERVICE", "text", false],
-      ["type", "TIPE", "text", false],
-      ["descricao", "DESCRIÇÃO", "text", false],
-      ["week", "WEEK", "text", false],
-      ["ponto_a_ponto", "PONTO-A-PONTO", "date", false],
-      ["logs", "LOGS", "text", false]
-    ].map(([key, label, type, required]) => ({
-      id: `col-${key}`,
-      dbId: null,
-      key,
-      label,
-      type,
-      required,
-      technicianEditable: false,
-      options: []
-    }))
-  },
-  {
-    id: "loop",
-    name: "Loop Teste",
-    description: "Módulo independente para testes de loop e seus resultados.",
-    dbId: null,
-    columns: [
-      ["forn", "FORN.", "text", false],
-      ["sys", "SYS", "text", true],
-      ["subsys", "SUBSYS", "text", false],
-      ["loop", "LOOP", "text", true],
-      ["tag", "TAG", "text", true],
-      ["teste", "TESTE", "text", true],
-      ["resultado", "RESULTADO", "select", true],
-      ["data_teste", "DATA TESTE", "date", false],
-      ["week", "WEEK", "text", true],
-      ["observacao", "OBSERVAÇÃO", "text", false]
-    ].map(([key, label, type, required]) => ({
-      id: `col-${key}`,
-      dbId: null,
-      key,
-      label,
-      type,
-      required,
-      technicianEditable: false,
-      options: key === "resultado" ? ["APROVADO", "REPROVADO", "PENDENTE"] : []
-    }))
-  },
-  {
-    id: "pres",
-    name: "Preservação",
-    description: "Módulo de preservação de equipamentos e acompanhamento de status.",
-    dbId: null,
-    columns: [
-      ["forn", "FORN.", "text", false],
-      ["sys", "SYS", "text", true],
-      ["subsys", "SUBSYS", "text", false],
-      ["tag", "TAG", "text", true],
-      ["equipamento", "EQUIPAMENTO", "text", true],
-      ["metodo", "MÉTODO", "text", false],
-      ["data", "DATA", "date", false],
-      ["status", "STATUS", "select", true],
-      ["week", "WEEK", "text", true],
-      ["observacao", "OBSERVAÇÃO", "text", false]
-    ].map(([key, label, type, required]) => ({
-      id: `col-${key}`,
-      dbId: null,
-      key,
-      label,
-      type,
-      required,
-      technicianEditable: false,
-      options: key === "status" ? ["ATIVO", "PRESERVADO", "BLOQUEADO", "LIBERADO"] : []
-    }))
-  }
-];
-
-const ACCESS_DEFAULTS = [];
+/* =========================================================
+   UTILITÁRIOS
+   ========================================================= */
 
 const $ = id => document.getElementById(id);
+const setText = (id, value) => { const el = $(id); if (el) el.textContent = String(value ?? ""); };
 
-const nowBR = () =>
-  new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit"
-  }).format(new Date()).replace(",", "");
+const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[c]);
+const dash = value => (value === null || value === undefined || String(value).trim() === "") ? "—" : String(value);
 
-const fmtDate = value => {
-  if (!value) return "—";
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric"
-  }).format(date);
+const normalizeText = value => String(value ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+
+function makeKey(label) {
+  return normalizeText(label).replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
+}
+
+const chunk = (list, size) => {
+  const out = [];
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out;
 };
 
-const escapeHTML = value =>
-  String(value ?? "—").replace(/[&<>"']/g, c => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;"
-  })[c]);
+const pad2 = n => String(n).padStart(2, "0");
+const toISODate = date => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 
-const clone = value => JSON.parse(JSON.stringify(value));
-
-function getSupabaseClient() {
-  if (state.supabase) return state.supabase;
-
-  const validUrl = /^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(String(CONFIG.SUPABASE_URL || ""));
-  const key = String(CONFIG.SUPABASE_ANON_KEY || "");
-  const validKey = key.length > 30 && !key.includes("COLE_AQUI") && !key.includes("SUA_CHAVE");
-
-  if (!validUrl || !validKey || !window.supabase?.createClient) {
-    return null;
-  }
-
-  state.supabase = window.supabase.createClient(
-    CONFIG.SUPABASE_URL,
-    CONFIG.SUPABASE_ANON_KEY,
-    {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true
-      }
-    }
-  );
-
-  return state.supabase;
+function fmtDate(value) {
+  if (!value) return "—";
+  const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(value);
 }
 
-function dbEnabled() {
-  return Boolean(getSupabaseClient());
+function fmtDateTime(value) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
+
+const nowStamp = () => fmtDateTime(new Date().toISOString());
+const pct = (part, total) => total ? Math.round(part / total * 100) : 0;
+const initials = name => String(name || "?").trim().split(/\s+/).slice(0, 2).map(w => w[0]).join("").toUpperCase() || "?";
+const sortByName = (a, b) => String(a.nome || a.name || "").localeCompare(String(b.nome || b.name || ""), "pt-BR", { numeric: true, sensitivity: "base" });
+
+/* ---------- semanas ---------- */
 
 function currentWeekNumber() {
   const today = new Date();
   const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const diff = Math.floor((start - WEEK_ANCHOR) / 86400000);
-  return WEEK_ANCHOR_NUMBER + Math.floor(diff / 7);
-}
-
-function currentWeek() {
-  return `W${currentWeekNumber()}`;
-}
-
-function activeDashboardWeek() {
-  const saved = normalizeWeek(localStorage.getItem("ppaCurrentWeek") || "");
-  return saved || currentWeek();
-}
-
-function setActiveDashboardWeek(value) {
-  const week = normalizeWeek(value);
-  if (!week || !/^W\d+$/.test(week)) return;
-  localStorage.setItem("ppaCurrentWeek", week);
+  return WEEK_ANCHOR_NUMBER + Math.floor(Math.round((start - WEEK_ANCHOR) / 86400000) / 7);
 }
 
 function weekToNumber(value) {
-  const match = String(value || "").trim().toUpperCase().match(/^W?(\d+)$/);
-  return match ? Number(match[1]) : null;
+  const m = String(value ?? "").trim().toUpperCase().match(/^W?\s*(\d+)$/);
+  return m ? Number(m[1]) : null;
 }
 
-function normalizeWeek(value) {
-  const number = weekToNumber(value);
-  return Number.isFinite(number) ? `W${number}` : String(value || "").trim().toUpperCase();
-}
+const weekLabel = n => `W${n}`;
+const sortWeeks = list => [...new Set(list.filter(Boolean))].sort((a, b) => weekToNumber(a) - weekToNumber(b));
 
-function makeKey(label) {
-  return String(label || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 40) || `campo_${Date.now()}`;
-}
+/* ---------- valores das células ---------- */
 
-function columnTypeLabel(type) {
-  return ({
-    text: "Texto",
-    number: "Número",
-    date: "Data",
-    select: "Lista",
-    boolean: "Sim/Não"
-  })[type] || "Texto";
-}
+const isDateObject = value => Object.prototype.toString.call(value) === "[object Date]";
 
-function moduleById(id) {
-  return state.moduleCatalog.find(m => m.id === id) || null;
-}
-
-function moduleByDbId(id) {
-  return state.moduleCatalog.find(m => m.dbId === id) || null;
-}
-
-function selectedModule() {
-  return moduleById(state.selectedModuleId);
-}
-
-function currentUserLabel() {
-  return state.currentUser?.nome || "Usuário";
-}
-
-function currentTeamName() {
-  const person = state.peopleRecords.find(p => p.id === state.currentUser?.id);
-  if (person?.equipe_id) {
-    return state.teams.find(t => t.id === person.equipe_id)?.nome || "";
+function normalizeDateValue(value) {
+  // +12h absorve o deslocamento de fuso que o SheetJS pode aplicar em datas sem hora.
+  if (isDateObject(value)) return Number.isNaN(value.getTime()) ? null : toISODate(new Date(value.getTime() + 43200000));
+  if (typeof value === "number" && window.XLSX?.SSF) {
+    const p = XLSX.SSF.parse_date_code(value);
+    if (p) return `${p.y}-${pad2(p.m)}-${pad2(p.d)}`;
   }
-  return state.currentUser?.team || "";
+  const s = String(value ?? "").trim();
+  if (!s) return "";
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const br = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
+  if (br) {
+    const year = br[3].length === 2 ? `20${br[3]}` : br[3];
+    return `${year}-${pad2(br[2])}-${pad2(br[1])}`;
+  }
+  return null; // inválida
 }
 
-function normalizeLookupName(value) {
-  return String(value ?? "")
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .trim().toLowerCase()
-    .replace(/^(equipe|team|eq\.?)[\s._-]*/i, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+function normalizeBoolean(value) {
+  const s = normalizeText(value);
+  if (!s) return "";
+  if (["sim", "s", "yes", "y", "true", "1", "x", "ok"].includes(s)) return "SIM";
+  if (["nao", "n", "no", "false", "0"].includes(s)) return "NÃO";
+  return null;
 }
 
-function teamByName(name) {
-  const raw = String(name ?? "").trim();
-  if (!raw) return null;
-  const normalized = normalizeLookupName(raw);
-  const exact = state.teams.filter(t => normalizeLookupName(t.nome || t.name) === normalized);
-  if (exact.length === 1) return exact[0];
-  if (exact.length > 1) return null;
+function cellText(value) {
+  if (isDateObject(value)) return normalizeDateValue(value) || "";
+  return String(value ?? "").trim();
+}
 
-  // Aceita abreviações comuns da planilha: "A" corresponde a "Equipe A".
-  // Só retorna quando houver uma correspondência única para evitar vincular à equipe errada.
-  const aliases = state.teams.filter(t => {
-    const teamName = normalizeLookupName(t.nome || t.name);
-    return teamName === normalized || (normalized.length === 1 && teamName.split(" ").at(-1) === normalized);
+function formatColumnValue(column, value) {
+  if (value === null || value === undefined || value === "") return "—";
+  if (column?.type === "date") return fmtDate(value);
+  return String(value);
+}
+
+/* =========================================================
+   SUPABASE
+   ========================================================= */
+
+function db() {
+  if (state.sb) return state.sb;
+  const urlOk = /^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(SUPABASE_URL);
+  if (!urlOk || SUPABASE_KEY.length < 30 || !window.supabase?.createClient) return null;
+  state.sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
   });
-  return aliases.length === 1 ? aliases[0] : null;
+  return state.sb;
 }
 
-function personByName(name) {
-  const normalized = normalizeLookupName(name);
-  if (!normalized) return null;
-  const matches = state.peopleRecords.filter(p => normalizeLookupName(p.nome) === normalized);
-  return matches.length === 1 ? matches[0] : null;
+function requireDb() {
+  const sb = db();
+  if (!sb) throw new Error("Supabase não configurado. Verifique supabase-config.js.");
+  return sb;
 }
 
-function setupSidebar() {
-  const sidebar = $("appSidebar");
-  const shell = $("appShell");
-  const toggle = $("sidebarToggle");
-  if (!sidebar || !shell || !toggle) return;
-
-  const collapsed = localStorage.getItem("ppaSidebarCollapsed") === "1";
-  sidebar.classList.toggle("collapsed", collapsed);
-  shell.classList.toggle("sidebar-collapsed", collapsed);
-
-  toggle.setAttribute("aria-label", collapsed ? "Expandir menu" : "Recolher menu");
-  toggle.title = collapsed ? "Expandir menu" : "Recolher menu";
-
-  toggle.onclick = () => {
-    const next = !sidebar.classList.contains("collapsed");
-    sidebar.classList.toggle("collapsed", next);
-    shell.classList.toggle("sidebar-collapsed", next);
-    localStorage.setItem("ppaSidebarCollapsed", next ? "1" : "0");
-    toggle.setAttribute("aria-label", next ? "Expandir menu" : "Recolher menu");
-    toggle.title = next ? "Expandir menu" : "Recolher menu";
-  };
-}
-
-function toast(message) {
-  const target = $("toast");
-  if (!target) return;
-  target.textContent = message;
-  target.classList.add("show");
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => target.classList.remove("show"), 2800);
-}
-
-function showLogin(role) {
-  $("accessChooser")?.classList.add("hidden");
-  $("adminLoginCard")?.classList.toggle("hidden", role !== "admin");
-  $("technicianLoginCard")?.classList.toggle("hidden", role !== "technician");
-  if ($("adminLoginMessage")) $("adminLoginMessage").textContent = "";
-  if ($("techLoginMessage")) $("techLoginMessage").textContent = "";
-}
-
-function backToAccessChooser() {
-  $("accessChooser")?.classList.remove("hidden");
-  $("adminLoginCard")?.classList.add("hidden");
-  $("technicianLoginCard")?.classList.add("hidden");
-}
-
-function showAppForRole(role) {
-  state.role = role;
-  $("loginScreen")?.classList.add("hidden");
-  $("appShell")?.classList.remove("hidden");
-  $("adminNav")?.classList.toggle("hidden", role !== "admin");
-  $("techNav")?.classList.toggle("hidden", role !== "technician");
-  document.querySelectorAll(".admin-only").forEach(el => el.classList.toggle("hidden", role !== "admin"));
-
-  if ($("roleBadge")) $("roleBadge").textContent = ROLE_LABELS[role] || role;
-  if ($("sidebarRoleText")) $("sidebarRoleText").textContent = role === "admin" ? "Painel administrativo" : "Operação de campo";
-
-  if (role === "admin") {
-    $("topbarEyebrow") && ($("topbarEyebrow").textContent = "GESTÃO OPERACIONAL");
-    $("topbarTitle") && ($("topbarTitle").textContent = "PLANNING PRO");
-    $("topbarSubtitle") && ($("topbarSubtitle").textContent = "Dashboard, programação e gestão do projeto");
-    nav("dashboard");
-  } else {
-    $("topbarEyebrow") && ($("topbarEyebrow").textContent = "OPERAÇÃO DE CAMPO");
-    $("topbarTitle") && ($("topbarTitle").textContent = "PLANNING PRO");
-    $("topbarSubtitle") && ($("topbarSubtitle").textContent = "Acompanhe e registre as atividades em campo");
-    nav("home");
-  }
-
-  setupProfile();
-  enhancePlanningUI();
-}
-
-async function loginAdmin(email, password) {
-  const sb = getSupabaseClient();
-  if (!sb) {
-    if ($("adminLoginMessage")) $("adminLoginMessage").textContent = "Supabase não está configurado.";
-    return false;
-  }
-
-  try {
-    if ($("adminLoginMessage")) $("adminLoginMessage").textContent = "Entrando...";
-
-    const { data: authData, error: authError } = await sb.auth.signInWithPassword({
-      email,
-      password
-    });
-
-    if (authError) throw authError;
-
-    const user = authData?.user;
-    if (!user) throw new Error("Usuário autenticado não encontrado.");
-
-    const ok = await loadAuthenticatedProfile();
-    if (!ok) {
-      await sb.auth.signOut();
-      throw new Error("O usuário Auth não possui um perfil ativo em tb_pessoas ou a leitura foi bloqueada pelo banco.");
-    }
-
-    if (state.currentUser?.role !== "admin") {
-      await sb.auth.signOut();
-      state.currentUser = null;
-      state.role = null;
-      throw new Error("Esta conta não possui perfil de Administrador.");
-    }
-
-    sessionStorage.setItem("ppaSession", JSON.stringify(state.currentUser));
-    if ($("adminLoginMessage")) $("adminLoginMessage").textContent = "";
-
-    showAppForRole("admin");
-    await syncAll();
-    return true;
-  } catch (error) {
-    console.error("Erro no login administrativo:", error);
-    if ($("adminLoginMessage")) {
-      const message = error?.message || "Não foi possível realizar o login.";
-      $("adminLoginMessage").textContent = message;
-    }
-    return false;
-  }
-}
-
-async function loginTechnician(code) {
-  const normalizedCode = String(code || "").trim();
-
-  if (dbEnabled()) {
-    try {
-      const sb = getSupabaseClient();
-      const { data: pessoa, error } = await sb.rpc("login_tecnico_por_cracha", { p_cracha: normalizedCode });
-      if (error) throw error;
-      const pessoaRecord = Array.isArray(pessoa) ? pessoa[0] : pessoa;
-
-      if (!pessoaRecord || pessoaRecord.perfil === "ADMINISTRADOR") {
-        throw new Error("Código não encontrado, inativo ou sem permissão de técnico.");
-      }
-
-      const team = state.teams.find(t => t.id === pessoaRecord.equipe_id);
-      state.currentUser = {
-        id: pessoaRecord.id,
-        authUserId: pessoaRecord.auth_user_id,
-        nome: pessoaRecord.nome,
-        identificador: pessoaRecord.cracha,
-        perfil: pessoaRecord.perfil,
-        disciplina: pessoaRecord.disciplina,
-        equipeId: pessoaRecord.equipe_id,
-        team: team?.nome || "",
-        role: "technician"
-      };
-      sessionStorage.setItem("ppaSession", JSON.stringify(state.currentUser));
-      showAppForRole("technician");
-      await syncAll();
-      return true;
-    } catch (error) {
-      console.error("Erro no login do técnico:", error);
-      if ($("techLoginMessage")) $("techLoginMessage").textContent = error?.message || "Não foi possível entrar.";
-      return false;
-    }
-  }
-
-  if ($("techLoginMessage")) $("techLoginMessage").textContent = "Supabase não está configurado.";
-  return false;
-}
-
-async function logout() {
-  try {
-    const sb = getSupabaseClient();
-    if (sb) await sb.auth.signOut();
-  } catch (error) {
-    console.error("Erro ao sair:", error);
-  }
-
-  sessionStorage.removeItem("ppaSession");
-  state.currentUser = null;
-  state.role = null;
-  state.rows = [];
-  state.programacoes = [];
-
-  $("appShell")?.classList.add("hidden");
-  $("loginScreen")?.classList.remove("hidden");
-  backToAccessChooser();
-  $("adminLoginForm")?.reset();
-  $("technicianLoginForm")?.reset();
-}
-
-function nav(screen) {
-  const allowedAdmin = [
-    "dashboard",
-    "programacao",
-    "program-history",
-    "atividades",
-    "acessos",
-    "relatorios",
-    "configuracoes",
-    "profile"
-  ];
-  const allowedTech = ["home", "dashboard", "history", "profile"];
-  const allowed = state.role === "admin" ? allowedAdmin : allowedTech;
-
-  if (!allowed.includes(screen)) screen = state.role === "admin" ? "dashboard" : "home";
-
-  document.querySelectorAll(".screen").forEach(el => el.classList.remove("active-screen"));
-  $("screen-" + screen)?.classList.add("active-screen");
-
-  document.querySelectorAll(".nav-item").forEach(button => {
-    button.classList.toggle("active", button.dataset.screen === screen);
-  });
-
-  if (screen === "dashboard") renderDashboard();
-  if (screen === "programacao") renderProgramacao();
-  if (screen === "program-history") renderProgramHistory();
-  if (screen === "atividades") renderModules();
-  if (screen === "acessos") renderAccesses();
-  if (screen === "relatorios") renderReports();
-  if (screen === "configuracoes") setupSettings();
-  if (screen === "profile") hydrateProfileUI();
-  if (screen === "history") renderHistory();
-}
-
-/* =========================
-   AUTH / PROFILE
-   ========================= */
-
-async function loadAuthenticatedProfile() {
-  const sb = getSupabaseClient();
-
-  if (!sb) {
-    console.error("Supabase não está configurado.");
-    return false;
-  }
-
-  try {
-    const { data: authData, error: authError } = await sb.auth.getUser();
-    if (authError) throw authError;
-
-    const user = authData?.user;
-    if (!user) return false;
-
-    const { data: pessoa, error } = await sb
-      .from("tb_pessoas")
-      .select("id,nome,cracha,perfil,ativo,auth_user_id,equipe_id,disciplina")
-      .eq("auth_user_id", user.id)
-      .eq("ativo", true)
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      console.error("Erro ao carregar tb_pessoas:", error);
-      if (error.code === "42501" || error.status === 403) {
-        console.error("A role authenticated precisa de SELECT em public.tb_pessoas além da política RLS.");
-      }
-      return false;
-    }
-
-    if (!pessoa) return false;
-
-    const team = state.teams.find(t => t.id === pessoa.equipe_id);
-
-    state.currentUser = {
-      id: pessoa.id,
-      authUserId: pessoa.auth_user_id,
-      nome: pessoa.nome,
-      identificador: pessoa.cracha,
-      perfil: pessoa.perfil,
-      disciplina: pessoa.disciplina,
-      equipeId: pessoa.equipe_id,
-      team: team?.nome || "",
-      email: user.email || "",
-      role: pessoa.perfil === "ADMINISTRADOR" ? "admin" : "technician"
-    };
-
-    sessionStorage.setItem("ppaSession", JSON.stringify(state.currentUser));
-    return true;
-  } catch (error) {
-    console.error("Falha ao carregar perfil autenticado:", error);
-    return false;
-  }
-}
-
-function hydrateProfileUI() {
-  let user = state.currentUser;
-  if (!user) {
-    try {
-      const cached = JSON.parse(sessionStorage.getItem("ppaSession") || "null");
-      if (cached) user = cached;
-    } catch {}
-  }
-  if (!user) return;
-
-  state.currentUser = user;
-  setupProfile();
-
-  const profileInfo = document.querySelector("#screen-profile .profile-info");
-  if (!profileInfo) return;
-
-  const rows = [
-    ["E-mail", user.email || "—"],
-    ["Equipe", user.team || currentTeamName() || "—"],
-    ["Disciplina", user.disciplina || "—"]
-  ];
-
-  rows.forEach(([label, value]) => {
-    let row = profileInfo.querySelector(`[data-profile-extra="${makeKey(label)}"]`);
-    if (!row) {
-      row = document.createElement("div");
-      row.className = "info-row profile-extra-row";
-      row.dataset.profileExtra = makeKey(label);
-      profileInfo.insertBefore(row, $("logoutBtn"));
-    }
-    row.innerHTML = `<span>${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong>`;
-  });
-}
-
-function setupProfile() {
-  const user = state.currentUser;
-  if (!user) return;
-
-  const initials = String(user.nome || "Usuário")
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map(x => x[0])
-    .join("")
-    .toUpperCase();
-
-  $("profileAvatar") && ($("profileAvatar").textContent = initials || "US");
-  $("profileName") && ($("profileName").textContent = user.nome || "Usuário");
-  $("profileName2") && ($("profileName2").textContent = user.nome || "—");
-  $("profileBadge") && ($("profileBadge").textContent = user.email || user.identificador || "—");
-  $("profileBadge2") && ($("profileBadge2").textContent = user.identificador || user.email || "—");
-  $("profileRole2") && ($("profileRole2").textContent = user.perfil || ROLE_LABELS[user.role] || "—");
-  const activeWeek = activeDashboardWeek();
-  $("profileWeek") && ($("profileWeek").textContent = activeWeek);
-  const weekInput = $("profileWeekInput");
-  if (weekInput) {
-    weekInput.value = activeWeek;
-    const admin = state.role === "admin";
-    weekInput.readOnly = !admin;
-    weekInput.disabled = !admin;
-    $("profileWeekHelp") && ($("profileWeekHelp").textContent = admin ? "Informe manualmente no padrão W###. Ex.: W136." : "Semana atual definida pelo Administrador.");
-    if (!weekInput.dataset.bound) {
-      weekInput.dataset.bound = "1";
-      weekInput.addEventListener("input", () => {
-        if (state.role !== "admin") return;
-        let value = String(weekInput.value || "").toUpperCase().replace(/[^W0-9]/g, "");
-        if (value && !value.startsWith("W")) value = "W" + value;
-        value = value.slice(0, 5);
-        weekInput.value = value;
-      });
-      weekInput.addEventListener("change", () => {
-        if (state.role !== "admin") return;
-        const normalized = normalizeWeek(weekInput.value);
-        if (!/^W\d{3}$/.test(normalized)) { weekInput.value = activeDashboardWeek(); toast("Informe a semana no formato W###."); return; }
-        setActiveDashboardWeek(normalized);
-        $("profileWeek") && ($("profileWeek").textContent = normalized);
-        renderDashboard();
-        toast(`Semana atual definida como ${normalized}.`);
-      });
-    }
-  }
-  $("roleBadge") && ($("roleBadge").textContent = ROLE_LABELS[user.role] || user.role || "—");
-  $("sidebarRoleText") && ($("sidebarRoleText").textContent = user.role === "admin" ? "Painel administrativo" : "Operação de campo");
-}
-
-/* =========================
-   SETTINGS
-   ========================= */
-
-const DEFAULT_SETTINGS = clone(state.settings);
-
-function loadSettings() {
-  try {
-    const saved = JSON.parse(localStorage.getItem("ppaSettings") || "null");
-    state.settings = { ...DEFAULT_SETTINGS, ...(saved || {}) };
-  } catch {
-    state.settings = clone(DEFAULT_SETTINGS);
-  }
-  applySettings();
-}
-
-function persistSettings() {
-  localStorage.setItem("ppaSettings", JSON.stringify(state.settings));
-  applySettings();
-}
-
-function applySettings() {
-  const root = document.documentElement;
-  root.style.setProperty("--sys-primary", state.settings.primary);
-  root.style.setProperty("--sys-accent", state.settings.accent);
-  root.style.setProperty("--sys-header", state.settings.header);
-  root.style.setProperty("--sys-bg", state.settings.background);
-
-  document.querySelectorAll(".brand-mark").forEach(element => {
-    if (state.settings.logo) {
-      element.style.backgroundImage = `url(${state.settings.logo})`;
-      element.style.backgroundSize = "contain";
-      element.style.backgroundRepeat = "no-repeat";
-      element.style.backgroundPosition = "center";
-      element.textContent = "";
-    } else {
-      element.style.backgroundImage = "";
-      element.textContent = "PP";
-    }
-  });
-}
-
-function currentSettings() {
-  return state.settings || DEFAULT_SETTINGS;
-}
-
-function setupSettings() {
-  const settings = currentSettings();
-  const colorMap = {
-    settingsPrimaryColor: "primary",
-    settingsAccentColor: "accent",
-    settingsHeaderColor: "header",
-    settingsBgColor: "background",
-    settingsChartPlanned: "chartPlanned",
-    settingsChartDone: "chartDone"
-  };
-
-  Object.entries(colorMap).forEach(([id, key]) => {
-    if ($(id)) $(id).value = settings[key];
-  });
-
-  const preview = $("settingsLogoPreview");
-  const placeholder = $("settingsLogoPlaceholder");
-  if (preview && placeholder) {
-    if (settings.logo) {
-      preview.src = settings.logo;
-      preview.classList.remove("hidden");
-      placeholder.classList.add("hidden");
-    } else {
-      preview.classList.add("hidden");
-      placeholder.classList.remove("hidden");
-    }
-  }
-
-  const input = $("settingsLogoInput");
-  if (input && !input.dataset.bound) {
-    input.dataset.bound = "1";
-    input.onchange = event => {
-      const file = event.target.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        state.settings.logo = String(reader.result || "");
-        setupSettings();
-      };
-      reader.readAsDataURL(file);
-    };
-  }
-
-  if ($("removeSettingsLogoBtn")) {
-    $("removeSettingsLogoBtn").onclick = () => {
-      state.settings.logo = "";
-      if ($("settingsLogoInput")) $("settingsLogoInput").value = "";
-      setupSettings();
-    };
-  }
-
-  if ($("saveSettingsBtn")) {
-    $("saveSettingsBtn").onclick = () => {
-      state.settings = {
-        ...state.settings,
-        primary: $("settingsPrimaryColor")?.value || state.settings.primary,
-        accent: $("settingsAccentColor")?.value || state.settings.accent,
-        header: $("settingsHeaderColor")?.value || state.settings.header,
-        background: $("settingsBgColor")?.value || state.settings.background,
-        chartPlanned: $("settingsChartPlanned")?.value || state.settings.chartPlanned,
-        chartDone: $("settingsChartDone")?.value || state.settings.chartDone
-      };
-      persistSettings();
-      if ($("settingsMessage")) {
-        $("settingsMessage").textContent = "Configurações salvas.";
-        $("settingsMessage").classList.add("ok");
-      }
-    };
-  }
-
-  if ($("resetSettingsBtn")) {
-    $("resetSettingsBtn").onclick = () => {
-      state.settings = clone(DEFAULT_SETTINGS);
-      persistSettings();
-      setupSettings();
-      if ($("settingsMessage")) {
-        $("settingsMessage").textContent = "Padrão restaurado.";
-        $("settingsMessage").classList.add("ok");
-      }
-    };
-  }
-}
-
-/* =========================
-   MODULES / ACTIVITIES
-   ========================= */
-
-function normalizeModules() {
-  try {
-    const saved = JSON.parse(localStorage.getItem("ppaModules") || "null");
-    state.moduleCatalog = Array.isArray(saved) && saved.length ? saved : clone(MODULE_DEFAULTS);
-  } catch {
-    state.moduleCatalog = clone(MODULE_DEFAULTS);
-  }
-
-  state.moduleCatalog = state.moduleCatalog.map(module => ({
-    ...module,
-    columns: (module.columns || []).map(column => ({
-      ...column,
-      technicianEditable: Boolean(column.technicianEditable),
-      options: Array.isArray(column.options) ? column.options : []
-    }))
-  }));
-
-  if (!state.selectedModuleId || !moduleById(state.selectedModuleId)) {
-    state.selectedModuleId = state.moduleCatalog[0]?.id || null;
-  }
-
-  localStorage.setItem("ppaModules", JSON.stringify(state.moduleCatalog));
-}
-
-async function loadModulesFromDB() {
-  const sb = getSupabaseClient();
-  if (!sb) return false;
-
-  const { data: modules, error } = await sb
-    .from("tb_atividades")
-    .select("id,nome,descricao,ativo,created_at,updated_at")
-    .eq("ativo", true)
-    .order("created_at", { ascending: true });
-
-  if (error) {
-    console.error("Erro ao carregar tb_atividades:", error);
-    return false;
-  }
-
-  const { data: columns, error: columnError } = await sb
-    .from("tb_atividade_colunas")
-    .select("*")
-    .order("ordem", { ascending: true });
-
-  if (columnError) {
-    console.warn("Não foi possível carregar tb_atividade_colunas:", columnError.message);
-  }
-
-  if (!modules?.length) return false;
-
-  const rebuilt = modules.map(dbModule => {
-    const existing = state.moduleCatalog.find(m => String(m.name).toLowerCase() === String(dbModule.nome).toLowerCase()) || null;
-    const dbColumns = (columns || [])
-      .filter(column => column.atividade_id === dbModule.id)
-      .map(column => ({
-        id: existing?.columns?.find(c => c.dbId === column.id || c.key === column.chave)?.id || `col-${column.id}`,
-        dbId: column.id,
-        key: column.chave,
-        label: column.rotulo,
-        type: column.tipo,
-        required: Boolean(column.obrigatorio),
-        technicianEditable: Boolean(column.editavel_tecnico),
-        options: Array.isArray(column.opcoes) ? column.opcoes : []
-      }));
-
-    return {
-      id: existing?.id || makeKey(dbModule.nome),
-      dbId: dbModule.id,
-      name: dbModule.nome,
-      description: dbModule.descricao || "",
-      columns: dbColumns.length ? dbColumns : (existing?.columns || [])
-    };
-  });
-
-  state.moduleCatalog = rebuilt;
-  if (!state.selectedModuleId || !moduleById(state.selectedModuleId)) {
-    state.selectedModuleId = state.moduleCatalog[0]?.id || null;
-  }
-  localStorage.setItem("ppaModules", JSON.stringify(state.moduleCatalog));
-  return true;
-}
-
-async function syncModulesToDB() {
-  const sb = getSupabaseClient();
-  if (!sb || state.role !== "admin") return;
-
-  for (const module of state.moduleCatalog) {
-    let dbId = module.dbId || null;
-
-    if (dbId) {
-      const { error } = await sb
-        .from("tb_atividades")
-        .update({
-          nome: module.name,
-          descricao: module.description || null,
-          ativo: true,
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", dbId);
-      if (error) throw error;
-    } else {
-      const { data: existing, error: findError } = await sb
-        .from("tb_atividades")
-        .select("id,nome")
-        .ilike("nome", module.name)
-        .limit(1)
-        .maybeSingle();
-      if (findError) throw findError;
-
-      if (existing) {
-        dbId = existing.id;
-        module.dbId = dbId;
-      } else {
-        const { data: inserted, error: insertError } = await sb
-          .from("tb_atividades")
-          .insert({
-            nome: module.name,
-            descricao: module.description || null,
-            ativo: true
-          })
-          .select("id")
-          .single();
-        if (insertError) throw insertError;
-        dbId = inserted.id;
-        module.dbId = dbId;
-      }
-    }
-
-    const { data: existingColumns, error: existingColumnError } = await sb
-      .from("tb_atividade_colunas")
-      .select("id,chave")
-      .eq("atividade_id", dbId);
-    if (existingColumnError) throw existingColumnError;
-
-    for (let index = 0; index < module.columns.length; index += 1) {
-      const column = module.columns[index];
-      const old = existingColumns?.find(item => item.chave === column.key) || null;
-      const payload = {
-        atividade_id: dbId,
-        chave: column.key,
-        rotulo: column.label,
-        tipo: column.type,
-        obrigatorio: Boolean(column.required),
-        editavel_tecnico: Boolean(column.technicianEditable),
-        opcoes: Array.isArray(column.options) ? column.options : [],
-        ordem: index,
-        updated_at: new Date().toISOString()
-      };
-
-      let result;
-      if (old?.id || column.dbId) {
-        result = await sb
-          .from("tb_atividade_colunas")
-          .update(payload)
-          .eq("id", column.dbId || old.id);
-      } else {
-        result = await sb
-          .from("tb_atividade_colunas")
-          .insert(payload)
-          .select("id")
-          .single();
-        if (!result.error && result.data?.id) column.dbId = result.data.id;
-      }
-      if (result.error) throw result.error;
-    }
-  }
-
-  localStorage.setItem("ppaModules", JSON.stringify(state.moduleCatalog));
-}
-
-function loadModuleCatalog() {
-  normalizeModules();
-  moduleRecordStore();
-}
-
-function persistModules() {
-  localStorage.setItem("ppaModules", JSON.stringify(state.moduleCatalog));
-  syncModulesToDB().catch(error => {
-    console.error("Erro ao sincronizar atividades:", error);
-    toast("Atividade salva localmente, mas não foi sincronizada no banco.");
-  });
-}
-
-function moduleRecordStore() {
-  try {
-    state.moduleRecords = JSON.parse(localStorage.getItem("ppaModuleRecords") || "{}") || {};
-  } catch {
-    state.moduleRecords = {};
-  }
-  if (typeof state.moduleRecords !== "object") state.moduleRecords = {};
-  return state.moduleRecords;
-}
-
-function persistModuleRecords() {
-  localStorage.setItem("ppaModuleRecords", JSON.stringify(state.moduleRecords || {}));
-}
-
-function renderModules() {
-  normalizeModules();
-  const modules = state.moduleCatalog;
-
-  if ($("moduleCountBadge")) $("moduleCountBadge").textContent = modules.length;
-  if ($("moduleCards")) {
-    $("moduleCards").innerHTML = modules.map(module => `
-      <button class="module-card ${module.id === state.selectedModuleId ? "active" : ""}" data-module-id="${escapeHTML(module.id)}">
-        <h4>${escapeHTML(module.name)}</h4>
-        <p>${escapeHTML(module.description || "Sem descrição")}</p>
-        <div class="module-card-meta">
-          <span><b>${module.columns.length}</b> colunas</span>
-          <span><b>${(moduleRecordStore()[module.id] || []).length}</b> registros</span>
-        </div>
-      </button>
-    `).join("");
-
-    $("moduleCards").querySelectorAll("[data-module-id]").forEach(button => {
-      button.onclick = () => {
-        state.selectedModuleId = button.dataset.moduleId;
-        renderModules();
-      };
-    });
-  }
-
-  const module = selectedModule();
-  $("moduleEditorEmpty")?.classList.toggle("hidden", Boolean(module));
-  $("moduleEditor")?.classList.toggle("hidden", !module);
-  if (!module) return;
-
-  $("moduleTitle") && ($("moduleTitle").textContent = module.name);
-  $("moduleDescription") && ($("moduleDescription").textContent = module.description || "");
-  $("moduleColumnCount") && ($("moduleColumnCount").textContent = module.columns.length);
-  $("moduleRequiredCount") && ($("moduleRequiredCount").textContent = module.columns.filter(c => c.required).length);
-  $("moduleRecordCount") && ($("moduleRecordCount").textContent = (moduleRecordStore()[module.id] || []).length);
-  const pdfActions = $("activityPdfTemplateActions");
-  const pdfTitle = $("activityPdfTemplateTitle");
-  const pdfDescription = $("activityPdfTemplateDescription");
-  const hasPdfTemplate = /loop|preserva/i.test(module.name);
-  pdfActions?.classList.toggle("hidden", !hasPdfTemplate);
-  if (hasPdfTemplate) {
-    const preservation = /preserva/i.test(module.name);
-    if (pdfTitle) pdfTitle.textContent = `Modelo PDF • ${preservation ? "Preservação com foto" : "Loop Teste"}`;
-    if (pdfDescription) pdfDescription.textContent = preservation ? "Modelo com áreas de evidência fotográfica para registro em campo." : "Modelo de relatório para identificação, resultado e observações do teste.";
-  }
-  $("maskFileName") && ($("maskFileName").textContent = `mascara_${makeKey(module.name)}.xlsx`);
-
-  const host = $("columnRows");
-  if (host) {
-    host.className = `column-list${state.columnViewMode === "side" ? " side-view" : " stacked-view"}`;
-    host.innerHTML = module.columns.map((column, index) => `
-      <div class="column-row" draggable="true" data-column-id="${escapeHTML(column.id)}">
-        <div class="column-grip">☷</div>
-        <div class="column-order">
-          <button class="mini-btn" data-move-column-up="${escapeHTML(column.id)}" ${index === 0 ? "disabled" : ""}>↑</button>
-          <button class="mini-btn" data-move-column-down="${escapeHTML(column.id)}" ${index === module.columns.length - 1 ? "disabled" : ""}>↓</button>
-        </div>
-        <div class="column-info"><strong>${escapeHTML(column.label)}</strong><small>${escapeHTML(column.key)}</small></div>
-        <div class="column-type"><span class="module-badge">${columnTypeLabel(column.type)}</span></div>
-        <div class="column-required">${column.required ? "Obrigatória" : "Opcional"}</div>
-        <div class="column-required">${column.technicianEditable ? "Editável pelo Técnico" : "Bloqueada"}</div>
-        <div class="drag-hint">${column.type === "select" ? escapeHTML((column.options || []).join(", ")) : ""}</div>
-        <div class="column-actions">
-          <button class="mini-btn" data-edit-column="${escapeHTML(column.id)}">✎</button>
-          <button class="mini-btn danger" data-delete-column="${escapeHTML(column.id)}">×</button>
-        </div>
-      </div>
-    `).join("");
-
-    host.querySelectorAll("[data-edit-column]").forEach(button => {
-      button.onclick = () => openColumnModal(button.dataset.editColumn);
-    });
-    host.querySelectorAll("[data-delete-column]").forEach(button => {
-      button.onclick = () => deleteColumn(button.dataset.deleteColumn);
-    });
-    host.querySelectorAll("[data-move-column-up]").forEach(button => {
-      button.onclick = () => moveColumn(button.dataset.moveColumnUp, -1);
-    });
-    host.querySelectorAll("[data-move-column-down]").forEach(button => {
-      button.onclick = () => moveColumn(button.dataset.moveColumnDown, 1);
-    });
-
-    setupColumnDragDrop();
-  }
-
-  renderColumnViewPreview(module);
-  renderMaskPreview(module);
-}
-
-function setColumnViewMode(mode) {
-  state.columnViewMode = mode === "side" ? "side" : "stacked";
-  localStorage.setItem("ppaColumnViewMode", state.columnViewMode);
-  document.querySelectorAll("[data-column-view]").forEach(button => {
-    button.classList.toggle("active", button.dataset.columnView === state.columnViewMode);
-  });
-  if (selectedModule()) renderModules();
-}
-
-function renderColumnViewPreview(module) {
-  const preview = $("columnViewPreview");
-  if (!preview) return;
-  preview.classList.toggle("stacked", state.columnViewMode === "stacked");
-  preview.classList.toggle("side", state.columnViewMode === "side");
-  preview.innerHTML = module.columns.map((column, index) => `
-    <div class="column-preview-card">
-      <span class="preview-order">${index + 1}</span>
-      <span class="preview-label">${escapeHTML(column.label)}</span>
-      <span class="preview-meta">${columnTypeLabel(column.type)}</span>
-      <span class="preview-chip">${column.required ? "Obrigatória" : "Opcional"}</span>
-    </div>
-  `).join("");
-}
-
-function setupColumnDragDrop() {
-  const list = $("columnRows");
-  if (!list) return;
-  let dragged = null;
-
-  list.querySelectorAll(".column-row").forEach(row => {
-    row.addEventListener("dragstart", () => {
-      dragged = row.dataset.columnId;
-      row.classList.add("dragging");
-    });
-    row.addEventListener("dragend", () => row.classList.remove("dragging"));
-    row.addEventListener("dragover", event => {
-      event.preventDefault();
-      row.classList.add("drag-over");
-    });
-    row.addEventListener("dragleave", () => row.classList.remove("drag-over"));
-    row.addEventListener("drop", event => {
-      event.preventDefault();
-      row.classList.remove("drag-over");
-      if (!dragged || dragged === row.dataset.columnId) return;
-      const module = selectedModule();
-      if (!module) return;
-      const from = module.columns.findIndex(c => c.id === dragged);
-      const to = module.columns.findIndex(c => c.id === row.dataset.columnId);
-      if (from < 0 || to < 0) return;
-      const [moved] = module.columns.splice(from, 1);
-      module.columns.splice(to, 0, moved);
-      persistModules();
-      renderModules();
-    });
-  });
-}
-
-function openActivityModal(id = null) {
-  state.editingModuleId = id;
-  const module = id ? moduleById(id) : null;
-  $("activityModal")?.classList.remove("hidden");
-  if ($("activityModalTitle")) $("activityModalTitle").textContent = module ? "Editar atividade" : "Nova atividade";
-  if ($("activityNameInput")) $("activityNameInput").value = module?.name || "";
-  if ($("activityDescriptionInput")) $("activityDescriptionInput").value = module?.description || "";
-  if ($("activityFormMessage")) $("activityFormMessage").textContent = "";
-}
-
-function closeActivityModal() {
-  $("activityModal")?.classList.add("hidden");
-  state.editingModuleId = null;
-}
-
-function saveActivity() {
-  const name = $("activityNameInput")?.value.trim();
-  const description = $("activityDescriptionInput")?.value.trim() || "";
-  if (!name) {
-    if ($("activityFormMessage")) $("activityFormMessage").textContent = "Informe o nome da atividade.";
-    return;
-  }
-
-  const duplicate = state.moduleCatalog.some(
-    module => module.name.toLowerCase() === name.toLowerCase() && module.id !== state.editingModuleId
-  );
-  if (duplicate) {
-    if ($("activityFormMessage")) $("activityFormMessage").textContent = "Já existe uma atividade com esse nome.";
-    return;
-  }
-
-  if (state.editingModuleId) {
-    const module = moduleById(state.editingModuleId);
-    if (module) {
-      module.name = name;
-      module.description = description;
-    }
-  } else {
-    const id = `mod-${Date.now()}`;
-    state.moduleCatalog.push({
-      id,
-      dbId: null,
-      name,
-      description,
-      columns: []
-    });
-    state.selectedModuleId = id;
-  }
-
-  persistModules();
-  closeActivityModal();
-  renderModules();
-  setupProgrammingSelectors();
-  toast("Atividade salva.");
-}
-
-function deleteActivity() {
-  const module = selectedModule();
-  if (!module) return;
-  state.pendingDeleteModuleId = module.id;
-  if ($("deleteModuleText")) $("deleteModuleText").textContent = `A atividade “${module.name}” será removida do catálogo. As programações já gravadas não serão apagadas automaticamente.`;
-  $("deleteModuleConfirm")?.classList.remove("hidden");
-}
-
-async function confirmDeleteActivity() {
-  const id = state.pendingDeleteModuleId;
-  const module = moduleById(id);
-  if (!module) return;
-
-  try {
-    const sb = getSupabaseClient();
-    if (sb && module.dbId) {
-      const { error } = await sb
-        .from("tb_atividades")
-        .update({ ativo: false, updated_at: new Date().toISOString() })
-        .eq("id", module.dbId);
-      if (error) throw error;
-    }
-
-    state.moduleCatalog = state.moduleCatalog.filter(m => m.id !== id);
-    delete moduleRecordStore()[id];
-    persistModuleRecords();
-    persistModules();
-    state.selectedModuleId = state.moduleCatalog[0]?.id || null;
-    $("deleteModuleConfirm")?.classList.add("hidden");
-    renderModules();
-    setupProgrammingSelectors();
-    renderDashboard();
-    toast("Atividade removida.");
-  } catch (error) {
-    toast(error?.message || "Não foi possível remover a atividade.");
-  }
-}
-
-function openColumnModal(id = null) {
-  const module = selectedModule();
-  if (!module) return;
-  state.editingColumnId = id;
-  const column = id ? module.columns.find(item => item.id === id) : null;
-
-  $("columnModal")?.classList.remove("hidden");
-  $("columnModalTitle") && ($("columnModalTitle").textContent = column ? "Editar coluna" : "Nova coluna");
-  $("columnLabelInput") && ($("columnLabelInput").value = column?.label || "");
-  $("columnKeyInput") && ($("columnKeyInput").value = column?.key || "");
-  $("columnTypeInput") && ($("columnTypeInput").value = column?.type || "text");
-  $("columnRequiredInput") && ($("columnRequiredInput").checked = Boolean(column?.required));
-  $("columnTechnicianEditableInput") && ($("columnTechnicianEditableInput").checked = Boolean(column?.technicianEditable));
-  $("columnOptionsInput") && ($("columnOptionsInput").value = (column?.options || []).join(", "));
-  $("columnFormMessage") && ($("columnFormMessage").textContent = "");
-}
-
-function closeColumnModal() {
-  $("columnModal")?.classList.add("hidden");
-  state.editingColumnId = null;
-}
-
-function saveColumn() {
-  const module = selectedModule();
-  if (!module) return;
-
-  const label = $("columnLabelInput")?.value.trim() || "";
-  const key = makeKey($("columnKeyInput")?.value.trim() || label);
-  const type = $("columnTypeInput")?.value || "text";
-  const required = Boolean($("columnRequiredInput")?.checked);
-  const technicianEditable = Boolean($("columnTechnicianEditableInput")?.checked);
-  const options = ($( "columnOptionsInput")?.value || "")
-    .split(",")
-    .map(item => item.trim())
-    .filter(Boolean);
-
-  if (!label) {
-    if ($("columnFormMessage")) $("columnFormMessage").textContent = "Informe o nome exibido.";
-    return;
-  }
-
-  const duplicate = module.columns.some(column => column.key === key && column.id !== state.editingColumnId);
-  if (duplicate) {
-    if ($("columnFormMessage")) $("columnFormMessage").textContent = "A chave desta coluna já existe neste módulo.";
-    return;
-  }
-
-  if (state.editingColumnId) {
-    const column = module.columns.find(item => item.id === state.editingColumnId);
-    if (column) Object.assign(column, { label, key, type, required, technicianEditable, options: type === "select" ? options : [] });
-  } else {
-    module.columns.push({
-      id: `col-${Date.now()}`,
-      dbId: null,
-      label,
-      key,
-      type,
-      required,
-      technicianEditable,
-      options: type === "select" ? options : []
-    });
-  }
-
-  persistModules();
-  closeColumnModal();
-  renderModules();
-  toast("Coluna salva.");
-}
-
-function deleteColumn(id) {
-  const module = selectedModule();
-  if (!module) return;
-  const column = module.columns.find(item => item.id === id);
-  if (!column) return;
-  if (!confirm(`Excluir a coluna “${column.label}”?`)) return;
-  module.columns = module.columns.filter(item => item.id !== id);
-  persistModules();
-  renderModules();
-  toast("Coluna excluída.");
-}
-
-function moveColumn(id, direction) {
-  const module = selectedModule();
-  if (!module) return;
-  const index = module.columns.findIndex(item => item.id === id);
-  if (index < 0) return;
-  const target = index + direction;
-  if (target < 0 || target >= module.columns.length) return;
-  [module.columns[index], module.columns[target]] = [module.columns[target], module.columns[index]];
-  persistModules();
-  renderModules();
-}
-
-function renderMaskPreview(module) {
-  const table = $("maskPreviewTable");
-  if (!table) return;
-  const headers = module.columns.map(column => `<th>${escapeHTML(column.label)}${column.required ? " *" : ""}</th>`).join("");
-  const sample = module.columns.map(column => {
-    const value = column.type === "date"
-      ? "AAAA-MM-DD"
-      : column.type === "number"
-        ? "0"
-        : column.type === "select"
-          ? (column.options?.[0] || "OPÇÃO")
-          : column.type === "boolean"
-            ? "SIM"
-            : "—";
-    return `<td>${escapeHTML(value)}</td>`;
-  }).join("");
-  table.innerHTML = `<thead><tr>${headers}</tr></thead><tbody><tr>${sample}</tr><tr>${module.columns.map(() => "<td></td>").join("")}</tr></tbody>`;
-}
-
-/* =========================
-   WEEKS
-   ========================= */
-
-async function loadWeeks() {
-  const sb = getSupabaseClient();
-  if (!sb) { state.weeks = []; return false; }
-  const { data, error } = await sb.from("tb_semanas").select("id,semana,ativa,created_at").eq("ativa", true).order("semana");
-  if (error) { console.error("Erro ao carregar semanas:", error); state.weeks = []; return false; }
-  state.weeks = data || [];
-  renderWeekFolders();
-  return true;
-}
-
-function renderWeekFolders() {
-  const host = $("weekFolders");
-  if (!host) return;
-  const weeks = [...(state.weeks || [])].sort((a,b) => weekToNumber(b.semana) - weekToNumber(a.semana));
-  host.innerHTML = weeks.length ? weeks.map((week, index) => `
-    <details class="week-folder" ${index === 0 ? "open" : ""}>
-      <summary class="week-folder-summary">
-        <span class="folder-glyph" aria-hidden="true">📁</span>
-        <span class="week-folder-name">${escapeHTML(week.semana)}</span>
-        <span class="week-folder-meta">${week.ativa === false ? "Inativa" : "Semana de programação"}</span>
-        <span class="week-folder-chevron" aria-hidden="true">⌄</span>
-      </summary>
-      <div class="week-folder-content">
-        <span class="week-folder-document">📄</span>
-        <div><strong>${escapeHTML(week.semana)}</strong><small>Cadastro de semana do Planning Pro</small></div>
-      </div>
-    </details>`).join("") : `<div class="week-folder-empty">Nenhuma semana cadastrada. Use “Nova semana” para criar a primeira.</div>`;
-}
-
-function nextWeekNumber() {
-  const nums = state.weeks.map(item => weekToNumber(item.semana)).filter(Number.isFinite);
-  return Math.max(currentWeekNumber(), ...(nums.length ? nums : [0])) + 1;
-}
-
-function openWeekModal() {
-  const modal = $("weekModal");
-  if (!modal) return;
-  const input = $("weekNumberInput");
-  const message = $("weekFormMessage");
-  modal.classList.remove("hidden");
-  modal.setAttribute("aria-hidden", "false");
-  if (input) {
-    input.value = nextWeekNumber();
-    window.setTimeout(() => input.focus(), 40);
-    input.select();
-  }
-  if (message) message.textContent = "";
-}
-
-function closeWeekModal() {
-  const modal = $("weekModal");
-  if (!modal) return;
-  modal.classList.add("hidden");
-  modal.setAttribute("aria-hidden", "true");
-  $("weekForm")?.reset();
-  if ($("weekFormMessage")) $("weekFormMessage").textContent = "";
-}
-
-async function createWeek(event) {
-  event?.preventDefault?.();
-  const sb = getSupabaseClient();
-  if (!sb) {
-    if ($("weekFormMessage")) $("weekFormMessage").textContent = "Supabase não está configurado.";
-    return;
-  }
-  const number = Number($("weekNumberInput")?.value);
-  if (!Number.isInteger(number) || number <= 0 || number > 999) {
-    if ($("weekFormMessage")) $("weekFormMessage").textContent = "Informe um número de semana válido, entre 1 e 999.";
-    return;
-  }
-  const semana = `W${number}`;
-  const existing = state.weeks.some(item => normalizeWeek(item.semana) === semana);
-  if (existing) {
-    if ($("weekFormMessage")) $("weekFormMessage").textContent = `${semana} já está cadastrada.`;
-    return;
-  }
-  const { error } = await sb.from("tb_semanas").insert({ semana, ativa: true });
-  if (error) {
-    if (String(error.code) === "23505") {
-      if ($("weekFormMessage")) $("weekFormMessage").textContent = `${semana} já existe.`;
-      return;
-    }
-    console.error(error);
-    if ($("weekFormMessage")) $("weekFormMessage").textContent = error.message || "Não foi possível criar a semana.";
-    return;
-  }
-  await loadWeeks();
-  setupProgrammingSelectors();
-  if ($("programWeek")) $("programWeek").value = semana;
-  closeWeekModal();
-  toast(`${semana} criada com sucesso.`);
-}
-
-function normalizeDisciplineForDB(value) {
-  // Persistir códigos canônicos sem acentos, compatíveis com a constraint do banco.
-  return String(value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .toUpperCase();
-}
-
-function formatDisciplineLabel(value) {
-  const normalized = normalizeDisciplineForDB(value);
-  const labels = {
-    ELETRICA: "Elétrica",
-    INSTRUMENTACAO: "Instrumentação",
-    TUBULACAO: "Tubulação",
-    MECANICA: "Mecânica",
-    AUTOMACAO: "Automação",
-    CIVIL: "Civil"
-  };
-  return labels[normalized] || String(value || "—");
-}
-
-/* =========================
-   TEAMS / PEOPLE
-   ========================= */
-
-async function loadTeamsAndPeople() {
-  const sb = getSupabaseClient();
-  if (!sb) return false;
-
-  const [teamsResult, peopleResult] = await Promise.all([
-    sb.from("tb_equipes").select("id,nome,disciplina,ativo,created_at,updated_at").order("nome"),
-    sb.from("tb_pessoas").select("id,nome,cracha,perfil,ativo,auth_user_id,equipe_id,disciplina,created_at,updated_at").eq("ativo", true).order("nome")
-  ]);
-
-  if (teamsResult.error) {
-    console.error("Erro ao carregar equipes:", teamsResult.error);
-    throw teamsResult.error;
-  }
-  if (peopleResult.error) {
-    console.error("Erro ao carregar pessoas:", peopleResult.error);
-    throw peopleResult.error;
-  }
-
-  state.teams = (teamsResult.data || []).map(team => ({
-    id: team.id,
-    dbId: team.id,
-    name: team.nome,
-    nome: team.nome,
-    disciplina: team.disciplina,
-    // Alguns cadastros antigos foram criados sem preencher `ativo`.
-    // Trate NULL/undefined como ativo; somente false explícito desativa a equipe.
-    ativo: team.ativo !== false
-  }));
-
-  state.peopleRecords = peopleResult.data || [];
-  state.accesses = state.peopleRecords.map(person => {
-    const team = state.teams.find(item => item.id === person.equipe_id);
-    return {
-      id: person.id,
-      nome: person.nome,
-      funcao: person.perfil === "ADMINISTRADOR" ? "Administrador" : "Executante",
-      email: "",
-      codigo: person.cracha,
-      role: person.perfil === "ADMINISTRADOR" ? "admin" : "technician",
-      team: team?.nome || "",
-      status: person.ativo ? "ATIVO" : "INATIVO",
-      disciplina: person.disciplina || team?.disciplina || ""
-    };
-  });
-
-  if (state.currentUser?.id) {
-    const me = state.peopleRecords.find(person => person.id === state.currentUser.id);
-    if (me) {
-      const team = state.teams.find(item => item.id === me.equipe_id);
-      state.currentUser.team = team?.nome || "";
-      state.currentUser.equipeId = me.equipe_id || null;
-      state.currentUser.disciplina = me.disciplina || team?.disciplina || "";
-      sessionStorage.setItem("ppaSession", JSON.stringify(state.currentUser));
-    }
-  }
-
-  return true;
-}
-
-function normalizeAccesses() {
-  if (dbEnabled()) return;
-  state.accesses = clone(ACCESS_DEFAULTS);
-}
-
-function renderTeams() {
-  const teams = [...(state.teams || [])].sort((a, b) => String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR", { numeric: true, sensitivity: "base" }));
-  const body = $("teamTableBody");
-  if (body) body.innerHTML = teams.map(team => `
-    <tr>
-      <td><strong>${escapeHTML(team.nome || team.name || "—")}</strong></td>
-      <td>${escapeHTML(formatDisciplineLabel(team.disciplina))}</td>
-      <td><span class="status-chip ${team.ativo === false ? "inactive" : "active"}">${team.ativo === false ? "INATIVA" : "ATIVA"}</span></td>
-    </tr>
-  `).join("");
-  $("teamEmpty")?.classList.toggle("hidden", teams.length > 0);
-  populateTeamSelectors();
-}
-
-async function saveTeam(event) {
-  event?.preventDefault?.();
-  const name = $("teamNameInput")?.value.trim().replace(/\s+/g, " ") || "";
-  const discipline = $("teamDisciplineInput")?.value || "";
-  const linkedPersonId = $("teamPersonInput")?.value || "";
-  const message = $("teamFormMessage");
-  const button = $("saveTeamBtn");
-  if (message) message.textContent = "";
-  if (!name || !discipline) {
-    if (message) message.textContent = "Informe o nome da equipe e a disciplina.";
-    return;
-  }
-  if ((state.teams || []).some(team => normalizeLookupName(team.nome || team.name) === normalizeLookupName(name))) {
-    if (message) message.textContent = `A equipe “${name}” já está cadastrada.`;
-    return;
-  }
-  const sb = getSupabaseClient();
-  if (!sb) {
-    if (message) message.textContent = "Supabase não está configurado.";
-    return;
-  }
-  if (button) { button.disabled = true; button.textContent = "Salvando…"; }
-  try {
-    const { data: insertedTeam, error } = await sb.from("tb_equipes")
-      .insert({ nome: name, disciplina: normalizeDisciplineForDB(discipline), ativo: true })
-      .select("id,nome,disciplina,ativo")
-      .single();
+// Busca todas as páginas de uma consulta (o PostgREST corta em 1000 linhas).
+async function fetchAll(build) {
+  const rows = [];
+  for (let from = 0; ; from += DB_PAGE) {
+    const { data, error } = await build().range(from, from + DB_PAGE - 1);
     if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < DB_PAGE) return rows;
+  }
+}
 
-    // O vínculo é persistido em tb_pessoas.equipe_id, mantendo a pessoa vinculada à equipe.
-    if (linkedPersonId) {
-      const { error: linkError } = await sb.from("tb_pessoas").update({
-        equipe_id: insertedTeam.id,
-        disciplina: normalizeDisciplineForDB(discipline),
-        updated_at: new Date().toISOString()
-      }).eq("id", linkedPersonId);
-      if (linkError) throw new Error(`Equipe criada, mas não foi possível vincular a pessoa selecionada: ${linkError.message}`);
-    }
-    await loadTeamsAndPeople();
-    renderTeams();
-    renderAccesses();
-    setupProgrammingSelectors();
-    if ($("teamForm")) $("teamForm").reset();
-    populateTeamSelectors();
-    if (message) message.textContent = linkedPersonId
-      ? `Equipe “${name}” cadastrada e pessoa vinculada com sucesso.`
-      : `Equipe “${name}” cadastrada com sucesso.`;
-    toast("Equipe cadastrada no Supabase.");
+async function fetchIn(table, columns, field, ids) {
+  const sb = requireDb();
+  const unique = [...new Set(ids.filter(Boolean))];
+  const parts = await Promise.all(chunk(unique, IN_CHUNK).map(async part => {
+    const { data, error } = await sb.from(table).select(columns).in(field, part);
+    if (error) throw error;
+    return data || [];
+  }));
+  return parts.flat();
+}
+
+function isMissingFunction(error) {
+  return ["PGRST202", "42883"].includes(error?.code) || /could not find the function/i.test(error?.message || "");
+}
+
+function dbErrorMessage(error, fallback = "Não foi possível concluir a operação.") {
+  const msg = error?.message || (typeof error === "string" ? error : "");
+  if (error?.code === "42501" || /row-level security|permission denied/i.test(msg)) return "O banco bloqueou a operação (permissões/RLS). Verifique as policies do Supabase para este perfil.";
+  if (error?.code === "23505") return "Já existe um registro com esse valor.";
+  if (error?.code === "23503") return "Este registro está vinculado a outros dados (ex.: execuções) e não pode ser removido.";
+  if (/null value in column "equipamento_id"/i.test(msg)) return "O banco exige um equipamento para cada programação. Inclua a coluna TAG nesta atividade e preencha-a.";
+  if (/tb_equipes_disciplina_check/i.test(msg)) return "Disciplina rejeitada pelo banco. Execute a migration 006_corrigir_disciplina_equipes.sql.";
+  if (/chk_tb_programacoes_modo_importacao/i.test(msg)) return "Modo de importação rejeitado pelo banco. Execute a migration 007_corrigir_modo_importacao.sql.";
+  if (/failed to fetch|networkerror|load failed/i.test(msg)) return "Sem conexão com o servidor. Verifique a internet e tente novamente.";
+  return msg || fallback;
+}
+
+/* ---------- status de sincronização ---------- */
+
+let busyCount = 0;
+function setBusy(delta) {
+  busyCount = Math.max(0, busyCount + delta);
+  const el = $("syncStatus");
+  if (!el) return;
+  el.classList.toggle("busy", busyCount > 0);
+  if (busyCount > 0) el.classList.remove("error");
+  el.querySelector("span").textContent = busyCount > 0 ? "Sincronizando…" : (el.classList.contains("error") ? "Falha na conexão" : "Conectado");
+}
+function setSyncError(on) {
+  const el = $("syncStatus");
+  if (!el) return;
+  el.classList.toggle("error", on);
+  el.querySelector("span").textContent = on ? "Falha na conexão" : "Conectado";
+}
+async function withBusy(task) {
+  setBusy(1);
+  try {
+    const result = await task();
+    setSyncError(false);
+    return result;
   } catch (error) {
-    console.error("Erro ao cadastrar equipe:", error);
-    const detail = error?.message || "Não foi possível cadastrar a equipe.";
-    if (message) message.textContent = /tb_equipes_disciplina_check|check constraint/i.test(detail)
-      ? "A disciplina foi rejeitada pela regra do banco. Execute a migration 006_corrigir_disciplina_equipes.sql no SQL Editor do Supabase e tente novamente."
-      : /row-level security|permission|not allowed|42501/i.test(detail)
-        ? "O Supabase bloqueou o cadastro. Verifique a política RLS de INSERT da tabela tb_equipes para administradores."
-        : detail;
+    if (/failed to fetch|network/i.test(error?.message || "")) setSyncError(true);
+    throw error;
   } finally {
-    if (button) { button.disabled = false; button.textContent = "＋ Cadastrar equipe"; }
+    setBusy(-1);
   }
 }
 
-function renderAccesses() {
-  renderTeams();
-  const search = $("accessSearch")?.value.trim().toLowerCase() || "";
-  const rows = state.accesses.filter(person => {
-    const values = [person.nome, person.email, person.funcao, person.team, person.codigo, person.disciplina];
-    return !search || values.some(value => String(value || "").toLowerCase().includes(search));
-  });
+/* =========================================================
+   UI HELPERS
+   ========================================================= */
 
-  $("accessTotal") && ($("accessTotal").textContent = state.accesses.length);
-  $("accessActive") && ($("accessActive").textContent = state.accesses.filter(item => item.status === "ATIVO").length);
-  $("accessCodes") && ($("accessCodes").textContent = state.accesses.filter(item => item.codigo).length);
-
-  if ($("accessTableBody")) {
-    $("accessTableBody").innerHTML = rows.map(person => `
-      <tr>
-        <td><strong>${escapeHTML(person.nome)}</strong></td>
-        <td>${escapeHTML(person.funcao)}</td>
-        <td>${escapeHTML(person.email || "—")}</td>
-        <td class="tag-cell">${escapeHTML(person.codigo || "—")}</td>
-        <td>${escapeHTML(person.team || "—")}</td>
-        <td>${person.role === "admin" ? "Administrador" : "Técnico"}</td>
-        <td><span class="status-chip ${person.status === "ATIVO" ? "active" : "inactive"}">${escapeHTML(person.status)}</span></td>
-        <td><div class="profile-list-actions"><button class="mini-btn" data-edit-access="${escapeHTML(person.id)}" title="Editar">✎</button></div></td>
-      </tr>
-    `).join("");
-
-    $("accessTableBody").querySelectorAll("[data-edit-access]").forEach(button => {
-      button.onclick = () => openAccessModal(button.dataset.editAccess);
-    });
-  }
-
-  $("accessEmpty")?.classList.toggle("hidden", rows.length !== 0);
-  populateTeamSelectors();
+function toast(message, type = "") {
+  const el = $("toast");
+  if (!el) return;
+  el.textContent = message;
+  el.className = `toast show ${type}`;
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => el.classList.remove("show"), type === "error" ? 5000 : 2800);
 }
 
-function populateTeamSelectors() {
-  const sortedTeams = [...state.teams].sort((a,b)=>String(a.nome||"").localeCompare(String(b.nome||""),"pt-BR",{numeric:true,sensitivity:"base"}));
-  const teamOptions = sortedTeams.map(team => `<option value="${escapeHTML(team.nome)}">${escapeHTML(team.nome)}</option>`).join("");
-  if ($("accessTeamInput")) {
-    const previous = $("accessTeamInput").value;
-    $("accessTeamInput").innerHTML = teamOptions;
-    if (sortedTeams.some(team => team.nome === previous)) $("accessTeamInput").value = previous;
-  }
-
-  if ($("teamPersonInput")) {
-    const previousPerson = $("teamPersonInput").value;
-    const people = [...(state.peopleRecords || [])].filter(person => person.ativo !== false)
-      .sort((a,b)=>String(a.nome||"").localeCompare(String(b.nome||""),"pt-BR",{sensitivity:"base"}));
-    $("teamPersonInput").innerHTML = `<option value="">Sem vínculo inicial</option>` + people
-      .map(person => `<option value="${escapeHTML(person.id)}">${escapeHTML(person.nome)}${person.equipe_id ? ` — ${escapeHTML(state.teams.find(team => team.id === person.equipe_id)?.nome || "equipe vinculada")}` : ""}</option>`).join("");
-    if (people.some(person => person.id === previousPerson)) $("teamPersonInput").value = previousPerson;
-  }
+function setMessage(id, text, ok = false) {
+  const el = $(id);
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("ok", ok);
 }
 
-function randomAccessCode() {
-  const used = new Set(state.accesses.map(person => String(person.codigo)));
-  let code = "";
-  do {
-    code = String(Math.floor(1000 + Math.random() * 9000));
-  } while (used.has(code));
-  return code;
+async function withButton(button, task) {
+  if (!button) return task();
+  button.disabled = true;
+  button.classList.add("loading");
+  try { return await task(); }
+  finally { button.disabled = false; button.classList.remove("loading"); }
 }
 
-function openAccessModal(id = null) {
-  const person = id ? state.accesses.find(item => item.id === id) : null;
-  populateTeamSelectors();
-
-  $("accessModal")?.classList.remove("hidden");
-  state.editingAccessId = id;
-  $("accessModalTitle") && ($("accessModalTitle").textContent = person ? "Editar usuário" : "Novo usuário");
-  $("accessNameInput") && ($("accessNameInput").value = person?.nome || "");
-  $("accessFunctionInput") && ($("accessFunctionInput").value = person?.funcao || "Executante");
-  $("accessEmailInput") && ($("accessEmailInput").value = person?.email || "");
-  $("accessCodeInput") && ($("accessCodeInput").value = person?.codigo || randomAccessCode());
-  $("accessRoleInput") && ($("accessRoleInput").value = person?.role || "technician");
-  $("accessStatusInput") && ($("accessStatusInput").value = person?.status || "ATIVO");
-  if ($("accessTeamInput")) $("accessTeamInput").value = person?.team || state.teams[0]?.nome || "";
-  if ($("accessFormMessage")) $("accessFormMessage").textContent = "";
+function openModal(id) {
+  const modal = $(id);
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  setTimeout(() => modal.querySelector("input:not([type=hidden]):not([disabled]), select, textarea, button.primary")?.focus(), 30);
 }
 
-function closeAccessModal() {
-  $("accessModal")?.classList.add("hidden");
-  state.editingAccessId = null;
+function closeModal(id) {
+  $(id)?.classList.add("hidden");
+  if (id === "importModal") state.pendingImport = null;
+  if (id === "confirmModal" && confirmDialog.resolve) { confirmDialog.resolve(false); confirmDialog.resolve = null; }
 }
 
-async function saveAccess() {
-  const name = $("accessNameInput")?.value.trim() || "";
-  const functionName = $("accessFunctionInput")?.value.trim() || "Executante";
-  const email = $("accessEmailInput")?.value.trim() || "";
-  const code = $("accessCodeInput")?.value.trim() || "";
-  const role = $("accessRoleInput")?.value || "technician";
-  const status = $("accessStatusInput")?.value || "ATIVO";
-  const teamName = $("accessTeamInput")?.value || "";
-
-  if (!name || !code) {
-    if ($("accessFormMessage")) $("accessFormMessage").textContent = "Nome e código são obrigatórios.";
-    return;
-  }
-
-  const team = teamByName(teamName);
-  const perfil = role === "admin" ? "ADMINISTRADOR" : "EXECUTANTE";
-  const active = status === "ATIVO";
-  const sb = getSupabaseClient();
-
-  if (!sb) {
-    if ($("accessFormMessage")) $("accessFormMessage").textContent = "Supabase não está configurado.";
-    return;
-  }
-
-  try {
-    const payload = {
-      nome: name,
-      cracha: code,
-      perfil,
-      ativo: active,
-      equipe_id: team?.id || null,
-      disciplina: team?.disciplina || null,
-      updated_at: new Date().toISOString()
-    };
-
-    if (state.editingAccessId) {
-      const { error } = await sb.from("tb_pessoas").update(payload).eq("id", state.editingAccessId);
-      if (error) throw error;
-    } else {
-      const { error } = await sb.from("tb_pessoas").insert(payload);
-      if (error) throw error;
-    }
-
-    await loadTeamsAndPeople();
-    closeAccessModal();
-    renderAccesses();
-    setupProgrammingSelectors();
-    toast("Pessoa salva no banco.");
-  } catch (error) {
-    console.error("Erro ao salvar pessoa:", error);
-    if ($("accessFormMessage")) $("accessFormMessage").textContent = error?.message || "Não foi possível salvar a pessoa.";
-  }
+function confirmDialog({ title = "Confirmar", text = "", okLabel = "Confirmar", danger = false } = {}) {
+  setText("confirmTitle", title);
+  setText("confirmText", text);
+  const ok = $("confirmOk");
+  ok.textContent = okLabel;
+  ok.classList.toggle("danger", danger);
+  openModal("confirmModal");
+  return new Promise(resolve => { confirmDialog.resolve = resolve; });
 }
 
-/* =========================
-   PROGRAMMING
-   ========================= */
-
-function weekOptions() {
-  const weeks = new Set(state.weeks.map(item => normalizeWeek(item.semana)));
-  weeks.add(currentWeek());
-  state.dashboardSeed.forEach(item => weeks.add(normalizeWeek(item.week)));
-  state.programacoes.forEach(item => weeks.add(normalizeWeek(item.week)));
-  state.rows.forEach(item => {
-    if (item.Week) weeks.add(normalizeWeek(item.Week));
-  });
-
-  return [...weeks]
-    .filter(Boolean)
-    .sort((a, b) => weekToNumber(a) - weekToNumber(b))
-    .map(week => `<option value="${escapeHTML(week)}">${escapeHTML(week)}</option>`)
-    .join("");
+function resolveConfirm(value) {
+  const resolve = confirmDialog.resolve;
+  confirmDialog.resolve = null;
+  $("confirmModal")?.classList.add("hidden");
+  resolve?.(value);
 }
 
-function setupProgrammingSelectors() {
-  const currentWeekValue = normalizeWeek($("programWeek")?.value) || currentWeek();
-  const currentActivity = $("programActivity")?.value || "";
-  const currentTeam = $("programTeam")?.value || "";
-  const weeks = weekOptions();
-
-  if ($("programWeek")) {
-    $("programWeek").innerHTML = weeks;
-    $("programWeek").value = [...$("programWeek").options].some(o => o.value === currentWeekValue) ? currentWeekValue : currentWeek();
-  }
-
-  if ($("programActivity")) {
-    $("programActivity").innerHTML = state.moduleCatalog.map(module => `<option value="${escapeHTML(module.id)}">${escapeHTML(module.name)}</option>`).join("");
-    if ([...$("programActivity").options].some(o => o.value === currentActivity)) $("programActivity").value = currentActivity;
-    else if (state.moduleCatalog[0]) $("programActivity").value = state.moduleCatalog[0].id;
-  }
-
-  if ($("programTeam")) {
-    const teams = [...state.teams].sort((a, b) => String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR", { numeric: true, sensitivity: "base" }));
-    $("programTeam").innerHTML = `<option value="">Selecione a equipe</option>` + teams.map(team => `<option value="${escapeHTML(team.nome)}">${escapeHTML(team.nome)}</option>`).join("");
-    if ([...$("programTeam").options].some(o => o.value === currentTeam)) $("programTeam").value = currentTeam;
-  }
+function fillSelect(select, options, { value, placeholder } = {}) {
+  if (!select) return;
+  const previous = value ?? select.value;
+  select.innerHTML = (placeholder !== undefined ? `<option value="">${escapeHTML(placeholder)}</option>` : "")
+    + options.map(o => `<option value="${escapeHTML(o.value)}">${escapeHTML(o.label)}</option>`).join("");
+  if (options.some(o => String(o.value) === String(previous))) select.value = previous;
+  else if (placeholder === undefined && options[0]) select.value = options[0].value;
+  else select.value = "";
 }
 
-function filteredProgramacoes() {
-  return [...state.programacoes].sort((a, b) => {
-    const aw = weekToNumber(a.week), bw = weekToNumber(b.week);
-    if (aw !== bw) return aw - bw;
-    return `${a.activity || ""}-${a.team || ""}`.localeCompare(`${b.activity || ""}-${b.team || ""}`, "pt-BR");
-  });
-}
-
-function programColumnsForModule(module) {
-  const fixed = [
-    { key: "week", label: "SEMANA", required: true },
-    { key: "activity", label: "ATIVIDADE", required: true },
-    { key: "team", label: "EQUIPE", required: true }
-  ];
-  const custom = (module?.columns || []).filter(column =>
-    !["week", "date", "activity", "team", "responsible", "qty", "note"].includes(column.key)
-  );
-  return [...fixed, ...custom];
-}
-
-function renderProgramCustomFields(activityId, values = {}) {
-  const module = moduleById(activityId);
-  const host = $("programCustomFields");
-  if (!host) return;
-  if (!module) {
-    host.innerHTML = "";
-    return;
-  }
-
-  const columns = module.columns.filter(column => !["week", "date", "activity", "team", "responsible", "qty", "note"].includes(column.key));
-  host.innerHTML = columns.map(column => {
-    const value = values[column.key] ?? "";
-    if (column.type === "select") {
-      const options = (column.options || []).map(option => `<option value="${escapeHTML(option)}" ${String(option) === String(value) ? "selected" : ""}>${escapeHTML(option)}</option>`).join("");
-      return `<div class="dynamic-field"><label>${escapeHTML(column.label)}${column.required ? " *" : ""}<select data-custom-key="${escapeHTML(column.key)}" data-required="${column.required}"><option value="">Selecione</option>${options}</select></label></div>`;
-    }
-    if (column.type === "boolean") {
-      return `<div class="dynamic-field"><label>${escapeHTML(column.label)}${column.required ? " *" : ""}<select data-custom-key="${escapeHTML(column.key)}" data-required="${column.required}"><option value="">Selecione</option><option value="SIM" ${value === "SIM" ? "selected" : ""}>SIM</option><option value="NÃO" ${value === "NÃO" ? "selected" : ""}>NÃO</option></select></label></div>`;
-    }
-    const inputType = column.type === "number" ? "number" : column.type === "date" ? "date" : "text";
-    return `<div class="dynamic-field"><label>${escapeHTML(column.label)}${column.required ? " *" : ""}<input data-custom-key="${escapeHTML(column.key)}" data-required="${column.required}" type="${inputType}" value="${escapeHTML(value)}"></label></div>`;
-  }).join("");
-}
-
-// Retorna o valor de uma coluna personalizada da programação.
-// Os dados dinâmicos são armazenados em customData (mapeado de dados_personalizados no Supabase).
-function getPlanningColumnValue(column, row) {
-  if (!column || !row) return "";
-  const key = column.key;
-  if (!key) return "";
-  return row.customData?.[key] ?? row[key] ?? "";
-}
-
-function renderProgramacao() {
-  setupProgrammingSelectors();
-  const rows = filteredProgramacoes();
-  const selectedActivity = $("programActivity")?.value || "";
-  const module = moduleById(selectedActivity);
-  const customColumns = module?.columns?.filter(column => !["week", "date", "activity", "team", "responsible", "qty", "note"].includes(column.key)) || [];
-
-  $("programCount") && ($("programCount").textContent = rows.length);
-
-  const table = $("programTableBody")?.closest("table");
-  if (table) table.querySelector("thead tr").innerHTML = `<th>SEMANA</th><th>ATIVIDADE</th><th>EQUIPE</th>${customColumns.map(column => `<th>${escapeHTML(column.label)}</th>`).join("")}<th>OBSERVAÇÃO</th><th></th>`;
-
-  if ($("programTableBody")) {
-    $("programTableBody").innerHTML = rows.map(row => {
-      const rowModule = moduleById(row.activity);
-      const customCells = selectedActivity
-        ? customColumns.map(column => `<td>${escapeHTML(getPlanningColumnValue(column, row) || "—")}</td>`).join("")
-        : "";
-      return `<tr>
-        <td class="week-cell">${escapeHTML(row.week)}</td>
-        <td class="program-activity">${escapeHTML(rowModule?.name || row.activity)}</td>
-        <td class="program-team">${escapeHTML(row.team || "—")}</td>
-        ${customCells}
-        <td class="program-note">${escapeHTML(row.note || "—")}</td>
-        <td><button class="delete-program" data-program-id="${escapeHTML(row.id)}" title="Excluir">×</button></td>
-      </tr>`;
-    }).join("");
-    $("programTableBody").querySelectorAll(".delete-program").forEach(button => button.onclick = () => deleteProgramacao(button.dataset.programId));
-  }
-  $("programEmpty")?.classList.toggle("hidden", rows.length !== 0);
-}
-
-function openProgramModal() {
-  setupProgrammingSelectors();
-  $("programFormMessage") && ($("programFormMessage").textContent = "");
-  $("programWeek") && ($("programWeek").value = currentWeek());
-  $("programNote") && ($("programNote").value = "");
-  state.pendingProgramDraft = null;
-  setProgramMode("incluir");
-  showProgramEditStep();
-  if ($("programActivity")) renderProgramCustomFields($("programActivity").value);
-  document.querySelector("#screen-programacao")?.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
-function closeProgramModal() {
-  $("programForm")?.reset();
-  state.pendingProgramDraft = null;
-  showProgramEditStep();
-  setupProgrammingSelectors();
-  if ($("programActivity")) renderProgramCustomFields($("programActivity").value);
-}
-
-async function resolveEquipmentId(customData, module) {
-  const sb = getSupabaseClient();
-  if (!sb) return null;
-
-  const read = keys => {
-    for (const key of keys) {
-      if (customData?.[key] !== undefined && String(customData[key]).trim() !== "") return String(customData[key]).trim();
-    }
-    return "";
-  };
-
-  const tag = read(["tag", "TAG", "equipamento", "EQUIPAMENTO"]);
-  if (!tag) {
-    throw new Error(`Informe a TAG/equipamento na atividade “${module?.name || ""}”.`);
-  }
-
-  const { data: existing, error: findError } = await sb
-    .from("tb_equipamentos")
-    .select("id,tag")
-    .eq("tag", tag)
-    .limit(1)
-    .maybeSingle();
-  if (findError) throw findError;
-  if (existing) return existing.id;
-
-  const payload = {
-    tag,
-    forn: read(["forn", "FORN.", "FORN"] ) || null,
-    sys: read(["sys", "SYS"]) || null,
-    subsys: read(["subsys", "SUBSYS"]) || null,
-    loop: read(["loop", "LOOP"]) || null,
-    service: read(["service", "SERVICE"]) || null,
-    tipe: read(["type", "tipe", "TIPE"]) || null,
-    descricao: read(["descricao", "DESCRIÇÃO", "descricao_equipamento"]) || null,
-    ativo: true
-  };
-
-  const { data: inserted, error: insertError } = await sb
-    .from("tb_equipamentos")
-    .insert(payload)
-    .select("id")
-    .single();
-  if (insertError) throw insertError;
-  return inserted.id;
-}
-
-function ensureProgramConfirmationUI() {
-  const modalBox = document.querySelector("#programModal .modal-box");
-  const form = $("programForm");
-  if ($("programConfirmationStep")) return;
-  if (!modalBox || !form) return;
-
-  const panel = document.createElement("section");
-  panel.id = "programConfirmationStep";
-  panel.className = "program-confirmation-step hidden";
-  panel.innerHTML = `
-    <div class="program-stepper" role="tablist" aria-label="Etapas da programação">
-      <button type="button" class="program-step active" data-program-step="edit">1. Dados</button>
-      <button type="button" class="program-step" data-program-step="confirm">2. Confirmar</button>
-    </div>
-
-    <div class="program-confirmation-head">
-      <span class="section-kicker">CONFIRMAÇÃO DA PROGRAMAÇÃO</span>
-      <h3>Confira antes de gravar</h3>
-      <p>Revise os dados abaixo. A gravação será feita somente ao clicar em <strong>Confirmar</strong>.</p>
-    </div>
-
-    <div class="program-confirmation-grid">
-      <div class="program-confirmation-card"><span>SEMANA</span><strong id="confirmProgramWeek">—</strong></div>
-      <div class="program-confirmation-card"><span>ATIVIDADE</span><strong id="confirmProgramActivity">—</strong></div>
-      <div class="program-confirmation-card"><span>EQUIPE</span><strong id="confirmProgramTeam">—</strong></div>
-      <div class="program-confirmation-card"><span>RESPONSÁVEL</span><strong id="confirmProgramResponsible">—</strong></div>
-      <div class="program-confirmation-card"><span>QUANTIDADE</span><strong id="confirmProgramQty">—</strong></div>
-      <div class="program-confirmation-card"><span>DATA PREVISTA</span><strong id="confirmProgramDate">—</strong></div>
-    </div>
-
-    <div class="program-flag-box">
-      <div>
-        <span class="section-kicker">FLAG DA PROGRAMAÇÃO</span>
-        <strong>Como esta programação deve ser registrada?</strong>
-        <small>As duas opções adicionam uma nova programação. Nenhuma delas apaga registros anteriores.</small>
-      </div>
-      <div class="program-flag-options" role="group" aria-label="Flag da programação">
-        <button type="button" class="program-flag active" data-program-mode="incluir">
-          <span>＋</span><strong>Incluir</strong><small>Adicionar ao planejamento existente</small>
-        </button>
-        <button type="button" class="program-flag" data-program-mode="nova">
-          <span>＋</span><strong>Nova Programação</strong><small>Registrar uma nova programação</small>
-        </button>
-      </div>
-    </div>
-
-    <div id="programConfirmationMessage" class="form-message"></div>
-    <div class="modal-actions program-confirmation-actions">
-      <button type="button" id="editProgramConfirmation" class="secondary-btn">Editar</button>
-      <button type="button" id="confirmProgramConfirmation" class="primary-btn">Confirmar</button>
-    </div>
-  `;
-
-  modalBox.insertBefore(panel, form);
-
-  panel.querySelectorAll("[data-program-mode]").forEach(button => {
-    button.addEventListener("click", () => setProgramMode(button.dataset.programMode));
-  });
-  $("editProgramConfirmation").onclick = showProgramEditStep;
-  $("confirmProgramConfirmation").onclick = confirmProgramacao;
-}
-
-function setProgramMode(mode) {
-  const normalized = mode === "nova" ? "nova" : "incluir";
-  if (!state.pendingProgramDraft) state.pendingProgramDraft = {};
-  state.pendingProgramDraft.mode = normalized;
-
-  document.querySelectorAll("[data-program-mode]").forEach(button => {
-    button.classList.toggle("active", button.dataset.programMode === normalized);
-  });
-}
-
-function showProgramEditStep() {
-  ensureProgramConfirmationUI();
-  $("programForm")?.classList.remove("hidden");
-  $("programConfirmationStep")?.classList.add("hidden");
-  document.querySelectorAll("[data-program-step]").forEach(button => {
-    button.classList.toggle("active", button.dataset.programStep === "edit");
-  });
-}
-
-function showProgramConfirmationStep(draft) {
-  ensureProgramConfirmationUI();
-  $("programForm")?.classList.add("hidden");
-  $("programConfirmationStep")?.classList.remove("hidden");
-  document.querySelectorAll("[data-program-step]").forEach(button => {
-    button.classList.toggle("active", button.dataset.programStep === "confirm");
-  });
-
-  $("confirmProgramWeek").textContent = draft.week;
-  $("confirmProgramActivity").textContent = draft.module?.name || draft.activity;
-  $("confirmProgramTeam").textContent = draft.team;
-  $("programConfirmationMessage").textContent = "";
-  setProgramMode(draft.mode || "incluir");
-}
-
-function collectProgramDraftForConfirmation() {
-  const { data: customData, invalid } = collectCustomData();
-  const week = normalizeWeek($("programWeek")?.value);
-  const activity = $("programActivity")?.value || "";
-  const team = $("programTeam")?.value || "";
-  const note = $("programNote")?.value.trim() || "";
-  const module = moduleById(activity);
-
-  if (!week || !activity || !team || invalid) {
-    $("programFormMessage") && ($("programFormMessage").textContent = "Preencha os campos obrigatórios: Semana, Atividade e Equipe.");
-    return null;
-  }
-
-  const currentMode = state.pendingProgramDraft?.mode || "incluir";
-  return { week, activity, team, note, customData, module, mode: currentMode };
-}
-
-function createProgramacao() {
-  const draft = collectProgramDraftForConfirmation();
-  if (!draft) return;
-
-  state.pendingProgramDraft = draft;
-  showProgramConfirmationStep(draft);
-}
-
-async function confirmProgramacao() {
-  const draft = state.pendingProgramDraft;
-  if (!draft) {
-    showProgramEditStep();
-    return;
-  }
-
-  $("programConfirmationMessage") && ($("programConfirmationMessage").textContent = "Gravando programação...");
-
-  try {
-    await saveProgramacaoToDatabase();
-  } catch (error) {
-    console.error("Erro na confirmação da programação:", error);
-    $("programConfirmationMessage") && ($("programConfirmationMessage").textContent = error?.message || "Não foi possível confirmar a programação.");
-  }
-}
-
-function collectCustomData() {
-  const data = {};
-  let invalid = false;
-  document.querySelectorAll("#programCustomFields [data-custom-key]").forEach(input => {
-    const value = String(input.value || "").trim();
-    data[input.dataset.customKey] = value;
-    if (input.dataset.required === "true" && !value) invalid = true;
-  });
-  return { data, invalid };
-}
-
-async function saveProgramacaoToDatabase() {
-  const draft = state.pendingProgramDraft;
-  if (!draft) return;
-  const { week, activity, team, note, customData } = draft;
-  const module = moduleById(activity);
-  const sb = getSupabaseClient();
-
-  if (!week || !activity || !team || !module) {
-    $("programConfirmationMessage") && ($("programConfirmationMessage").textContent = "Dados obrigatórios incompletos.");
-    return;
-  }
-  if (!sb) {
-    $("programConfirmationMessage") && ($("programConfirmationMessage").textContent = "Supabase não está configurado.");
-    return;
-  }
-
-  try {
-    const teamRecord = teamByName(team);
-    if (!teamRecord) throw new Error("Equipe selecionada não encontrada no cadastro.");
-    if (!module.dbId) await syncModulesToDB();
-    const refreshedModule = moduleById(activity);
-    const equipmentId = await resolveEquipmentId(customData, refreshedModule);
-
-    const payload = {
-      equipamento_id: equipmentId,
-      semana: weekToNumber(week),
-      status: "PROGRAMADO",
-      atividade_id: refreshedModule.dbId,
-      data_programacao: null,
-      equipe_id: teamRecord.id,
-      responsavel_id: null,
-      quantidade: 1,
-      observacao: note || null,
-      dados_personalizados: customData,
-      modo_importacao: draft.mode === "nova" ? "NOVA_PROGRAMACAO" : "INCLUIR_NA_PROGRAMACAO",
-      arquivo_importacao: null,
-      usuario_importacao: state.currentUser?.authUserId || null,
-      updated_at: new Date().toISOString()
-    };
-
-    const { error } = await sb.from("tb_programacoes").insert(payload);
-    if (error) throw error;
-
-    closeProgramModal();
-    await loadProgramacoes();
-    renderProgramacao();
-    renderDashboard();
-    toast("Programação confirmada no Supabase.");
-  } catch (error) {
-    console.error("Erro ao confirmar programação:", error);
-    $("programConfirmationMessage") && ($("programConfirmationMessage").textContent = error?.message || "Não foi possível salvar a programação.");
-  }
-}
-
-function mapProgrammingRecord(row) {
-  const module = moduleByDbId(row.atividade_id);
-  const team = state.teams.find(item => item.id === row.equipe_id);
-  const person = state.peopleRecords.find(item => item.id === row.responsavel_id);
-  return {
-    id: row.id,
-    week: `W${row.semana}`,
-    date: row.data_programacao || "",
-    activity: module?.id || row.atividade_id,
-    activityDbId: row.atividade_id,
-    team: team?.nome || "",
-    teamId: row.equipe_id,
-    responsible: person?.nome || "",
-    responsibleId: row.responsavel_id,
-    qty: Number(row.quantidade || 0),
-    note: row.observacao || "",
-    status: row.status || "PROGRAMADO",
-    equipamentoId: row.equipamento_id,
-    customData: row.dados_personalizados || {},
-    createdAt: row.created_at
-  };
-}
-
-function cacheProgramacoes() {
-  localStorage.setItem("ppaProgramacoes", JSON.stringify(state.programacoes));
-}
-
-async function loadProgramacoes() {
-  const sb = getSupabaseClient();
-  if (!sb) {
-    try {
-      const saved = JSON.parse(localStorage.getItem("ppaProgramacoes") || "null");
-      state.programacoes = Array.isArray(saved) ? saved : [];
-    } catch {
-      state.programacoes = [];
-    }
-    return;
-  }
-
-  const { data, error } = await sb
-    .from("tb_programacoes")
-    .select("id,equipamento_id,semana,status,atividade_id,data_programacao,equipe_id,responsavel_id,quantidade,observacao,dados_personalizados,modo_importacao,arquivo_importacao,usuario_importacao,created_at,updated_at")
-    .order("created_at", { ascending: true });
-
-  if (error) {
-    console.error("Erro ao carregar tb_programacoes:", error);
-    return;
-  }
-
-  state.programacoes = (data || []).map(mapProgrammingRecord);
-  cacheProgramacoes();
-}
-
-async function deleteProgramacao(id) {
-  const sb = getSupabaseClient();
-  if (!sb) return;
-
-  try {
-    const { error } = await sb.from("tb_programacoes").delete().eq("id", id);
-    if (error) throw error;
-    state.programacoes = state.programacoes.filter(program => program.id !== id);
-    cacheProgramacoes();
-    renderProgramacao();
-    renderDashboard();
-    toast("Programação removida.");
-  } catch (error) {
-    console.error("Erro ao excluir programação:", error);
-    toast(error?.message || "Não foi possível excluir.");
-  }
-}
-
-/* =========================
-   PROGRAM EXCEL
-   ========================= */
-
-async function readModuleFile(file) {
-  if (!file) throw new Error("Nenhum arquivo selecionado.");
-  if (window.XLSX) {
-    const buffer = await file.arrayBuffer();
-    const workbook = XLSX.read(buffer, { type: "array", cellDates: true, raw: false });
-    if (!workbook.SheetNames.length) throw new Error("O arquivo não possui uma planilha.");
-    return XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {
-      header: 1,
-      defval: "",
-      raw: false
-    });
-  }
-  const text = await file.text();
-  return text.split(/\r?\n/).filter(Boolean).map(line => line.split(/;|,/).map(item => item.replace(/^"|"$/g, "").trim()));
-}
-
-function normalizeImportedProgramDate(value) {
-  const stringValue = String(value ?? "").trim();
-  if (!stringValue) return "";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(stringValue)) return stringValue;
-  const br = stringValue.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
-  if (br) return `${br[3]}-${String(br[2]).padStart(2, "0")}-${String(br[1]).padStart(2, "0")}`;
-  return stringValue;
-}
-
-function validateAndMapProgramImport(rows, module) {
-  if (!rows.length) throw new Error("Arquivo sem dados.");
-  const headers = rows[0].map(header => String(header ?? "").trim());
-  if (!headers.some(Boolean)) throw new Error("A primeira linha não contém cabeçalhos.");
-
-  const normalizedHeaders = headers.map(makeKey);
-  const columns = programColumnsForModule(module);
-  const missing = columns.filter(column =>
-    column.required &&
-    !normalizedHeaders.includes(makeKey(column.label)) &&
-    !normalizedHeaders.includes(makeKey(column.key))
-  );
-  if (missing.length) throw new Error(`Colunas obrigatórias ausentes: ${missing.map(column => column.label).join(", ")}.`);
-
-  const getValue = (row, column) => {
-    const index = normalizedHeaders.findIndex(header => header === makeKey(column.label) || header === makeKey(column.key));
-    return index >= 0 ? (row[index] ?? "") : "";
-  };
-
-  const imported = [];
-  const errors = [];
-
-  rows.slice(1).forEach((row, index) => {
-    if (!row.some(value => String(value ?? "").trim() !== "")) return;
-    const line = index + 2;
-    const values = {};
-
-    columns.forEach(column => {
-      values[column.key] = String(getValue(row, column)).trim();
-    });
-
-    values.activity = values.activity || module.name;
-    values.week = normalizeWeek(values.week);
-    values.date = normalizeImportedProgramDate(values.date);
-    values.qty = Number(String(values.qty).replace(",", "."));
-
-    if (makeKey(values.activity) !== makeKey(module.name)) {
-      errors.push(`Linha ${line}: ATIVIDADE diferente de “${module.name}”.`);
-    }
-
-    const missingRow = columns.filter(column =>
-      column.required &&
-      (values[column.key] === "" || (column.key === "qty" && (!Number.isFinite(values.qty) || values.qty < 1)))
-    );
-    if (missingRow.length) errors.push(`Linha ${line}: preencha ${missingRow.map(column => column.label).join(", ")}.`);
-
-    const customData = {};
-    module.columns
-      .filter(column => !["week", "date", "activity", "team", "responsible", "qty", "note"].includes(column.key))
-      .forEach(column => {
-        customData[column.key] = values[column.key] ?? "";
-      });
-
-    imported.push({
-      week: values.week,
-      date: values.date,
-      activity: module.id,
-      team: values.team,
-      responsible: values.responsible,
-      qty: values.qty,
-      note: values.note,
-      customData
-    });
-  });
-
-  if (!imported.length) throw new Error("O arquivo não possui linhas de dados para importar.");
-  if (errors.length) throw new Error(errors.slice(0, 8).join(" ") + (errors.length > 8 ? ` E mais ${errors.length - 8} erro(s).` : ""));
-  return { headers, imported };
-}
-
-function excelTheme() {
-  const s = currentSettings();
-  const hex = value => String(value || "#0b5cff").replace("#", "").toUpperCase();
-  return { primary: hex(s.primary), header: hex(s.header), bg: hex(s.background) };
-}
-
-function styleExcelTable(sheet, headers, rowCount) {
-  const theme = excelTheme();
-  const end = XLSX.utils.encode_cell({ r: rowCount, c: headers.length - 1 });
-  sheet["!autofilter"] = { ref: `A1:${end}` };
-  sheet["!freeze"] = { xSplit: 0, ySplit: 1 };
-  sheet["!cols"] = headers.map(h => ({ wch: Math.max(14, Math.min(34, String(h).length + 5)) }));
-  const range = XLSX.utils.decode_range(`A1:${end}`);
-  for (let c=0;c<headers.length;c++) { const cell=sheet[XLSX.utils.encode_cell({r:0,c})]; if(cell) cell.s={fill:{fgColor:{rgb:theme.header}},font:{bold:true,color:{rgb:"FFFFFF"}},alignment:{horizontal:"center",vertical:"center"}}; }
-  for (let r=1;r<=range.e.r;r++) for(let c=0;c<range.e.c+1;c++){ const cell=sheet[XLSX.utils.encode_cell({r,c})]; if(cell) cell.s={fill:{fgColor:{rgb:r%2?"FFFFFF":theme.bg}},border:{top:{style:"thin",color:{rgb:"D9E1EA"}},bottom:{style:"thin",color:{rgb:"D9E1EA"}},left:{style:"thin",color:{rgb:"D9E1EA"}},right:{style:"thin",color:{rgb:"D9E1EA"}}},alignment:{vertical:"center"}}; }
-  sheet["!rows"]=[{hpt:24}];
-}
-
-function downloadProgramTemplate() {
-  const activityId = $("programActivity")?.value || "";
-  const module = moduleById(activityId);
-  if (!module) {
-    toast("Selecione uma atividade no cabeçalho da programação para gerar o template.");
-    return;
-  }
-
-  const columns = programColumnsForModule(module);
-  const headers = columns.map(column => column.label);
-  const blank = columns.map(column => {
-    if (column.key === "activity") return module.name;
-    if (column.key === "week") return currentWeek();
-    return "";
-  });
-
-  if (window.XLSX) {
-    const sheet = XLSX.utils.aoa_to_sheet([headers, blank]);
-    styleExcelTable(sheet, headers, 1);
-    sheet["!autofilter"] = { ref: `A1:${XLSX.utils.encode_col(headers.length - 1)}2` };
-    sheet["!ref"] = `A1:${XLSX.utils.encode_col(headers.length - 1)}2`;
-    const info = XLSX.utils.aoa_to_sheet([
-      ["Atividade", module.name],
-      ["Instruções", "Não altere os cabeçalhos. Campos com * são obrigatórios."],
-      ["Importação", "As importações são cumulativas e nunca apagam programações anteriores."],
-      ["Equipamento", "Para programar, a linha deve conter TAG/equipamento nas colunas do módulo."]
-    ]);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, sheet, "Programação");
-    XLSX.utils.book_append_sheet(workbook, info, "Leia-me");
-    XLSX.writeFile(workbook, `template_programacao_${makeKey(module.name)}.xlsx`);
-  } else {
-    exportCSV(headers, [blank], `template_programacao_${makeKey(module.name)}.csv`);
-  }
-  toast("Template gerado.");
-}
-
-function exportCSV(headers, rows, filename) {
-  const esc = value => `"${String(value ?? "").replace(/"/g, '""')}"`;
-  const csv = [headers, ...rows].map(row => row.map(esc).join(";")).join("\n");
-  const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function importProgramFile(file) {
-  const activityId = $("programActivity")?.value || "";
-  const module = moduleById(activityId);
-  if (!module) {
-    toast("Selecione uma atividade no cabeçalho da programação antes de importar.");
-    return;
-  }
-  if (!file) return;
+/* =========================================================
+   CONFIGURAÇÕES / TEMA
+   ========================================================= */
 
-  readModuleFile(file)
-    .then(rows => {
-      const mapped = validateAndMapProgramImport(rows, module);
-      state.pendingProgramImport = {
-        fileName: file.name,
-        modId: module.id,
-        records: mapped.imported
-      };
-      $("programImportFileName") && ($("programImportFileName").textContent = file.name);
-      $("programImportCount") && ($("programImportCount").textContent = mapped.imported.length);
-      $("programImportDescription") && ($("programImportDescription").textContent = `${mapped.imported.length} programação(ões) válida(s). Os registros serão acrescentados à base atual.`);
-      $("programImportMessage") && ($("programImportMessage").textContent = "");
-      $("programImportModal")?.classList.remove("hidden");
-    })
-    .catch(error => toast(error?.message || "Não foi possível ler o Excel."));
-}
-
-function closeProgramImportModal() {
-  $("programImportModal")?.classList.add("hidden");
-  state.pendingProgramImport = null;
-}
-
-async function confirmProgramImport(mode) {
-  const pending = state.pendingProgramImport;
-  if (!pending) return;
-  const module = moduleById(pending.modId);
-  const sb = getSupabaseClient();
-  if (!module || !sb) {
-    if ($("programImportMessage")) $("programImportMessage").textContent = "Supabase não está configurado.";
-    return;
-  }
-
+function loadSettings() {
   try {
-    if (!module.dbId) await syncModulesToDB();
-    // Atualiza os cadastros antes da validação para não depender de uma lista antiga em memória.
-    await loadTeamsAndPeople();
-
-    const resolvedRecords = pending.records.map((record, index) => {
-      const team = teamByName(record.team);
-      const responsibleName = String(record.responsible ?? "").trim();
-      // Responsável é opcional. Se estiver vazio, aproveita o vínculo pessoa/equipe
-      // quando houver exatamente uma pessoa ativa vinculada à equipe; caso contrário, fica sem responsável.
-      const linkedPeople = team ? state.peopleRecords.filter(item => item.ativo !== false && item.equipe_id === team.id) : [];
-      const person = responsibleName ? personByName(responsibleName) : (linkedPeople.length === 1 ? linkedPeople[0] : null);
-      if (!team) {
-        const available = state.teams.filter(t => t.ativo !== false).map(t => t.nome || t.name).filter(Boolean).join(", ");
-        const allTeams = state.teams.map(t => `${t.nome || t.name}${t.ativo === false ? " (inativa)" : ""}`).filter(Boolean).join(", ");
-        const detail = allTeams ? `Equipes cadastradas: ${allTeams}.` : "A tabela tb_equipes não retornou nenhum registro para este usuário. Verifique o cadastro no Supabase e as políticas RLS.";
-        throw new Error(`Linha ${index + 2}: equipe “${record.team || "(vazia)"}” não encontrada. ${detail} Equipes disponíveis para importação: ${available || "nenhuma equipe ativa"}. O importador aceita “A” para “Equipe A” quando houver correspondência única.`);
-      }
-      if (responsibleName && !person) {
-        const available = state.peopleRecords.map(p => p.nome).filter(Boolean).join(", ") || "nenhuma pessoa ativa cadastrada";
-        throw new Error(`Linha ${index + 2}: responsável “${responsibleName}” não encontrado no cadastro. Pessoas ativas: ${available}. Deixe a célula vazia para importar sem responsável ou vincule uma pessoa à equipe no cadastro.`);
-      }
-      return { record, team, person };
-    });
-
-    let insertedCount = 0;
-    for (const { record, team, person } of resolvedRecords) {
-      const equipmentId = await resolveEquipmentId(record.customData || {}, module);
-      const payload = {
-        equipamento_id: equipmentId,
-        semana: weekToNumber(record.week),
-        status: "PROGRAMADO",
-        atividade_id: module.dbId,
-        data_programacao: record.date || null,
-        equipe_id: team.id,
-        responsavel_id: person?.id || null,
-        quantidade: Number(record.qty || 1),
-        observacao: record.note || null,
-        dados_personalizados: record.customData || {},
-        modo_importacao: mode === "new" ? "NOVA_PROGRAMACAO" : "INCLUIR_NA_PROGRAMACAO",
-        arquivo_importacao: pending.fileName,
-        usuario_importacao: state.currentUser?.authUserId || null,
-        updated_at: new Date().toISOString()
-      };
-
-      const { error } = await sb.from("tb_programacoes").insert(payload);
-      if (error) throw error;
-      insertedCount += 1;
-    }
-
-    recordProgramImport(mode === "new" ? "new" : "append", pending);
-    closeProgramImportModal();
-    await loadProgramacoes();
-    await loadData();
-    renderProgramacao();
-    renderDashboard();
-    toast(`${insertedCount} programação(ões) importada(s). A base anterior foi preservada.`);
-  } catch (error) {
-    console.error("Erro na importação:", error);
-    if ($("programImportMessage")) $("programImportMessage").textContent = error?.message || "Não foi possível gravar a importação.";
-  }
-}
-
-/* =========================
-   PROGRAM HISTORY
-   ========================= */
-
-function loadProgramHistory() {
-  try {
-    state.programHistory = JSON.parse(localStorage.getItem("ppaProgramHistory") || "[]") || [];
+    const saved = JSON.parse(localStorage.getItem("ppaSettings") || "null") || {};
+    state.settings = { ...DEFAULT_SETTINGS, ...Object.fromEntries(Object.entries(saved).filter(([k]) => k in DEFAULT_SETTINGS)) };
   } catch {
-    state.programHistory = [];
+    state.settings = { ...DEFAULT_SETTINGS };
   }
+  applySettings();
 }
 
-function persistProgramHistory() {
-  localStorage.setItem("ppaProgramHistory", JSON.stringify(state.programHistory));
+function saveSettings() {
+  try { localStorage.setItem("ppaSettings", JSON.stringify(state.settings)); }
+  catch { toast("Não foi possível salvar: armazenamento do navegador cheio. Use uma logo menor.", "error"); return false; }
+  applySettings();
+  return true;
 }
 
-function recordProgramImport(mode, pending) {
-  const byWeek = {};
-  pending.records.forEach(record => {
-    const week = normalizeWeek(record.week);
-    (byWeek[week] ||= []).push(record);
+function applySettings() {
+  const root = document.documentElement.style;
+  root.setProperty("--primary", state.settings.primary);
+  root.setProperty("--chart-planned", state.settings.chartPlanned);
+  root.setProperty("--chart-done", state.settings.chartDone);
+  document.querySelectorAll("[data-brand-mark]").forEach(el => {
+    el.classList.toggle("has-logo", Boolean(state.settings.logo));
+    el.style.backgroundImage = state.settings.logo ? `url("${state.settings.logo}")` : "";
+    el.textContent = state.settings.logo ? "" : "PP";
   });
-
-  Object.entries(byWeek).forEach(([week, records]) => {
-    state.programHistory.unshift({
-      id: `imp-${Date.now()}-${week}`,
-      week,
-      mode,
-      fileName: pending.fileName,
-      createdAt: nowBR(),
-      count: records.length,
-      items: records.map(record => ({
-        date: record.date,
-        activity: record.activity,
-        team: record.team,
-        responsible: record.responsible,
-        qty: record.qty,
-        note: record.note,
-        customData: record.customData || {}
-      }))
-    });
-  });
-  persistProgramHistory();
 }
 
-function renderProgramHistory() {
-  const host = $("programHistoryList");
-  if (!host) return;
-  if (!state.programHistory.length) {
-    host.innerHTML = `<div class="empty-state card"><strong>Nenhuma importação registrada.</strong><span>As cargas de Excel aparecerão aqui.</span></div>`;
-    return;
-  }
-
-  const grouped = {};
-  state.programHistory.forEach(batch => (grouped[batch.week] ||= []).push(batch));
-  const weeks = Object.keys(grouped).sort((a, b) => weekToNumber(b) - weekToNumber(a));
-
-  host.innerHTML = weeks.map(week => {
-    const batches = grouped[week];
-    return `<section class="card program-history-week">
-      <div class="program-history-week-head">
-        <div><span class="section-kicker">SEMANA</span><h3>${escapeHTML(week)}</h3></div>
-        <span class="tag-badge">${batches.reduce((total, batch) => total + batch.count, 0)} itens</span>
-      </div>
-      <div class="program-history-batches">
-        ${batches.map((batch, index) => `<details class="program-history-batch" ${index === 0 ? "open" : ""}>
-          <summary>
-            <span class="history-mode ${batch.mode === "new" ? "new" : "append"}">${batch.mode === "new" ? "NOVA CARGA" : "INCLUSÃO"}</span>
-            <strong>${batch.count} itens</strong>
-            <span>${escapeHTML(batch.createdAt)}</span>
-            <span class="history-file">${escapeHTML(batch.fileName)}</span>
-          </summary>
-          <div class="history-batch-body">
-            <div><b>Importação:</b> ${escapeHTML(week)}</div>
-            <div class="compact-items">${batch.items.map(item => `<span>${escapeHTML(item.date || "—")} · ${escapeHTML(moduleById(item.activity)?.name || item.activity)} · ${escapeHTML(item.team || "—")} · Qtd. ${escapeHTML(item.qty)}</span>`).join("")}</div>
-          </div>
-        </details>`).join("")}
-      </div>
-    </section>`;
-  }).join("");
+function renderSettings() {
+  const s = state.settings;
+  $("settingsPrimary").value = s.primary;
+  $("settingsHeader").value = s.header;
+  $("settingsPlanned").value = s.chartPlanned;
+  $("settingsDone").value = s.chartDone;
+  $("settingsLogoPreview").classList.toggle("hidden", !s.logo);
+  $("settingsLogoPlaceholder").classList.toggle("hidden", Boolean(s.logo));
+  if (s.logo) $("settingsLogoPreview").src = s.logo;
+  const docHead = document.querySelector("#docPreview .doc-head");
+  if (docHead) { docHead.style.background = s.header; docHead.style.borderBottomColor = s.primary; }
+  const docLogo = $("docPreviewLogo");
+  docLogo.style.backgroundImage = s.logo ? `url("${s.logo}")` : "";
+  docLogo.textContent = s.logo ? "" : "LOGO";
 }
 
-/* =========================
-   PPA / EXECUTION
-   ========================= */
-
-function hasLog(row) {
-  return Array.isArray(row.executionLogs) && row.executionLogs.length > 0;
-}
-
-function latestLog(row) {
-  const logs = Array.isArray(row.executionLogs) ? row.executionLogs : [];
-  if (!logs.length) return "Não registrado";
-  const last = logs[logs.length - 1];
-  return formatExecutionLog(last);
-}
-
-function formatExecutionLog(log) {
-  const time = log?.executado_em ? new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(log.executado_em)) : "";
-  const person = log?.executante_id ? state.peopleRecords.find(item => item.id === log.executante_id)?.nome : "";
-  const team = log?.equipeNome || "";
-  return [time, person || "Usuário", team].filter(Boolean).join(" - ");
-}
-
-function logEntries(row) {
-  return Array.isArray(row.executionLogs) ? row.executionLogs : [];
-}
-
-async function loadData() {
-  const sb = getSupabaseClient();
-  if (!sb) { state.rows = []; return; }
-  const currentNumber = currentWeekNumber();
-
-  const { data: programData, error: programError } = await sb
-    .from("tb_programacoes")
-    .select("id,equipamento_id,semana,status,atividade_id,data_programacao,equipe_id,responsavel_id,quantidade,observacao,dados_personalizados,created_at")
-    .eq("semana", currentNumber)
-    .order("created_at", { ascending: true });
-  if (programError) { console.error("Erro ao carregar programação do Técnico:", programError); state.rows = []; return; }
-
-  const programs = programData || [];
-  const equipmentIds = programs.map(item => item.equipamento_id).filter(Boolean);
-  const programIds = programs.map(item => item.id).filter(Boolean);
-  const [equipmentResult, executionResult] = await Promise.all([
-    equipmentIds.length ? sb.from("tb_equipamentos").select("id,tag,forn,sys,subsys,loop,service,tipe,descricao,ativo").in("id", equipmentIds) : Promise.resolve({ data: [], error: null }),
-    programIds.length ? sb.from("tb_execucoes").select("id,programacao_id,executante_id,executado_em,observacao,created_at,foto_url").in("programacao_id", programIds).order("executado_em", { ascending: true }) : Promise.resolve({ data: [], error: null })
-  ]);
-  if (equipmentResult.error) throw equipmentResult.error;
-  if (executionResult.error) throw executionResult.error;
-
-  const equipmentById = new Map((equipmentResult.data || []).map(item => [item.id, item]));
-  const executionByProgram = new Map();
-  (executionResult.data || []).forEach(execution => {
-    const list = executionByProgram.get(execution.programacao_id) || [];
-    const program = programs.find(item => item.id === execution.programacao_id);
-    execution.equipeNome = state.teams.find(item => item.id === program?.equipe_id)?.nome || "";
-    list.push(execution); executionByProgram.set(execution.programacao_id, list);
-  });
-
-  state.rows = programs.map(program => {
-    const module = moduleByDbId(program.atividade_id) || moduleById("ppa");
-    const equipment = equipmentById.get(program.equipamento_id) || {};
-    const customData = program.dados_personalizados || {};
-    const executionLogs = executionByProgram.get(program.id) || [];
-    const row = {
-      programacaoId: program.id,
-      activityModuleId: module?.id || "ppa",
-      activityName: module?.name || "Atividade",
-      FORN: equipment.forn || customData.forn || "",
-      SYS: equipment.sys || customData.sys || "",
-      SUBSYS: equipment.subsys || customData.subsys || "",
-      LOOP: equipment.loop || customData.loop || "",
-      TAG: equipment.tag || customData.tag || "",
-      SERVICE: equipment.service || customData.service || "",
-      TIPE: equipment.tipe || customData.tipe || customData.type || "",
-      DESCRIÇÃO: equipment.descricao || customData.descricao || "",
-      Week: `W${program.semana}`,
-      Logs: executionLogs.map(formatExecutionLog).join("\n"),
-      executionLogs,
-      customData,
-      equipamentoId: program.equipamento_id,
-      team: state.teams.find(item => item.id === program.equipe_id)?.nome || "",
-      status: program.status,
-      module
+// Converte a logo para PNG reduzido: jsPDF não aceita WebP e o localStorage é limitado.
+function readLogo(file) {
+  return new Promise((resolve, reject) => {
+    if (file.size > 400 * 1024) return reject(new Error("A logo deve ter no máximo 400 KB."));
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Não foi possível ler a imagem."));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Formato de imagem não suportado."));
+      img.onload = () => {
+        const scale = Math.min(1, 480 / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.src = reader.result;
     };
-    return row;
+    reader.readAsDataURL(file);
   });
 }
 
-function rowValueForColumn(row, column) {
-  if (!row || !column) return "";
-  if (column.key === "week") return row.Week || "";
-  if (column.key === "logs") return latestLog(row);
-  const aliases = {
-    forn: "FORN", sys: "SYS", subsys: "SUBSYS", loop: "LOOP", tag: "TAG", service: "SERVICE",
-    tipe: "TIPE", type: "TIPE", descricao: "DESCRIÇÃO", description: "DESCRIÇÃO"
-  };
-  const key = aliases[column.key] || column.key;
-  return row.customData?.[column.key] ?? row[key] ?? "";
+function applyTheme() {
+  const theme = localStorage.getItem("ppaTheme");
+  if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+  const dark = theme === "dark" || (!theme && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  $("themeToggle")?.querySelector("use")?.setAttribute("href", dark ? "#i-sun" : "#i-moon");
 }
 
-function technicianSearchMatch(row, query) {
-  if (!query) return true;
-  const module = row.module || moduleById(row.activityModuleId);
-  const values = [row.activityName, row.team, row.TAG, row.SYS, row.SUBSYS, ...(module?.columns || []).map(c => rowValueForColumn(row, c))];
-  return values.some(value => String(value ?? "").toLowerCase().includes(query));
+function toggleTheme() {
+  const dark = document.documentElement.dataset.theme === "dark"
+    || (!document.documentElement.dataset.theme && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  localStorage.setItem("ppaTheme", dark ? "light" : "dark");
+  applyTheme();
 }
 
-function populateFilters() {
-  const rows = state.rows.filter(row => normalizeWeek(row.Week) === activeDashboardWeek());
-  const activities = [...new Set(rows.map(row => row.activityName).filter(Boolean))].sort();
-  const teams = [...new Set(rows.map(row => row.team).filter(Boolean))].sort();
-  const sys = $("sysFilter"); const subsys = $("subsysFilter");
-  if (sys) sys.innerHTML = `<option value="">Todas</option>${activities.map(name => `<option value="${escapeHTML(name)}">${escapeHTML(name)}</option>`).join("")}`;
-  if (subsys) subsys.innerHTML = `<option value="">Todas</option>${teams.map(name => `<option value="${escapeHTML(name)}">${escapeHTML(name)}</option>`).join("")}`;
+/* =========================================================
+   AUTENTICAÇÃO
+   ========================================================= */
+
+function showLoginStep(step) {
+  $("accessChooser").classList.toggle("hidden", step !== "chooser");
+  $("adminLoginForm").classList.toggle("hidden", step !== "admin");
+  $("technicianLoginForm").classList.toggle("hidden", step !== "technician");
+  setMessage("adminLoginMessage", "");
+  setMessage("techLoginMessage", "");
+  if (step === "admin") $("adminEmail").focus();
+  if (step === "technician") $("techAccessCode").focus();
 }
 
-function filteredRows() {
-  const query = String($("tagSearch")?.value || "").trim().toLowerCase();
-  const activity = String($("sysFilter")?.value || "");
-  const team = String($("subsysFilter")?.value || "");
-  return state.rows.filter(row => normalizeWeek(row.Week) === activeDashboardWeek())
-    .filter(row => !activity || row.activityName === activity)
-    .filter(row => !team || row.team === team)
-    .filter(row => technicianSearchMatch(row, query));
-}
-
-function updateMultiSelectionUI() {
-  const count = state.selectedTags.size;
-  $("selectedCount") && ($("selectedCount").textContent = count);
-  if ($("registerSelectedBtn")) $("registerSelectedBtn").disabled = count === 0;
-  const visible = filteredRows();
-  if ($("selectAllTags")) {
-    $("selectAllTags").checked = visible.length > 0 && visible.every(row => state.selectedTags.has(row.programacaoId));
-    $("selectAllTags").indeterminate = visible.some(row => state.selectedTags.has(row.programacaoId)) && !$("selectAllTags").checked;
-  }
-}
-
-function toggleSelectAllTags() {
-  const visible = filteredRows();
-  if ($("selectAllTags")?.checked) visible.forEach(row => state.selectedTags.add(row.programacaoId));
-  else visible.forEach(row => state.selectedTags.delete(row.programacaoId));
-  renderTable();
-}
-
-function renderTable() {
-  const rows = filteredRows();
-  const host = $("technicianActivityCards");
-  if (!host) return;
-  host.innerHTML = rows.map((row, index) => {
-    const module = row.module || moduleById(row.activityModuleId);
-    const cols = (module?.columns || []).filter(c => !["week", "logs"].includes(c.key)).slice(0, 8);
-    return `<article class="tech-activity-card ${row.TAG === state.selectedTag ? "selected" : ""}" data-tech-row="${escapeHTML(row.programacaoId)}">
-      <div class="tech-activity-card-head"><label class="tech-select"><input type="checkbox" class="tech-row-select" data-row-select="${escapeHTML(row.programacaoId)}" ${state.selectedTags.has(row.programacaoId) ? "checked" : ""} aria-label="Selecionar atividade"></label><div><span class="activity-chip">${escapeHTML(row.activityName)}</span><h3>${escapeHTML(rowValueForColumn(row, cols.find(c => c.key === "tag")) || row.TAG || `Registro ${index+1}`)}</h3></div><span class="tag-badge ${hasLog(row) ? "done" : "pending"}">${hasLog(row) ? "EXECUTADO" : "PENDENTE"}</span></div>
-      <div class="tech-activity-grid">${cols.map(c => `<div><span>${escapeHTML(c.label)}</span><strong>${escapeHTML(rowValueForColumn(row,c) || "—")}</strong></div>`).join("")}</div>
-      <div class="tech-activity-card-foot"><span>${escapeHTML(row.team || "Sem equipe")}</span><span>${escapeHTML(row.Week)}</span><button type="button" class="ghost-btn tech-open-row" data-open-row="${escapeHTML(row.programacaoId)}">Abrir atividade</button></div>
-    </article>`;
-  }).join("");
-  host.querySelectorAll("[data-open-row]").forEach(btn => btn.onclick = e => { e.stopPropagation(); selectItemByProgram(btn.dataset.openRow); });
-  host.querySelectorAll("[data-row-select]").forEach(input => input.onchange = e => { e.stopPropagation(); input.checked ? state.selectedTags.add(input.dataset.rowSelect) : state.selectedTags.delete(input.dataset.rowSelect); updateMultiSelectionUI(); });
-  host.querySelectorAll("[data-tech-row]").forEach(card => card.onclick = e => { if (e.target.closest("input,button")) return; selectItemByProgram(card.dataset.techRow); });
-  $("emptyState")?.classList.toggle("hidden", rows.length !== 0);
-  counters(rows);
-  updateMultiSelectionUI();
-  if (!state.selectedTag && rows.length) selectItem(rows[0].TAG || rows[0].programacaoId, false);
-  else if (state.selectedTag && !rows.some(row => row.TAG === state.selectedTag || row.programacaoId === state.selectedTag)) clearSelection();
-}
-
-function selectItemByProgram(programId) {
-  const row = state.rows.find(item => item.programacaoId === programId);
-  if (!row) return;
-  state.selectedTag = row.TAG || row.programacaoId;
-  selectItem(state.selectedTag);
-}
-
-function selectItem(tag, rerender = true) {
-  const row = state.rows.find(item => item.TAG === tag || item.programacaoId === tag);
-  if (!row) return;
-  state.selectedTag = row.TAG || row.programacaoId;
-  const module = row.module || moduleById(row.activityModuleId);
-  $("selectedTagTitle") && ($("selectedTagTitle").textContent = row.activityName || module?.name || "Atividade");
-  $("selectedActivitySubtitle") && ($("selectedActivitySubtitle").textContent = `${row.team || "Sem equipe"} • ${row.Week} • estrutura definida pelo Administrador`);
-  if ($("selectedBadge")) { $("selectedBadge").textContent = hasLog(row) ? "EXECUTADO" : "PENDENTE"; $("selectedBadge").className = `tag-badge ${hasLog(row) ? "done" : "pending"}`; }
-  $("registerBtn") && ($("registerBtn").disabled = false);
-  $("repeatBtn") && ($("repeatBtn").disabled = !hasLog(row));
-  $("actionMessage") && ($("actionMessage").textContent = "");
-  renderTechnicianDetail(row);
-  renderTechnicianCustomFields(row);
-  if (rerender) renderTable();
-}
-
-function renderTechnicianDetail(row) {
-  const host = $("technicianActivityDetail");
-  if (!host) return;
-  const module = row.module || moduleById(row.activityModuleId);
-  const cols = (module?.columns || []).filter(c => ["week","logs"].includes(c.key) || ["tag","sys","subsys","loop","forn","service","tipe","descricao"].includes(c.key)).slice(0, 10);
-  host.innerHTML = cols.map(c => `<div class="tech-detail-field"><span>${escapeHTML(c.label)}</span><strong>${escapeHTML(rowValueForColumn(row,c) || "—")}</strong></div>`).join("");
-}
-
-function clearSelection() {
-  $("selectedTagTitle") && ($("selectedTagTitle").textContent = "Selecione uma atividade");
-  $("selectedActivitySubtitle") && ($("selectedActivitySubtitle").textContent = "Os campos abaixo seguem exatamente a configuração criada pelo Administrador.");
-  $("technicianActivityDetail") && ($("technicianActivityDetail").innerHTML = "");
-  $("technicianCustomFields") && ($("technicianCustomFields").innerHTML = "");
-  $("selectedBadge") && ($("selectedBadge").textContent = "AGUARDANDO");
-  $("registerBtn") && ($("registerBtn").disabled = true);
-  $("repeatBtn") && ($("repeatBtn").disabled = true);
-}
-
-function renderTechnicianCustomFields(row) {
-  const host = $("technicianCustomFields"); if (!host) return;
-  const module = row?.module || moduleById(row?.activityModuleId || "ppa");
-  const columns = (module?.columns || []).filter(column => !["week", "logs"].includes(column.key));
-  if (!columns.length) { host.innerHTML = ""; return; }
-  host.innerHTML = `<div class="dynamic-fields-heading"><span>Dados de ${escapeHTML(module.name)}</span><small>Os campos e a ordem seguem a configuração da atividade.</small></div>` + columns.map(column => {
-    const value = row.customData?.[column.key] ?? rowValueForColumn(row,column) ?? "";
-    const disabled = column.technicianEditable ? "" : "disabled";
-    if (column.type === "select") return `<label class="dynamic-field"><span>${escapeHTML(column.label)}${column.required ? " *" : ""}</span><select data-tech-custom-key="${escapeHTML(column.key)}" ${disabled}><option value="">Selecione</option>${(column.options||[]).map(o=>`<option value="${escapeHTML(o)}" ${String(o)===String(value)?"selected":""}>${escapeHTML(o)}</option>`).join("")}</select></label>`;
-    if (column.type === "boolean") return `<label class="dynamic-field"><span>${escapeHTML(column.label)}</span><select data-tech-custom-key="${escapeHTML(column.key)}" ${disabled}><option value="">Selecione</option><option value="SIM" ${value==="SIM"?"selected":""}>SIM</option><option value="NÃO" ${value==="NÃO"?"selected":""}>NÃO</option></select></label>`;
-    const inputType = column.type === "number" ? "number" : column.type === "date" ? "date" : "text";
-    return `<label class="dynamic-field"><span>${escapeHTML(column.label)}${column.required ? " *" : ""}</span><input data-tech-custom-key="${escapeHTML(column.key)}" type="${inputType}" value="${escapeHTML(value)}" ${disabled}></label>`;
-  }).join("");
-  host.querySelectorAll("[data-tech-custom-key]:not([disabled])").forEach(input => input.addEventListener("change", () => saveTechnicianCustomField(row,input.dataset.techCustomKey,input.value)));
-}
-
-async function saveTechnicianCustomField(row, key, value) {
-  row.customData = row.customData || {};
-  row.customData[key] = value;
-  const sb = getSupabaseClient();
-  if (sb && row.programacaoId) {
-    const { error } = await sb
-      .from("tb_programacoes")
-      .update({
-        dados_personalizados: row.customData,
-        updated_at: new Date().toISOString()
-      })
-      .eq("id", row.programacaoId);
-    if (error) {
-      toast("Não foi possível salvar o campo no banco.");
-      return;
-    }
-  }
-  toast("Campo atualizado.");
-}
-
-async function appendLog(row) {
-  const sb = getSupabaseClient();
-  if (!sb || !row?.programacaoId || !state.currentUser?.id) {
-    throw new Error("Programação, usuário ou conexão com o Supabase não encontrados.");
-  }
-
-  const { data: execution, error } = await sb
-    .from("tb_execucoes")
-    .insert({
-      programacao_id: row.programacaoId,
-      executante_id: state.currentUser.id,
-      executado_em: new Date().toISOString(),
-      observacao: null
-    })
-    .select("id,programacao_id,executante_id,executado_em,observacao,created_at,foto_url")
-    .single();
-
-  if (error) throw error;
-
-  row.executionLogs = [...(row.executionLogs || []), execution];
-  row.Logs = row.executionLogs.map(formatExecutionLog).join("\n");
-  row.status = "EXECUTADO";
-
-  const { error: statusError } = await sb
-    .from("tb_programacoes")
-    .update({ status: "EXECUTADO", updated_at: new Date().toISOString() })
-    .eq("id", row.programacaoId);
-
-  if (statusError) console.warn("Execução criada, mas status da programação não foi atualizado:", statusError.message);
-
-  return formatExecutionLog(execution);
-}
-
-async function registerPonto() {
-  const row = state.rows.find(item => item.TAG === state.selectedTag || item.programacaoId === state.selectedTag);
-  if (!row) return;
-
-  try {
-    $("registerBtn") && ($("registerBtn").disabled = true);
-    $("repeatBtn") && ($("repeatBtn").disabled = true);
-    const entry = await appendLog(row);
-    selectItem(row.TAG);
-    $("actionMessage") && ($("actionMessage").textContent = `Registro acrescentado: ${entry}`);
-    toast("Execução registrada no Supabase.");
-    renderHistory();
-    renderDashboard();
-  } catch (error) {
-    console.error("Erro ao registrar execução:", error);
-    toast(error?.message || "Erro ao registrar execução.");
-    selectItem(row.TAG);
-  }
-}
-
-async function registerSelectedPontos() {
-  const tags = [...state.selectedTags];
-  if (!tags.length) return;
-
-  try {
-    $("registerSelectedBtn") && ($("registerSelectedBtn").disabled = true);
-    let done = 0;
-    for (const tag of tags) {
-      const row = state.rows.find(item => item.programacaoId === tag || item.TAG === tag);
-      if (!row || hasLog(row)) continue;
-      await appendLog(row);
-      done += 1;
-    }
-    state.selectedTags.clear();
-    renderTable();
-    renderHistory();
-    renderDashboard();
-    toast(`${done} execução(ões) registrada(s).`);
-  } catch (error) {
-    console.error("Erro nas execuções selecionadas:", error);
-    toast(error?.message || "Não foi possível registrar os selecionados.");
-  } finally {
-    updateMultiSelectionUI();
-  }
-}
-
-function renderHistory() {
-  const rows = state.rows.filter(row => normalizeWeek(row.Week) === activeDashboardWeek());
-  const done = rows.filter(hasLog);
-  $("historyDone") && ($("historyDone").textContent = done.length);
-  $("historyPending") && ($("historyPending").textContent = rows.length - done.length);
-  $("historyTotal") && ($("historyTotal").textContent = rows.length);
-
-  const logs = [];
-  rows.forEach(row => {
-    (row.executionLogs || []).forEach(execution => logs.push({ tag: row.TAG, execution, team: row.team }));
-  });
-  logs.reverse();
-
-  $("historyLog") && ($("historyLog").innerHTML = logs.length
-    ? logs.slice(0, 30).map(item => `
-        <div class="history-log-row">
-          <span class="time">${escapeHTML(formatExecutionLog(item.execution).split(" - ")[0])}</span>
-          <div><strong>Ponto a ponto</strong><span>${escapeHTML(item.tag)}</span></div>
-          <span class="user">${escapeHTML(formatExecutionLog(item.execution))}</span>
-        </div>
-      `).join("")
-    : `<div class="empty-state inline"><strong>Nenhuma execução na semana atual.</strong><span>Os registros aparecerão aqui.</span></div>`);
-}
-
-/* =========================
-   DASHBOARD
-   ========================= */
-
-function dashboardFilterState() {
-  return { week: activeDashboardWeek(), activity: "", team: "" };
-}
-
-function setupDashboardFilters() {
-  const previous = dashboardFilterState();
-  const weeks = [...new Set([
-    currentWeek(),
-    ...state.dashboardSeed.map(item => normalizeWeek(item.week)),
-    ...state.programacoes.map(item => normalizeWeek(item.week)),
-    ...state.rows.map(item => normalizeWeek(item.Week)).filter(Boolean)
-  ])].sort((a, b) => weekToNumber(a) - weekToNumber(b));
-
-  if ($("dashboardWeekFilter")) {
-    $("dashboardWeekFilter").innerHTML = `<option value="">Todas</option>` + weeks.map(week => `<option value="${escapeHTML(week)}">${escapeHTML(week)}</option>`).join("");
-    $("dashboardWeekFilter").value = weeks.includes(previous.week) ? previous.week : "";
-  }
-
-  if ($("dashboardActivityFilter")) {
-    $("dashboardActivityFilter").innerHTML = `<option value="">Todas</option>` + state.moduleCatalog.map(module => `<option value="${escapeHTML(module.id)}">${escapeHTML(module.name)}</option>`).join("");
-    $("dashboardActivityFilter").value = moduleById(previous.activity) ? previous.activity : "";
-  }
-
-  if ($("dashboardTeamFilter")) {
-    $("dashboardTeamFilter").innerHTML = `<option value="">Todas</option>` + state.teams.map(team => `<option value="${escapeHTML(team.nome)}">${escapeHTML(team.nome)}</option>`).join("");
-    $("dashboardTeamFilter").value = state.teams.some(team => team.nome === previous.team) ? previous.team : "";
-  }
-}
-
-function executionRowsForWeek(week, activity, team) {
-  if (activity && activity !== "ppa") return [];
-  return state.rows
-    .filter(row => normalizeWeek(row.Week) === normalizeWeek(week))
-    .flatMap(row => (row.executionLogs || []).map(execution => ({
-      row,
-      execution,
-      meta: {
-        time: formatExecutionLog(execution).split(" - ")[0] || "",
-        user: state.peopleRecords.find(person => person.id === execution.executante_id)?.nome || "Usuário",
-        team: row.team || ""
-      }
-    })))
-    .filter(item => !team || !item.meta.team || item.meta.team === team);
-}
-
-function dashboardData() {
-  const filters = dashboardFilterState();
-  const weeks = [...new Set([
-    ...state.dashboardSeed.map(item => normalizeWeek(item.week)),
-    ...state.programacoes.map(item => normalizeWeek(item.week)),
-    ...state.rows.map(item => normalizeWeek(item.Week)).filter(Boolean),
-    activeDashboardWeek()
-  ])].sort((a, b) => weekToNumber(a) - weekToNumber(b));
-
-  const selectedWeeks = filters.week ? weeks.filter(week => week === filters.week) : weeks;
-  const chart = selectedWeeks.map(week => {
-    const planned = state.programacoes
-      .filter(program => normalizeWeek(program.week) === week && (!filters.activity || program.activity === filters.activity) && (!filters.team || program.team === filters.team))
-      .reduce((sum, program) => sum + Number(program.qty || 0), 0);
-    const done = executionRowsForWeek(week, filters.activity, filters.team).length;
-
-    const seed = state.dashboardSeed.find(item => normalizeWeek(item.week) === week);
-    return {
-      week,
-      planned: planned || (!state.programacoes.length && !filters.activity && !filters.team ? Number(seed?.planned || 0) : 0),
-      done: done || (!state.rows.length && !filters.activity && !filters.team ? Number(seed?.done || 0) : 0)
-    };
-  });
-
-  const planned = chart.reduce((sum, item) => sum + item.planned, 0);
-  const done = chart.reduce((sum, item) => sum + item.done, 0);
-  const balance = Math.max(planned - done, 0);
-  const rate = planned ? Math.min(done / planned, 1) : 0;
-
-  const activityMap = new Map();
-  state.moduleCatalog.forEach(module => activityMap.set(module.id, { name: module.name, planned: 0, done: 0 }));
-
-  state.programacoes
-    .filter(program => (!filters.week || normalizeWeek(program.week) === normalizeWeek(filters.week)) && (!filters.activity || program.activity === filters.activity) && (!filters.team || program.team === filters.team))
-    .forEach(program => {
-      const item = activityMap.get(program.activity) || { name: moduleById(program.activity)?.name || program.activity, planned: 0, done: 0 };
-      item.planned += Number(program.qty || 0);
-      activityMap.set(program.activity, item);
-    });
-
-  if (filters.activity) {
-    const item = activityMap.get(filters.activity);
-    if (item) item.done = done;
-  } else if (activityMap.has("ppa")) {
-    activityMap.get("ppa").done = executionRowsForWeek(filters.week || activeDashboardWeek(), "ppa", filters.team).length;
-  }
-
-  const teamMap = new Map();
-  state.programacoes.filter(p => normalizeWeek(p.week) === activeDashboardWeek()).forEach(p => {
-    const name = p.team || "Sem equipe";
-    const x = teamMap.get(name) || { name, planned: 0, done: 0 };
-    x.planned += Number(p.qty || 1);
-    teamMap.set(name, x);
-  });
-  teamMap.forEach((x, name) => { x.done = executionRowsForWeek(activeDashboardWeek(), "", name).length; x.pct = x.planned ? Math.round(x.done / x.planned * 100) : 0; });
-
+function personToUser(p, extra = {}) {
   return {
-    filters,
-    weeks: selectedWeeks,
-    chart,
-    planned,
-    done,
-    balance,
-    rate,
-    breakdown: [...activityMap.entries()]
-      .filter(([, value]) => value.planned || value.done)
-      .map(([id, value]) => ({ id, ...value, pct: value.planned ? Math.round(value.done / value.planned * 100) : 0 })),
-    teams: [...teamMap.values()].sort((a,b) => b.planned - a.planned)
+    id: p.id, nome: p.nome, cracha: p.cracha, perfil: p.perfil,
+    role: p.perfil === "ADMINISTRADOR" ? "admin" : "technician",
+    equipeId: p.equipe_id || null, disciplina: p.disciplina || "", authUserId: p.auth_user_id || null,
+    ...extra
   };
 }
 
-function renderDashboard() {
-  setupDashboardFilters();
-  const data = dashboardData();
-  const pct = Math.round(data.rate * 100);
-
-  const setText = (id, value) => { if ($(id)) $(id).textContent = String(value); };
-  setText("dashboardWeek", data.filters.week || currentWeek());
-  setText("metricPlanned", data.planned);
-  setText("metricDone", data.done);
-  setText("metricBalance", data.balance);
-  setText("metricRate", `${pct}%`);
-  setText("ringRate", `${pct}%`);
-  setText("ringPlanned", data.planned);
-  setText("ringDone", data.done);
-  setText("ringPending", data.balance);
-
-  if ($("progressRing")) $("progressRing").style.background = `conic-gradient(${currentSettings().chartDone} ${pct * 3.6}deg, #e7edf4 0deg)`;
-
-  const maxValue = Math.max(1, ...data.chart.flatMap(item => [item.planned, item.done]));
-  if ($("weeklyBars")) {
-    $("weeklyBars").innerHTML = data.chart.length
-      ? data.chart.map(item => {
-          const plannedHeight = Math.max(4, Math.round(item.planned / maxValue * 150));
-          const doneHeight = Math.max(4, Math.round(item.done / maxValue * 150));
-          return `<div class="week-bar-group">
-            <div class="week-bar-values"><span>${item.planned}</span><span>${item.done}</span></div>
-            <div class="week-bar-track"><i class="week-bar planned" style="height:${plannedHeight}px;background:${currentSettings().chartPlanned}"></i><i class="week-bar done" style="height:${doneHeight}px;background:${currentSettings().chartDone}"></i></div>
-            <small>${escapeHTML(item.week)}</small>
-          </div>`;
-        }).join("")
-      : `<div class="empty-state inline"><strong>Sem dados para os filtros.</strong></div>`;
-  }
-
-  if ($("activityBreakdownRows")) {
-    $("activityBreakdownRows").innerHTML = data.breakdown.length
-      ? data.breakdown.map(item => `<div class="breakdown-row">
-          <div class="breakdown-main"><span class="activity-color-dot"></span><strong>${escapeHTML(item.name)}</strong></div>
-          <div class="breakdown-numbers"><span>${item.done}/${item.planned}</span><strong>${item.pct}%</strong></div>
-          <div class="breakdown-progress"><i style="width:${Math.min(item.pct, 100)}%"></i></div>
-        </div>`).join("")
-      : `<div class="empty-state inline"><strong>Nenhuma atividade encontrada.</strong><span>Ajuste os filtros ou importe uma programação.</span></div>`;
-  }
-
-  if ($("dashboardTeamRows")) {
-    const maxTeam = Math.max(1, ...data.teams.map(x => x.planned));
-    $("dashboardTeamRows").innerHTML = data.teams.length ? data.teams.map(x => `<div class="breakdown-row team-breakdown-row"><div class="breakdown-main"><span class="activity-color-dot team-dot"></span><strong>${escapeHTML(x.name)}</strong></div><div class="breakdown-numbers"><span>${x.done}/${x.planned}</span><strong>${x.pct}%</strong></div><div class="breakdown-progress"><i style="width:${Math.min(100, Math.round(x.planned / maxTeam * 100))}%;background:${currentSettings().chartPlanned}"></i><b style="width:${Math.min(100, x.pct)}%;background:${currentSettings().chartDone}"></b></div></div>`).join("") : `<div class="empty-state inline"><strong>Nenhuma equipe encontrada.</strong></div>`;
-  }
-
+async function loadAdminProfile() {
+  const sb = requireDb();
+  const { data: auth } = await sb.auth.getUser();
+  const authUser = auth?.user;
+  if (!authUser) return null;
+  const { data, error } = await sb.from("tb_pessoas")
+    .select("id,nome,cracha,perfil,ativo,auth_user_id,equipe_id,disciplina")
+    .eq("auth_user_id", authUser.id).eq("ativo", true).limit(1).maybeSingle();
+  if (error) throw error;
+  return data ? personToUser(data, { email: authUser.email || "" }) : null;
 }
 
-function setupReportFilters() {
-  const current = { week: $("reportWeekFilter")?.value || "", activity: $("reportActivityFilter")?.value || "", team: $("reportTeamFilter")?.value || "" };
-  const weeks = [...new Set([...(state.weeks || []).map(item => normalizeWeek(item.semana)), ...state.dashboardSeed.map(item => normalizeWeek(item.week)), ...state.programacoes.map(item => normalizeWeek(item.semana))])].filter(Boolean).sort((a,b)=>weekToNumber(a)-weekToNumber(b));
-  if ($("reportWeekFilter")) { $("reportWeekFilter").innerHTML = `<option value="">Todas</option>` + weeks.map(w=>`<option value="${escapeHTML(w)}">${escapeHTML(w)}</option>`).join(""); $("reportWeekFilter").value = weeks.includes(current.week) ? current.week : ""; }
-  if ($("reportActivityFilter")) { $("reportActivityFilter").innerHTML = `<option value="">Todas</option>` + state.moduleCatalog.map(m=>`<option value="${escapeHTML(m.id)}">${escapeHTML(m.name)}</option>`).join(""); $("reportActivityFilter").value = moduleById(current.activity) ? current.activity : ""; }
-  const teams = [...state.teams].sort((a,b)=>String(a.nome||"").localeCompare(String(b.nome||""),"pt-BR",{numeric:true,sensitivity:"base"}));
-  if ($("reportTeamFilter")) { $("reportTeamFilter").innerHTML = `<option value="">Todas</option>` + teams.map(t=>`<option value="${escapeHTML(t.nome)}">${escapeHTML(t.nome)}</option>`).join(""); $("reportTeamFilter").value = teams.some(t=>t.nome===current.team) ? current.team : ""; }
-}
-
-function reportAnalysis() {
-  const filters = { week: $("reportWeekFilter")?.value || "", activity: $("reportActivityFilter")?.value || "", team: $("reportTeamFilter")?.value || "" };
-  const programs = state.programacoes.filter(p =>
-    (!filters.week || normalizeWeek(p.week) === filters.week) &&
-    (!filters.activity || p.activity === filters.activity) &&
-    (!filters.team || p.team === filters.team)
-  );
-  const weeks = [...new Set([
-    ...programs.map(p => normalizeWeek(p.week)),
-    ...state.rows.map(r => normalizeWeek(r.Week)).filter(Boolean)
-  ])].filter(Boolean).sort((a,b)=>weekToNumber(a)-weekToNumber(b));
-  const sourceWeeks = weeks.length ? weeks : (filters.week ? [filters.week] : state.dashboardSeed.map(x=>normalizeWeek(x.week)));
-  const weekRows = sourceWeeks.map(week => {
-    const weekPrograms = programs.filter(p => normalizeWeek(p.week) === week);
-    const seed = state.dashboardSeed.find(x=>normalizeWeek(x.week)===week);
-    const planned = weekPrograms.length ? weekPrograms.reduce((n,p)=>n+Number(p.qty||1),0) : (!state.programacoes.length && !filters.activity && !filters.team ? Number(seed?.planned||0) : 0);
-    const done = executionRowsForWeek(week, filters.activity, filters.team).length || (!state.rows.length && !filters.activity && !filters.team ? Number(seed?.done||0) : 0);
-    return {week,planned,done};
+async function loginAdmin(event) {
+  event.preventDefault();
+  const email = $("adminEmail").value.trim();
+  const password = $("adminPassword").value;
+  if (!email || !password) return setMessage("adminLoginMessage", "Informe e-mail e senha.");
+  await withButton(event.submitter, async () => {
+    try {
+      const sb = requireDb();
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) throw new Error(/invalid login/i.test(error.message) ? "E-mail ou senha incorretos." : error.message);
+      const user = await loadAdminProfile();
+      if (!user || user.role !== "admin") {
+        await sb.auth.signOut();
+        throw new Error(user ? "Esta conta não possui perfil de Administrador." : "Usuário sem cadastro ativo em tb_pessoas (auth_user_id).");
+      }
+      await enterApp(user);
+    } catch (error) {
+      setMessage("adminLoginMessage", dbErrorMessage(error, "Não foi possível entrar."));
+    }
   });
-  const planned = weekRows.reduce((n,x)=>n+x.planned,0);
-  const done = weekRows.reduce((n,x)=>n+x.done,0);
-  const teamMap = new Map();
-  programs.forEach(p => { const name=p.team || "Sem equipe"; const x=teamMap.get(name)||{name,planned:0,done:0}; x.planned += Number(p.qty||1); teamMap.set(name,x); });
-  teamMap.forEach(x => { x.done = executionRowsForWeek(filters.week || currentWeek(), filters.activity, x.name).length; x.pct=x.planned?Math.round(x.done/x.planned*100):0; });
-  const activityMap = new Map();
-  programs.forEach(p => { const name=moduleById(p.activity)?.name || p.activity || "Sem atividade"; const x=activityMap.get(p.activity)||{name,planned:0,done:0}; x.planned += Number(p.qty||1); activityMap.set(p.activity,x); });
-  activityMap.forEach((x,id)=>{ x.done=executionRowsForWeek(filters.week || currentWeek(), id, filters.team).length; x.pct=x.planned?Math.round(x.done/x.planned*100):0; });
-  if (!programs.length && !state.programacoes.length) state.dashboardSeed.forEach(seed=>{ const x=activityMap.get("ppa")||{name:"Ponto a Ponto",planned:0,done:0}; if(!filters.activity||filters.activity==="ppa"){x.planned+=seed.planned;x.done+=seed.done;} activityMap.set("ppa",x); });
-  return {filters,planned,done,rate:planned?Math.min(done/planned,1):0,teams:[...teamMap.values()],activities:[...activityMap.values()],weeks:weekRows};
 }
 
-function renderReports() {
-  setupReportFilters();
-  const r=reportAnalysis();
-  $("reportPlanned") && ($("reportPlanned").textContent=r.planned);
-  $("reportDone") && ($("reportDone").textContent=r.done);
-  $("reportRate") && ($("reportRate").textContent=`${Math.round(r.rate*100)}%`);
-  $("reportTeams") && ($("reportTeams").textContent=r.teams.filter(x=>x.planned).length);
-  const maxTeam=Math.max(1,...r.teams.map(x=>x.planned));
-  if ($("reportTeamBars")) $("reportTeamBars").innerHTML=r.teams.length?r.teams.map(x=>`<div class="report-bar-row"><div><strong>${escapeHTML(x.name)}</strong><span>${x.done}/${x.planned} • ${x.pct}%</span></div><div class="report-bar-track"><i style="width:${Math.min(100,Math.max(3,Math.round(x.planned/maxTeam*100)))}%"></i><b style="width:${Math.min(100,Math.round(x.done/Math.max(1,x.planned)*100))}%"></b></div></div>`).join(""):`<div class="empty-state inline"><strong>Sem dados por equipe.</strong></div>`;
-  if ($("reportActivityRows")) $("reportActivityRows").innerHTML=r.activities.length?r.activities.map(x=>`<div class="breakdown-row"><div class="breakdown-main"><span class="activity-color-dot"></span><strong>${escapeHTML(x.name)}</strong></div><div class="breakdown-numbers"><span>${x.done}/${x.planned}</span><strong>${x.pct}%</strong></div><div class="breakdown-progress"><i style="width:${Math.min(100,x.pct)}%"></i></div></div>`).join(""):`<div class="empty-state inline"><strong>Sem dados por atividade.</strong></div>`;
-  const maxWeek=Math.max(1,...r.weeks.map(x=>Math.max(x.planned,x.done)));
-  if ($("reportWeekBars")) $("reportWeekBars").innerHTML=r.weeks.length?r.weeks.map(x=>`<div class="week-bar-group"><div class="week-bar-values"><span>${x.planned}</span><span>${x.done}</span></div><div class="week-bar-track"><i class="week-bar planned" style="height:${Math.max(4,Math.round(x.planned/maxWeek*150))}px"></i><i class="week-bar done" style="height:${Math.max(4,Math.round(x.done/maxWeek*150))}px"></i></div><small>${escapeHTML(x.week)}</small></div>`).join(""):`<div class="empty-state inline"><strong>Sem dados semanais.</strong></div>`;
+async function technicianByCode(code) {
+  const sb = requireDb();
+  const { data, error } = await sb.rpc("login_tecnico_por_cracha", { p_cracha: code });
+  if (error) throw error;
+  const person = Array.isArray(data) ? data[0] : data;
+  return person && person.perfil !== "ADMINISTRADOR" ? personToUser(person) : null;
 }
 
-function reportRowsForDashboard() {
-  return dashboardData().breakdown.map(item => ({
-    label: item.name,
-    planned: item.planned,
-    done: item.done,
-    pending: Math.max(item.planned - item.done, 0),
-    pct: item.pct
+async function loginTechnician(event) {
+  event.preventDefault();
+  const code = $("techAccessCode").value.trim();
+  if (!code) return setMessage("techLoginMessage", "Informe o código de acesso.");
+  await withButton(event.submitter, async () => {
+    try {
+      const user = await technicianByCode(code);
+      if (!user) throw new Error("Código não encontrado ou inativo.");
+      sessionStorage.setItem("ppaFieldCode", code);
+      await enterApp(user);
+    } catch (error) {
+      setMessage("techLoginMessage", dbErrorMessage(error, "Não foi possível entrar."));
+    }
+  });
+}
+
+async function restoreSession() {
+  // Equipe de campo: não usa Supabase Auth; revalida o código guardado na sessão do navegador.
+  const fieldCode = sessionStorage.getItem("ppaFieldCode");
+  if (fieldCode) {
+    try {
+      const user = await technicianByCode(fieldCode);
+      if (user) return user;
+    } catch (error) { console.warn("Falha ao restaurar sessão de campo:", error); }
+    sessionStorage.removeItem("ppaFieldCode");
+  }
+  try {
+    const user = await loadAdminProfile();
+    if (user?.role === "admin") return user;
+  } catch (error) { console.warn("Falha ao restaurar sessão administrativa:", error); }
+  return null;
+}
+
+async function logout() {
+  try { await db()?.auth.signOut(); } catch (error) { console.warn(error); }
+  sessionStorage.removeItem("ppaFieldCode");
+  state.user = null;
+  state.programs = [];
+  state.executions = new Map();
+  state.field = { ...state.field, programs: [], selected: new Set(), activeId: null };
+  $("appShell").classList.add("hidden");
+  $("loginScreen").classList.remove("hidden");
+  $("adminLoginForm").reset();
+  $("technicianLoginForm").reset();
+  history.replaceState(null, "", location.pathname);
+  showLoginStep("chooser");
+}
+
+async function enterApp(user) {
+  state.user = user;
+  $("loginScreen").classList.add("hidden");
+  $("appShell").classList.remove("hidden");
+  document.querySelectorAll("[data-nav-role]").forEach(nav => nav.classList.toggle("active", nav.dataset.navRole === user.role));
+  renderUserChrome();
+  await syncAll();
+  route();
+}
+
+function renderUserChrome() {
+  const u = state.user;
+  if (!u) return;
+  setText("sidebarRole", u.role === "admin" ? "Planejamento" : "Equipe de campo");
+  setText("sidebarAvatar", initials(u.nome));
+  setText("sidebarUserName", u.nome);
+  setText("sidebarUserMeta", u.role === "admin" ? (u.email || "Administrador") : (teamName(u.equipeId) || "Sem equipe"));
+}
+
+/* =========================================================
+   CARGA DE DADOS
+   ========================================================= */
+
+const teamById = id => state.teams.find(t => t.id === id) || null;
+const teamName = id => teamById(id)?.nome || "";
+const personById = id => state.people.find(p => p.id === id) || null;
+const activityById = id => state.activities.find(a => a.id === id) || null;
+
+function teamByName(name) {
+  const target = normalizeText(name).replace(/^(equipe|eq\.?)\s*/, "");
+  if (!target) return null;
+  const clean = t => normalizeText(t.nome).replace(/^(equipe|eq\.?)\s*/, "");
+  const exact = state.teams.filter(t => clean(t) === target);
+  if (exact.length === 1) return exact[0];
+  // Aceita "A" para "Equipe A" somente quando houver correspondência única.
+  if (!exact.length && target.length <= 2) {
+    const alias = state.teams.filter(t => clean(t).split(/\s+/).at(-1) === target);
+    if (alias.length === 1) return alias[0];
+  }
+  return null;
+}
+
+function personByName(name) {
+  const target = normalizeText(name);
+  if (!target) return null;
+  const matches = state.people.filter(p => normalizeText(p.nome) === target);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function mapColumn(c) {
+  return {
+    id: c.id, key: c.chave, label: c.rotulo, type: COLUMN_TYPES[c.tipo] ? c.tipo : "text",
+    required: Boolean(c.obrigatorio), technicianEditable: Boolean(c.editavel_tecnico),
+    options: Array.isArray(c.opcoes) ? c.opcoes.map(String) : [], ordem: Number(c.ordem) || 0
+  };
+}
+
+async function loadActivities() {
+  const sb = requireDb();
+  const { data: acts, error } = await sb.from("tb_atividades").select("id,nome,descricao,ativo,created_at").eq("ativo", true).order("created_at");
+  if (error) throw error;
+  const cols = await fetchAll(() => sb.from("tb_atividade_colunas").select("*").order("ordem").order("id"));
+  state.activities = (acts || []).map(a => ({
+    id: a.id, name: a.nome, description: a.descricao || "",
+    columns: cols.filter(c => c.atividade_id === a.id).map(mapColumn).sort((x, y) => x.ordem - y.ordem)
   }));
 }
 
-function exportDashboardJPEG() {
-  const rows = reportRowsForDashboard();
-  drawStationeryCanvas("PLANNING PRO", `Relatório gerencial • ${nowBR()}`, rows, `dashboard-${currentWeek()}.jpg`);
+async function seedDefaultActivities() {
+  const sb = requireDb();
+  for (const def of DEFAULT_ACTIVITIES) {
+    const { data, error } = await sb.from("tb_atividades").insert({ nome: def.name, descricao: def.description, ativo: true }).select("id").single();
+    if (error) throw error;
+    const rows = def.columns.map(([chave, rotulo, tipo, obrigatorio = false, editavel = false, opcoes = []], ordem) => ({
+      atividade_id: data.id, chave, rotulo, tipo, obrigatorio, editavel_tecnico: editavel, opcoes, ordem
+    }));
+    const { error: colError } = await sb.from("tb_atividade_colunas").insert(rows);
+    if (colError) throw colError;
+  }
 }
 
-function exportTechReportJPEG() {
-  const rows = state.rows.filter(row => normalizeWeek(row.Week) === activeDashboardWeek());
-  const done = rows.filter(hasLog).length;
-  drawStationeryCanvas("PLANNING PRO", `Relatório de campo • ${currentWeek()}`, [{ label: "Total da semana", planned: rows.length, done, pending: Math.max(rows.length - done, 0), pct: rows.length ? Math.round(done / rows.length * 100) : 0 }], `campo-${currentWeek()}.jpg`);
+async function loadTeams() {
+  const { data, error } = await requireDb().from("tb_equipes").select("id,nome,disciplina,ativo").order("nome");
+  if (error) throw error;
+  state.teams = (data || []).map(t => ({ ...t, ativo: t.ativo !== false })).sort(sortByName);
 }
 
-function drawStationeryCanvas(title, subtitle, rows, filename) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 1600;
-  canvas.height = Math.max(900, 420 + rows.length * 55);
-  const context = canvas.getContext("2d");
-  const settings = currentSettings();
+async function loadPeople() {
+  const data = await fetchAll(() => requireDb().from("tb_pessoas").select("id,nome,cracha,perfil,ativo,auth_user_id,equipe_id,disciplina").order("nome").order("id"));
+  state.people = data.map(p => ({ ...p, ativo: p.ativo !== false }));
+}
 
-  context.fillStyle = settings.background;
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = settings.header;
-  context.fillRect(0, 0, canvas.width, 180);
-  context.fillStyle = settings.primary;
-  context.fillRect(0, 173, canvas.width, 7);
+async function loadWeeks() {
+  const { data, error } = await requireDb().from("tb_semanas").select("id,semana,ativa").order("semana");
+  if (error) { console.warn("tb_semanas indisponível:", error.message); state.weekRows = []; state.weeks = []; return; }
+  state.weekRows = data || [];
+  state.weeks = sortWeeks(state.weekRows.filter(w => w.ativa !== false).map(w => w.semana));
+}
 
-  context.fillStyle = "#fff";
-  context.font = "800 34px Arial";
-  context.fillText(title, 60, 65);
-  context.font = "20px Arial";
-  context.fillText(subtitle, 60, 104);
-  context.font = "16px Arial";
-  context.fillText(`Responsável: ${currentUserLabel()}`, 60, 138);
+const PROGRAM_COLUMNS = "id,equipamento_id,semana,status,atividade_id,data_programacao,equipe_id,responsavel_id,quantidade,observacao,dados_personalizados,modo_importacao,arquivo_importacao,usuario_importacao,created_at";
 
-  let y = 225;
-  context.fillStyle = settings.header;
-  context.fillRect(60, y, 1480, 46);
-  context.fillStyle = "#fff";
-  context.font = "700 17px Arial";
-  context.fillText("ATIVIDADE", 80, y + 29);
-  context.fillText("PREVISTO", 930, y + 29);
-  context.fillText("EXECUTADO", 1110, y + 29);
-  context.fillText("PENDENTE", 1300, y + 29);
-  y += 46;
+function mapProgram(row) {
+  return {
+    id: row.id,
+    weekNum: Number(row.semana),
+    week: weekLabel(row.semana),
+    activityId: row.atividade_id,
+    teamId: row.equipe_id,
+    responsibleId: row.responsavel_id,
+    date: row.data_programacao || "",
+    note: row.observacao || "",
+    status: row.status || "PROGRAMADO",
+    equipmentId: row.equipamento_id,
+    customData: row.dados_personalizados && typeof row.dados_personalizados === "object" ? row.dados_personalizados : {},
+    mode: row.modo_importacao || "",
+    file: row.arquivo_importacao || "",
+    importedBy: row.usuario_importacao || "",
+    createdAt: row.created_at
+  };
+}
 
-  rows.forEach((row, index) => {
-    context.fillStyle = index % 2 ? "#f8fafc" : "#fff";
-    context.fillRect(60, y, 1480, 52);
-    context.fillStyle = settings.header;
-    context.font = "600 17px Arial";
-    context.fillText(String(row.label).slice(0, 70), 80, y + 32);
-    context.fillText(String(row.planned), 955, y + 32);
-    context.fillStyle = settings.accent;
-    context.fillText(String(row.done), 1140, y + 32);
-    context.fillStyle = "#d97706";
-    context.fillText(String(row.pending), 1330, y + 32);
-    y += 52;
+function setExecutions(rows) {
+  const map = new Map();
+  rows.forEach(e => {
+    const list = map.get(e.programacao_id) || [];
+    list.push(e);
+    map.set(e.programacao_id, list);
+  });
+  map.forEach(list => list.sort((a, b) => String(a.executado_em).localeCompare(String(b.executado_em))));
+  return map;
+}
+
+async function loadAdminPrograms() {
+  const sb = requireDb();
+  const [programs, executions] = await Promise.all([
+    // Ordem secundária por id: uma importação grava centenas de linhas com o mesmo created_at.
+    fetchAll(() => sb.from("tb_programacoes").select(PROGRAM_COLUMNS).order("created_at").order("id")),
+    fetchAll(() => sb.from("tb_execucoes").select("id,programacao_id,executante_id,executado_em,observacao").order("executado_em").order("id"))
+  ]);
+  state.programs = programs.map(mapProgram);
+  state.executions = setExecutions(executions);
+}
+
+const executionsOf = programId => state.executions.get(programId) || [];
+const isDone = p => executionsOf(p.id).length > 0 || p.status === "EXECUTADO";
+
+async function syncAll() {
+  await withBusy(async () => {
+    try {
+      if (state.user.role === "admin") {
+        await loadActivities();
+        if (!state.activities.length) { await seedDefaultActivities(); await loadActivities(); }
+        await Promise.all([loadTeams(), loadPeople(), loadWeeks()]);
+        await loadAdminPrograms();
+      } else {
+        await loadActivities();
+        try { await loadTeams(); } catch (error) { console.warn("Equipes indisponíveis para o perfil de campo:", error.message); }
+        if (state.field.weekNum === null) state.field.weekNum = currentWeekNumber();
+        await loadFieldWeek();
+      }
+    } catch (error) {
+      console.error("Erro ao sincronizar:", error);
+      toast(dbErrorMessage(error, "Não foi possível carregar os dados."), "error");
+    }
+  });
+  renderUserChrome();
+}
+
+/* =========================================================
+   NAVEGAÇÃO
+   ========================================================= */
+
+function route() {
+  if (!state.user) return;
+  const allowed = state.user.role === "admin" ? ADMIN_SCREENS : FIELD_SCREENS;
+  let screen = location.hash.replace("#", "");
+  if (!allowed.includes(screen)) screen = allowed[0];
+
+  document.querySelectorAll(".screen").forEach(el => el.classList.toggle("active", el.id === `screen-${screen}`));
+  document.querySelectorAll(".nav-item[data-screen]").forEach(el => el.classList.toggle("active", el.dataset.screen === screen));
+  const section = $(`screen-${screen}`);
+  setText("topbarTitle", section?.dataset.title || "");
+  setText("topbarKicker", section?.dataset.kicker || "");
+  document.title = `${section?.dataset.title || ""} · Planning Pro`;
+  closeSidebar();
+  renderScreen(screen);
+  window.scrollTo({ top: 0 });
+}
+
+function currentScreen() {
+  return document.querySelector(".screen.active")?.id.replace("screen-", "") || "";
+}
+
+function renderScreen(screen = currentScreen()) {
+  ({
+    dashboard: renderDashboard,
+    programacao: renderProgramacao,
+    importacoes: renderImportHistory,
+    relatorios: renderReports,
+    atividades: renderActivities,
+    equipes: renderEquipes,
+    configuracoes: renderSettings,
+    perfil: renderProfile,
+    campo: renderField,
+    historico: renderFieldHistory
+  })[screen]?.();
+}
+
+function goTo(screen) {
+  if (location.hash === `#${screen}`) route();
+  else location.hash = screen;
+}
+
+function closeSidebar() {
+  $("sidebar").classList.remove("open");
+  $("sidebarOverlay").classList.remove("show");
+}
+
+/* =========================================================
+   ESTATÍSTICAS
+   ========================================================= */
+
+function summarize(programs) {
+  const total = programs.length;
+  const done = programs.filter(isDone).length;
+  return { total, done, pending: total - done, rate: pct(done, total) };
+}
+
+function groupBy(programs, keyOf, labelOf) {
+  const map = new Map();
+  programs.forEach(p => {
+    const key = keyOf(p) ?? "";
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(p);
+  });
+  return [...map.entries()]
+    .map(([key, list]) => ({ key, label: labelOf(key), ...summarize(list) }))
+    .sort((a, b) => b.total - a.total || String(a.label).localeCompare(String(b.label), "pt-BR"));
+}
+
+const byActivity = programs => groupBy(programs, p => p.activityId, id => activityById(id)?.name || "Atividade removida");
+const byTeam = programs => groupBy(programs, p => p.teamId, id => teamName(id) || "Sem equipe");
+
+function allWeeks() {
+  return sortWeeks([...state.weeks, ...state.programs.map(p => p.week), weekLabel(currentWeekNumber())]);
+}
+
+function renderBarChart(host, series, currentWeek) {
+  if (!host) return;
+  if (!series.length) { host.innerHTML = `<div class="empty inline"><span>Sem programação no período.</span></div>`; return; }
+  const max = Math.max(1, ...series.flatMap(s => [s.total, s.done]));
+  host.innerHTML = series.map(s => `
+    <div class="bar-group ${s.week === currentWeek ? "current" : ""}" title="${escapeHTML(s.week)}: ${s.done} de ${s.total} (${s.rate}%)">
+      <div class="bar-pair">
+        <i class="bar planned" style="height:${Math.round(s.total / max * 150)}px"><b>${s.total}</b></i>
+        <i class="bar done" style="height:${Math.round(s.done / max * 150)}px"><b>${s.done}</b></i>
+      </div>
+      <small>${escapeHTML(s.week)}</small>
+    </div>`).join("");
+}
+
+function renderProgressList(host, groups, emptyText = "Sem dados.") {
+  if (!host) return;
+  host.innerHTML = groups.length ? groups.map(g => `
+    <div class="progress-row">
+      <strong title="${escapeHTML(g.label)}">${escapeHTML(g.label)}</strong>
+      <span><b>${g.done}</b>/${g.total} · ${g.rate}%</span>
+      <div class="meter"><i style="width:${g.rate}%"></i></div>
+    </div>`).join("") : `<div class="empty inline"><span>${escapeHTML(emptyText)}</span></div>`;
+}
+
+function weeklySeries(programs, weeks) {
+  return weeks.map(week => ({ week, ...summarize(programs.filter(p => p.week === week)) }));
+}
+
+/* =========================================================
+   DASHBOARD
+   ========================================================= */
+
+function renderDashboard() {
+  const weeks = allWeeks();
+  if (!state.dashboardWeek || !weeks.includes(state.dashboardWeek)) state.dashboardWeek = weekLabel(currentWeekNumber());
+  fillSelect($("dashboardWeek"), weeks.slice().reverse().map(w => ({ value: w, label: w })), { value: state.dashboardWeek });
+
+  const week = state.dashboardWeek;
+  const programs = state.programs.filter(p => p.week === week);
+  const s = summarize(programs);
+  setText("kpiPlanned", s.total);
+  setText("kpiDone", s.done);
+  setText("kpiPending", s.pending);
+  setText("kpiRate", `${s.rate}%`);
+  $("kpiRateBar").style.width = `${s.rate}%`;
+
+  // Até 10 semanas com programação, terminando na semana selecionada.
+  const n = weekToNumber(week);
+  const withData = sortWeeks(state.programs.map(p => p.week)).filter(w => weekToNumber(w) <= n);
+  if (!withData.includes(week)) withData.push(week);
+  renderBarChart($("dashboardWeekly"), weeklySeries(state.programs, withData.slice(-10)), week);
+  renderProgressList($("dashboardTeams"), byTeam(programs), "Nenhuma equipe programada nesta semana.");
+  renderProgressList($("dashboardActivities"), byActivity(programs), "Nenhuma atividade programada nesta semana.");
+}
+
+/* =========================================================
+   PROGRAMAÇÃO
+   ========================================================= */
+
+// Colunas da atividade que entram no template/tabela (exclui as que duplicam campos fixos).
+function activityColumns(activity) {
+  return (activity?.columns || []).filter(c => !RESERVED_COLUMN_KEYS.has(c.key));
+}
+
+// Colunas fixas que não colidem com colunas da atividade de mesmo nome.
+function fixedColumnsFor(activity) {
+  const used = new Set(activityColumns(activity).flatMap(c => [makeKey(c.label), c.key]));
+  return FIXED_COLUMNS.filter(f => f.required || !used.has(makeKey(f.label)));
+}
+
+function templateColumns(activity) {
+  const fixed = fixedColumnsFor(activity);
+  const head = fixed.filter(f => ["week", "activity", "team"].includes(f.key));
+  const tail = fixed.filter(f => !["week", "activity", "team"].includes(f.key));
+  return [
+    ...head.map(f => ({ ...f, fixed: true })),
+    ...activityColumns(activity).map(c => ({ ...c, fixed: false })),
+    ...tail.map(f => ({ ...f, fixed: true }))
+  ];
+}
+
+function equipmentValue(program, key) {
+  const eq = state.equipment.get(program.equipmentId);
+  if (!eq) return undefined;
+  return eq[key === "type" ? "tipe" : key];
+}
+
+function columnValue(program, column) {
+  const v = program.customData?.[column.key];
+  if (v !== undefined && v !== null && v !== "") return v;
+  return equipmentValue(program, column.key) ?? "";
+}
+
+function titleColumn(activity) {
+  const cols = activityColumns(activity);
+  return cols.find(c => c.key === "tag") || cols.find(c => /tag|equipamento/.test(c.key)) || cols[0] || null;
+}
+
+function programTitle(program) {
+  const activity = activityById(program.activityId);
+  const col = titleColumn(activity);
+  return (col && columnValue(program, col)) || activity?.name || "Item programado";
+}
+
+function filteredAdminPrograms() {
+  const f = state.program;
+  const q = normalizeText(f.search);
+  const activity = activityById(f.activityId);
+  const cols = activityColumns(activity);
+  return state.programs.filter(p => {
+    if (p.activityId !== f.activityId) return false;
+    if (f.week && p.week !== f.week) return false;
+    if (f.team && p.teamId !== f.team) return false;
+    if (f.status === "done" && !isDone(p)) return false;
+    if (f.status === "pending" && isDone(p)) return false;
+    if (q) {
+      const hay = [p.week, teamName(p.teamId), p.note, personById(p.responsibleId)?.nome, ...cols.map(c => columnValue(p, c))].map(normalizeText).join(" ");
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  }).sort((a, b) => b.weekNum - a.weekNum || teamName(a.teamId).localeCompare(teamName(b.teamId), "pt-BR") || String(programTitle(a)).localeCompare(String(programTitle(b)), "pt-BR", { numeric: true }));
+}
+
+function renderProgramFilters() {
+  if (!activityById(state.program.activityId)) state.program.activityId = state.activities[0]?.id || null;
+  fillSelect($("programActivity"), state.activities.map(a => ({ value: a.id, label: a.name })), { value: state.program.activityId });
+  const weeks = sortWeeks(state.programs.filter(p => p.activityId === state.program.activityId).map(p => p.week)).reverse();
+  fillSelect($("programWeekFilter"), weeks.map(w => ({ value: w, label: w })), { value: state.program.week, placeholder: "Todas" });
+  fillSelect($("programTeamFilter"), state.teams.map(t => ({ value: t.id, label: t.nome })), { value: state.program.team, placeholder: "Todas" });
+  state.program.week = $("programWeekFilter").value;
+  state.program.team = $("programTeamFilter").value;
+}
+
+function renderProgramacao() {
+  renderProgramFilters();
+  const activity = activityById(state.program.activityId);
+  const cols = activityColumns(activity);
+  const rows = filteredAdminPrograms();
+  const s = summarize(rows);
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  state.program.page = Math.min(state.program.page, pages - 1);
+  const pageRows = rows.slice(state.program.page * PAGE_SIZE, (state.program.page + 1) * PAGE_SIZE);
+
+  setText("programTableTitle", activity ? activity.name : "Programações");
+  setText("programTableMeta", activity ? `${rows.length} item(ns) · ${s.done} executado(s) · ${s.pending} pendente(s)` : "Cadastre uma atividade para começar.");
+
+  $("programTableHead").innerHTML = `<tr><th>Semana</th><th>Equipe</th>${cols.map(c => `<th>${escapeHTML(c.label)}</th>`).join("")}<th>Data prevista</th><th>Responsável</th><th>Situação</th><th>Observação</th><th></th></tr>`;
+  $("programTableBody").innerHTML = pageRows.map(p => {
+    const done = isDone(p);
+    const last = executionsOf(p.id).at(-1);
+    return `<tr>
+      <td class="mono">${escapeHTML(p.week)}</td>
+      <td>${escapeHTML(dash(teamName(p.teamId)))}</td>
+      ${cols.map(c => `<td title="${escapeHTML(columnValue(p, c))}">${escapeHTML(formatColumnValue(c, columnValue(p, c)))}</td>`).join("")}
+      <td>${escapeHTML(fmtDate(p.date))}</td>
+      <td>${escapeHTML(dash(personById(p.responsibleId)?.nome))}</td>
+      <td><span class="status ${done ? "done" : "pending"}" title="${last ? `Último registro: ${escapeHTML(fmtDateTime(last.executado_em))}` : ""}">${done ? "Executado" : "Pendente"}</span></td>
+      <td class="wrap">${escapeHTML(dash(p.note))}</td>
+      <td class="actions-cell"><button class="icon-btn sm danger" type="button" data-delete-program="${escapeHTML(p.id)}" title="Excluir"><svg class="icon"><use href="#i-trash"/></svg></button></td>
+    </tr>`;
+  }).join("");
+  $("programEmpty").classList.toggle("hidden", rows.length > 0);
+
+  $("programPager").innerHTML = pages > 1 ? `
+    <span>Página ${state.program.page + 1} de ${pages} · ${rows.length} itens</span>
+    <div class="actions">
+      <button class="btn ghost sm" type="button" data-page="-1" ${state.program.page === 0 ? "disabled" : ""}>Anterior</button>
+      <button class="btn ghost sm" type="button" data-page="1" ${state.program.page >= pages - 1 ? "disabled" : ""}>Próxima</button>
+    </div>` : "";
+}
+
+async function deleteProgram(id) {
+  const program = state.programs.find(p => p.id === id);
+  if (!program) return;
+  const executed = executionsOf(id).length;
+  const ok = await confirmDialog({
+    title: "Excluir programação?",
+    text: `${programTitle(program)} · ${program.week} · ${teamName(program.teamId) || "sem equipe"}.${executed ? ` Este item possui ${executed} registro(s) de execução.` : ""}`,
+    okLabel: "Excluir", danger: true
+  });
+  if (!ok) return;
+  try {
+    await withBusy(async () => {
+      const { error } = await requireDb().from("tb_programacoes").delete().eq("id", id);
+      if (error) throw error;
+    });
+    state.programs = state.programs.filter(p => p.id !== id);
+    renderProgramacao();
+    toast("Programação excluída.");
+  } catch (error) {
+    toast(dbErrorMessage(error), "error");
+  }
+}
+
+/* ---------- lançamento manual ---------- */
+
+function weekOptionsForForm() {
+  const current = currentWeekNumber();
+  const near = [current - 1, current, current + 1, current + 2].map(weekLabel);
+  return sortWeeks([...state.weeks, ...near]).map(w => ({ value: w, label: w }));
+}
+
+function renderCustomInputs(host, activity, values = {}, { prefix = "pf", editableOnly = false } = {}) {
+  host.innerHTML = activityColumns(activity).map(c => {
+    const value = values[c.key] ?? "";
+    const disabled = editableOnly && !c.technicianEditable ? "disabled" : "";
+    const attrs = `data-custom-key="${escapeHTML(c.key)}" data-type="${c.type}" ${c.required ? "data-required" : ""} ${disabled}`;
+    const label = `${escapeHTML(c.label)}${c.required ? " *" : ""}`;
+    let control;
+    if (c.type === "select" || c.type === "boolean") {
+      const opts = c.type === "boolean" ? ["SIM", "NÃO"] : c.options;
+      const hasValue = !value || opts.some(o => String(o) === String(value));
+      control = `<select ${attrs}><option value="">Selecione</option>${opts.map(o => `<option ${String(o) === String(value) ? "selected" : ""}>${escapeHTML(o)}</option>`).join("")}${hasValue ? "" : `<option selected>${escapeHTML(value)}</option>`}</select>`;
+    } else {
+      const type = c.type === "number" ? "number" : c.type === "date" ? "date" : "text";
+      control = `<input ${attrs} type="${type}" ${c.type === "number" ? 'step="any"' : ""} value="${escapeHTML(value)}">`;
+    }
+    return `<label class="field" id="${prefix}-${escapeHTML(c.key)}">${label}${control}</label>`;
+  }).join("");
+}
+
+function collectCustomInputs(host) {
+  const data = {};
+  const missing = [];
+  host.querySelectorAll("[data-custom-key]").forEach(input => {
+    const value = String(input.value ?? "").trim();
+    data[input.dataset.customKey] = value;
+    const invalid = input.hasAttribute("data-required") && !value && !input.disabled;
+    input.closest(".field")?.classList.toggle("invalid", invalid);
+    if (invalid) missing.push(input.closest(".field")?.firstChild?.textContent?.replace(" *", "") || input.dataset.customKey);
+  });
+  return { data, missing };
+}
+
+function openProgramModal() {
+  if (!state.activities.length) return toast("Cadastre uma atividade primeiro.", "error");
+  fillSelect($("pfActivity"), state.activities.map(a => ({ value: a.id, label: a.name })), { value: state.program.activityId });
+  fillSelect($("pfWeek"), weekOptionsForForm(), { value: state.program.week || weekLabel(currentWeekNumber()) });
+  fillSelect($("pfTeam"), state.teams.filter(t => t.ativo).map(t => ({ value: t.id, label: t.nome })), { value: state.program.team, placeholder: "Selecione a equipe" });
+  fillSelect($("pfResponsible"), state.people.filter(p => p.ativo).sort(sortByName).map(p => ({ value: p.id, label: p.nome })), { value: "", placeholder: "Sem responsável" });
+  $("pfDate").value = "";
+  $("pfNote").value = "";
+  renderCustomInputs($("pfCustom"), activityById($("pfActivity").value));
+  setMessage("programFormMessage", "");
+  openModal("programModal");
+}
+
+async function saveProgramForm(event) {
+  event.preventDefault();
+  const activity = activityById($("pfActivity").value);
+  const weekNum = weekToNumber($("pfWeek").value);
+  const team = teamById($("pfTeam").value);
+  const { data: customData, missing } = collectCustomInputs($("pfCustom"));
+  if (!activity || !weekNum || !team) return setMessage("programFormMessage", "Preencha atividade, semana e equipe.");
+  if (missing.length) return setMessage("programFormMessage", `Preencha: ${missing.join(", ")}.`);
+
+  await withButton(event.submitter, async () => {
+    try {
+      await withBusy(async () => {
+        const equipmentIds = await resolveEquipment([customData]);
+        const tag = tagOf(customData);
+        const payload = {
+          equipamento_id: tag ? equipmentIds.get(tag) || null : null,
+          semana: weekNum,
+          status: "PROGRAMADO",
+          atividade_id: activity.id,
+          data_programacao: $("pfDate").value || null,
+          equipe_id: team.id,
+          responsavel_id: $("pfResponsible").value || null,
+          quantidade: 1,
+          observacao: $("pfNote").value.trim() || null,
+          dados_personalizados: customData,
+          modo_importacao: MODE_APPEND,
+          arquivo_importacao: null,
+          usuario_importacao: state.user.authUserId
+        };
+        const { data, error } = await requireDb().from("tb_programacoes").insert(payload).select(PROGRAM_COLUMNS).single();
+        if (error) throw error;
+        state.programs.push(mapProgram(data));
+      });
+      closeModal("programModal");
+      state.program.activityId = activity.id;
+      renderProgramacao();
+      toast("Programação cadastrada.");
+    } catch (error) {
+      setMessage("programFormMessage", dbErrorMessage(error));
+    }
+  });
+}
+
+/* ---------- equipamentos (TAG) ---------- */
+
+function tagOf(data) {
+  for (const key of ["tag", "TAG", "equipamento", "EQUIPAMENTO"]) {
+    const v = String(data?.[key] ?? "").trim();
+    if (v) return v;
+  }
+  return "";
+}
+
+// Garante tb_equipamentos para cada TAG em lote: 1 consulta + 1 inserção, em vez de N chamadas.
+async function resolveEquipment(records) {
+  const sb = requireDb();
+  const byTag = new Map();
+  records.forEach(r => { const tag = tagOf(r); if (tag && !byTag.has(tag)) byTag.set(tag, r); });
+  const ids = new Map();
+  if (!byTag.size) return ids;
+
+  const existing = await fetchIn("tb_equipamentos", "id,tag", "tag", [...byTag.keys()]);
+  existing.forEach(e => ids.set(e.tag, e.id));
+
+  const pick = (r, keys) => { for (const k of keys) { const v = String(r?.[k] ?? "").trim(); if (v) return v; } return null; };
+  const missing = [...byTag.entries()].filter(([tag]) => !ids.has(tag)).map(([tag, r]) => ({
+    tag,
+    forn: pick(r, ["forn"]), sys: pick(r, ["sys"]), subsys: pick(r, ["subsys"]), loop: pick(r, ["loop"]),
+    service: pick(r, ["service"]), tipe: pick(r, ["tipe", "type"]), descricao: pick(r, ["descricao", "equipamento"]),
+    ativo: true
+  }));
+  for (const part of chunk(missing, 500)) {
+    const { data, error } = await sb.from("tb_equipamentos").insert(part).select("id,tag");
+    if (error) throw error;
+    (data || []).forEach(e => ids.set(e.tag, e.id));
+  }
+  return ids;
+}
+
+/* =========================================================
+   EXCEL — TEMPLATE, LEITURA E IMPORTAÇÃO
+   ========================================================= */
+
+function requireXLSX() {
+  if (!window.XLSX) throw new Error("A biblioteca de Excel não carregou. Verifique a conexão e recarregue a página.");
+}
+
+function styleHeaderRow(sheet, count) {
+  const headerFill = state.settings.header.replace("#", "").toUpperCase();
+  for (let c = 0; c < count; c++) {
+    const cell = sheet[XLSX.utils.encode_cell({ r: 0, c })];
+    if (cell) cell.s = { fill: { fgColor: { rgb: headerFill } }, font: { bold: true, color: { rgb: "FFFFFF" } }, alignment: { horizontal: "center", vertical: "center" } };
+  }
+  sheet["!rows"] = [{ hpt: 24 }];
+}
+
+function downloadTemplate(activity) {
+  if (!activity) return toast("Selecione uma atividade.", "error");
+  try {
+    requireXLSX();
+    const cols = templateColumns(activity);
+    const headers = cols.map(c => `${c.label}${c.required ? " *" : ""}`);
+    const example = cols.map(c => {
+      if (c.key === "week") return weekLabel(currentWeekNumber());
+      if (c.key === "activity") return activity.name;
+      if (c.key === "team") return state.teams.find(t => t.ativo)?.nome || "Equipe A";
+      return "";
+    });
+    const sheet = XLSX.utils.aoa_to_sheet([headers, example]);
+    sheet["!cols"] = headers.map(h => ({ wch: Math.max(14, Math.min(36, h.length + 6)) }));
+    sheet["!autofilter"] = { ref: `A1:${XLSX.utils.encode_col(headers.length - 1)}1` };
+    styleHeaderRow(sheet, headers.length);
+
+    const info = [
+      ["Atividade", activity.name],
+      ["Gerado em", nowStamp()],
+      [],
+      ["Como preencher"],
+      ["1", "Não altere nem renomeie os cabeçalhos. Colunas com * são obrigatórias."],
+      ["2", "SEMANA no formato W137 (ou apenas 137)."],
+      ["3", "EQUIPE deve ser o nome de uma equipe cadastrada (lista abaixo)."],
+      ["4", "Datas em DD/MM/AAAA ou como data do Excel."],
+      ["5", "Cada linha vira um item programado para a equipe de campo."],
+      [],
+      ["Coluna", "Tipo", "Obrigatória", "Equipe de campo edita", "Opções aceitas"],
+      ...cols.map(c => [c.label, c.fixed ? "Fixa" : COLUMN_TYPES[c.type], c.required ? "Sim" : "Não", c.technicianEditable ? "Sim" : "Não",
+        c.type === "select" ? c.options.join(", ") : c.type === "boolean" ? "SIM, NÃO" : ""]),
+      [],
+      ["Equipes cadastradas"],
+      ...state.teams.filter(t => t.ativo).map(t => [t.nome, DISCIPLINE_LABELS[t.disciplina] || t.disciplina || ""])
+    ];
+    const infoSheet = XLSX.utils.aoa_to_sheet(info);
+    infoSheet["!cols"] = [{ wch: 26 }, { wch: 60 }, { wch: 12 }, { wch: 22 }, { wch: 40 }];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, sheet, "Programação");
+    XLSX.utils.book_append_sheet(wb, infoSheet, "Leia-me");
+    XLSX.writeFile(wb, `template_${makeKey(activity.name)}.xlsx`);
+    toast("Template gerado.");
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+async function readSheetRows(file) {
+  requireXLSX();
+  const wb = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+  const name = wb.SheetNames.find(n => makeKey(n) === "programacao") || wb.SheetNames[0];
+  if (!name) throw new Error("O arquivo não possui planilhas.");
+  return XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: "", raw: true, blankrows: false });
+}
+
+// Valida e converte as linhas do Excel. Retorna registros válidos e a lista completa de erros.
+function parseProgramRows(rows, activity) {
+  if (!rows.length) throw new Error("A planilha está vazia.");
+  const headers = rows[0].map(h => makeKey(cellText(h)));
+  const used = new Set();
+  const findIndex = candidates => {
+    const idx = headers.findIndex((h, i) => !used.has(i) && candidates.includes(h));
+    if (idx >= 0) used.add(idx);
+    return idx;
+  };
+
+  const customCols = activityColumns(activity).map(c => ({ col: c, index: findIndex([makeKey(c.label), c.key]) }));
+  const fixed = Object.fromEntries(fixedColumnsFor(activity).map(f => [f.key, findIndex([makeKey(f.label), ...f.aliases])]));
+
+  const missingHeaders = [
+    ...FIXED_COLUMNS.filter(f => f.required && fixed[f.key] < 0).map(f => f.label),
+    ...customCols.filter(x => x.col.required && x.index < 0).map(x => x.col.label)
+  ];
+  if (missingHeaders.length) throw new Error(`Colunas obrigatórias ausentes no arquivo: ${missingHeaders.join(", ")}. Baixe o template da atividade “${activity.name}”.`);
+
+  const errors = [];
+  const records = [];
+  const at = (row, i) => (i >= 0 ? row[i] : "");
+
+  rows.slice(1).forEach((row, i) => {
+    if (!row.some(v => cellText(v) !== "")) return;
+    const line = i + 2;
+    const rowErrors = [];
+
+    const weekNum = weekToNumber(cellText(at(row, fixed.week)));
+    if (!weekNum) rowErrors.push("SEMANA inválida (use W137)");
+
+    const activityName = cellText(at(row, fixed.activity));
+    if (activityName && makeKey(activityName) !== makeKey(activity.name)) rowErrors.push(`ATIVIDADE “${activityName}” diferente de “${activity.name}”`);
+
+    const teamText = cellText(at(row, fixed.team));
+    const team = teamByName(teamText);
+    if (!teamText) rowErrors.push("EQUIPE vazia");
+    else if (!team) rowErrors.push(`equipe “${teamText}” não cadastrada`);
+    else if (!team.ativo) rowErrors.push(`equipe “${team.nome}” está inativa`);
+
+    const respText = fixed.responsible >= 0 ? cellText(at(row, fixed.responsible)) : "";
+    const person = respText ? personByName(respText) : null;
+    if (respText && !person) rowErrors.push(`responsável “${respText}” não encontrado`);
+
+    let date = "";
+    if (fixed.date >= 0 && cellText(at(row, fixed.date))) {
+      date = normalizeDateValue(at(row, fixed.date));
+      if (date === null) rowErrors.push("DATA PREVISTA inválida");
+    }
+
+    const customData = {};
+    customCols.forEach(({ col, index }) => {
+      const raw = at(row, index);
+      let value = cellText(raw);
+      if (value && col.type === "date") {
+        const d = normalizeDateValue(raw);
+        if (d === null) rowErrors.push(`${col.label}: data inválida`); else value = d;
+      } else if (value && col.type === "number") {
+        const n = Number(value.replace(/\s/g, "").replace(",", "."));
+        if (!Number.isFinite(n)) rowErrors.push(`${col.label}: número inválido`); else value = String(n);
+      } else if (value && col.type === "boolean") {
+        const b = normalizeBoolean(value);
+        if (b === null) rowErrors.push(`${col.label}: use SIM ou NÃO`); else value = b;
+      } else if (value && col.type === "select" && col.options.length) {
+        const match = col.options.find(o => normalizeText(o) === normalizeText(value));
+        if (!match) rowErrors.push(`${col.label}: “${value}” fora da lista (${col.options.join(", ")})`); else value = match;
+      }
+      if (col.required && !value) rowErrors.push(`${col.label} obrigatório`);
+      customData[col.key] = value;
+    });
+
+    if (rowErrors.length) { errors.push(`Linha ${line}: ${rowErrors.join("; ")}.`); return; }
+    records.push({
+      line, weekNum, week: weekLabel(weekNum), team, person, date: date || "",
+      note: fixed.note >= 0 ? cellText(at(row, fixed.note)) : "", customData
+    });
   });
 
-  context.fillStyle = "#64748b";
-  context.font = "15px Arial";
-  context.fillText(`Gerado em ${nowBR()}`, 60, y + 65);
-
-  const link = document.createElement("a");
-  link.download = filename;
-  link.href = canvas.toDataURL("image/jpeg", 0.95);
-  link.click();
+  if (!records.length && !errors.length) throw new Error("O arquivo não possui linhas de dados.");
+  return { records, errors };
 }
 
-function exportStyledPDF(subtitle, rows, filename) {
-  if (!window.jspdf?.jsPDF) {
-    window.print();
+// Chave de duplicidade: mesma atividade, semana, equipe e TAG/título.
+function duplicateKey(activityId, weekNum, teamId, customData, activity) {
+  const col = titleColumn(activity);
+  const ident = col ? normalizeText(customData?.[col.key]) : "";
+  return ident ? `${activityId}|${weekNum}|${teamId}|${ident}` : null;
+}
+
+async function handleProgramFile(file) {
+  const activity = activityById(state.program.activityId);
+  if (!file) return;
+  if (!activity) return toast("Selecione uma atividade antes de importar.", "error");
+  try {
+    const rows = await readSheetRows(file);
+    const { records, errors } = parseProgramRows(rows, activity);
+    const existingKeys = new Set(state.programs.filter(p => p.activityId === activity.id).map(p => duplicateKey(p.activityId, p.weekNum, p.teamId, p.customData, activity)).filter(Boolean));
+    const duplicates = records.filter(r => existingKeys.has(duplicateKey(activity.id, r.weekNum, r.team.id, r.customData, activity))).length;
+    state.pendingImport = { file: file.name, activityId: activity.id, records, errors, duplicates };
+    renderImportModal();
+    openModal("importModal");
+  } catch (error) {
+    toast(error.message || "Não foi possível ler o arquivo.", "error");
+  }
+}
+
+function replaceCandidates(pending) {
+  const weeks = new Set(pending.records.map(r => r.weekNum));
+  return state.programs.filter(p => p.activityId === pending.activityId && weeks.has(p.weekNum) && !isDone(p));
+}
+
+function renderImportModal() {
+  const pending = state.pendingImport;
+  if (!pending) return;
+  const activity = activityById(pending.activityId);
+  const weeks = sortWeeks(pending.records.map(r => r.week));
+  setText("importFile", pending.file);
+  setText("importActivity", activity?.name || "—");
+  setText("importCount", pending.records.length);
+  setText("importWeeks", weeks.join(", ") || "—");
+
+  const errorsBox = $("importErrors");
+  errorsBox.classList.toggle("hidden", !pending.errors.length);
+  if (pending.errors.length) {
+    errorsBox.innerHTML = `<strong>${pending.errors.length} linha(s) com erro. Corrija o arquivo e importe novamente — nenhuma linha será gravada enquanto houver erros.</strong><ul>${pending.errors.slice(0, 200).map(e => `<li>${escapeHTML(e)}</li>`).join("")}</ul>${pending.errors.length > 200 ? `<p>… e mais ${pending.errors.length - 200}.</p>` : ""}`;
+  }
+
+  const cols = templateColumns(activity).filter(c => !["activity"].includes(c.key));
+  const preview = pending.records.slice(0, 6);
+  $("importPreview").innerHTML = `<thead><tr><th>Linha</th>${cols.map(c => `<th>${escapeHTML(c.label)}</th>`).join("")}</tr></thead><tbody>${preview.map(r => `<tr><td class="mono">${r.line}</td>${cols.map(c => {
+    const v = c.key === "week" ? r.week : c.key === "team" ? r.team.nome : c.key === "responsible" ? r.person?.nome : c.key === "date" ? fmtDate(r.date) : c.key === "note" ? r.note : formatColumnValue(c, r.customData[c.key]);
+    return `<td>${escapeHTML(dash(v))}</td>`;
+  }).join("")}</tr>`).join("")}</tbody>`;
+  $("importPreview").querySelectorAll("tbody td").forEach(td => { td.style.fontStyle = "normal"; td.style.color = "var(--text)"; });
+  $("importPreviewWrap").classList.toggle("hidden", !preview.length);
+
+  const replaceCount = replaceCandidates(pending).length;
+  $("importReplaceHint").innerHTML = `Remove <b>${replaceCount}</b> item(ns) <b>pendente(s)</b> de ${escapeHTML(activity?.name || "")} em ${escapeHTML(weeks.join(", ") || "—")} e grava o arquivo. Itens já executados são mantidos.`;
+  $("importDupWrap").classList.toggle("hidden", !pending.duplicates);
+  setText("importDupText", `Ignorar ${pending.duplicates} linha(s) que já existem (mesma semana, equipe e ${titleColumn(activity)?.label || "identificação"})`);
+  setMessage("importMessage", "");
+  $("importConfirm").disabled = Boolean(pending.errors.length) || !pending.records.length;
+  $("importModes").classList.toggle("hidden", Boolean(pending.errors.length));
+}
+
+async function confirmImport() {
+  const pending = state.pendingImport;
+  if (!pending || pending.errors.length) return;
+  const activity = activityById(pending.activityId);
+  const mode = document.querySelector('input[name="importMode"]:checked')?.value === "replace" ? MODE_REPLACE : MODE_APPEND;
+  const skipDuplicates = mode === MODE_APPEND && $("importSkipDup").checked;
+  const toReplace = mode === MODE_REPLACE ? replaceCandidates(pending).map(p => p.id) : [];
+
+  if (mode === MODE_REPLACE && toReplace.length) {
+    const ok = await confirmDialog({ title: "Substituir programação?", text: `${toReplace.length} item(ns) pendente(s) serão removidos e substituídos pelas ${pending.records.length} linhas do arquivo.`, okLabel: "Substituir", danger: true });
+    if (!ok) return;
+  }
+
+  await withButton($("importConfirm"), async () => {
+    try {
+      const inserted = await withBusy(async () => {
+        const sb = requireDb();
+        let records = pending.records;
+        if (skipDuplicates) {
+          const existing = new Set(state.programs.filter(p => p.activityId === activity.id).map(p => duplicateKey(p.activityId, p.weekNum, p.teamId, p.customData, activity)).filter(Boolean));
+          records = records.filter(r => !existing.has(duplicateKey(activity.id, r.weekNum, r.team.id, r.customData, activity)));
+        }
+        const equipmentIds = await resolveEquipment(records.map(r => r.customData));
+        const payloads = records.map(r => ({
+          equipamento_id: equipmentIds.get(tagOf(r.customData)) || null,
+          semana: r.weekNum,
+          status: "PROGRAMADO",
+          atividade_id: activity.id,
+          data_programacao: r.date || null,
+          equipe_id: r.team.id,
+          responsavel_id: r.person?.id || null,
+          quantidade: 1,
+          observacao: r.note || null,
+          dados_personalizados: r.customData,
+          modo_importacao: mode,
+          arquivo_importacao: pending.file,
+          usuario_importacao: state.user.authUserId
+        }));
+        const created = [];
+        // Insere primeiro; só remove os itens substituídos depois que a nova carga foi gravada.
+        for (const part of chunk(payloads, 500)) {
+          const { data, error } = await sb.from("tb_programacoes").insert(part).select(PROGRAM_COLUMNS);
+          if (error) throw error;
+          created.push(...(data || []).map(mapProgram));
+        }
+        for (const part of chunk(toReplace, IN_CHUNK)) {
+          const { error } = await sb.from("tb_programacoes").delete().in("id", part);
+          if (error) throw new Error(`A nova carga foi gravada, mas não foi possível remover os itens antigos: ${dbErrorMessage(error)}`);
+        }
+        const removed = new Set(toReplace);
+        state.programs = [...state.programs.filter(p => !removed.has(p.id)), ...created];
+        return { created: created.length, skipped: pending.records.length - records.length };
+      });
+      closeModal("importModal");
+      state.program.week = "";
+      renderProgramacao();
+      const parts = [`${inserted.created} item(ns) importado(s)`];
+      if (toReplace.length) parts.push(`${toReplace.length} substituído(s)`);
+      if (inserted.skipped) parts.push(`${inserted.skipped} duplicado(s) ignorado(s)`);
+      toast(parts.join(" · ") + ".");
+    } catch (error) {
+      setMessage("importMessage", dbErrorMessage(error, "Não foi possível gravar a importação."));
+    }
+  });
+}
+
+function exportProgramList() {
+  const activity = activityById(state.program.activityId);
+  if (!activity) return;
+  try {
+    requireXLSX();
+    const cols = activityColumns(activity);
+    const rows = filteredAdminPrograms();
+    const headers = ["SEMANA", "EQUIPE", ...cols.map(c => c.label), "DATA PREVISTA", "RESPONSÁVEL", "OBSERVAÇÃO", "SITUAÇÃO", "ÚLTIMA EXECUÇÃO", "EXECUÇÕES"];
+    const data = rows.map(p => {
+      const ex = executionsOf(p.id);
+      return [p.week, teamName(p.teamId), ...cols.map(c => columnValue(p, c)), fmtDate(p.date).replace("—", ""), personById(p.responsibleId)?.nome || "", p.note,
+        isDone(p) ? "EXECUTADO" : "PENDENTE", ex.length ? fmtDateTime(ex.at(-1).executado_em) : "", ex.length];
+    });
+    const sheet = XLSX.utils.aoa_to_sheet([headers, ...data]);
+    sheet["!cols"] = headers.map(h => ({ wch: Math.max(12, Math.min(34, h.length + 6)) }));
+    sheet["!autofilter"] = { ref: `A1:${XLSX.utils.encode_col(headers.length - 1)}${data.length + 1}` };
+    styleHeaderRow(sheet, headers.length);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, sheet, "Programação");
+    XLSX.writeFile(wb, `programacao_${makeKey(activity.name)}${state.program.week ? `_${state.program.week}` : ""}.xlsx`);
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+/* =========================================================
+   HISTÓRICO DE IMPORTAÇÕES (derivado do banco)
+   ========================================================= */
+
+function importBatches() {
+  // Uma importação grava as linhas em sequência; agrupa por arquivo/modo/usuário com até 3 min de intervalo.
+  const sorted = [...state.programs].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  const batches = [];
+  const open = new Map();
+  sorted.forEach(p => {
+    const key = `${p.file || "manual"}|${p.mode}|${p.importedBy}|${p.file ? "" : String(p.createdAt).slice(0, 10)}`;
+    const time = new Date(p.createdAt).getTime();
+    const current = open.get(key);
+    if (current && (!p.file || time - current.last <= 180000)) {
+      current.items.push(p);
+      current.last = time;
+    } else {
+      const batch = { key, file: p.file, mode: p.mode, importedBy: p.importedBy, first: p.createdAt, last: time, items: [p] };
+      batches.push(batch);
+      open.set(key, batch);
+    }
+  });
+  return batches.reverse();
+}
+
+function renderImportHistory() {
+  const host = $("importHistory");
+  const batches = importBatches();
+  if (!batches.length) {
+    host.innerHTML = `<div class="card empty"><svg class="icon xl"><use href="#i-history"/></svg><strong>Nenhuma programação cadastrada</strong><span>As importações de Excel aparecerão aqui.</span></div>`;
     return;
   }
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: "mm", format: "a4" });
-  const settings = currentSettings();
-  const planned = rows.reduce((sum, row) => sum + row.planned, 0);
-  const done = rows.reduce((sum, row) => sum + row.done, 0);
-  const pending = rows.reduce((sum, row) => sum + row.pending, 0);
-  const pct = planned ? Math.round(done / planned * 100) : 0;
+  host.innerHTML = batches.slice(0, 100).map((b, index) => {
+    const s = summarize(b.items);
+    const acts = [...new Set(b.items.map(p => activityById(p.activityId)?.name || "Atividade removida"))].join(", ");
+    const weeks = sortWeeks(b.items.map(p => p.week)).join(", ");
+    const who = state.people.find(p => p.auth_user_id && p.auth_user_id === b.importedBy)?.nome || "";
+    const modeChip = !b.file ? `<span class="chip">MANUAL</span>` : b.mode === MODE_REPLACE ? `<span class="chip warn">NOVA PROGRAMAÇÃO</span>` : `<span class="chip primary">INCLUSÃO</span>`;
+    const activity = activityById(b.items[0].activityId);
+    const cols = activityColumns(activity).slice(0, 4);
+    return `<details class="card import-batch" ${index === 0 ? "open" : ""}>
+      <summary>
+        ${modeChip}
+        <div class="grow"><strong>${escapeHTML(b.file || "Lançamentos manuais")}</strong><small>${escapeHTML(fmtDateTime(b.first))}${who ? ` · ${escapeHTML(who)}` : ""} · ${escapeHTML(acts)} · ${escapeHTML(weeks)}</small></div>
+        <span class="badge">${b.items.length} itens</span>
+        <span class="chip ok">${s.rate}% executado</span>
+      </summary>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Semana</th><th>Equipe</th>${cols.map(c => `<th>${escapeHTML(c.label)}</th>`).join("")}<th>Situação</th></tr></thead>
+          <tbody>${b.items.slice(0, 200).map(p => `<tr><td class="mono">${escapeHTML(p.week)}</td><td>${escapeHTML(dash(teamName(p.teamId)))}</td>${cols.map(c => `<td>${escapeHTML(formatColumnValue(c, columnValue(p, c)))}</td>`).join("")}<td><span class="status ${isDone(p) ? "done" : "pending"}">${isDone(p) ? "Executado" : "Pendente"}</span></td></tr>`).join("")}</tbody>
+        </table>
+      </div>
+    </details>`;
+  }).join("");
+}
 
-  doc.setFillColor(settings.header);
-  doc.rect(0, 0, 210, 31, "F");
-  doc.setFillColor(settings.primary);
-  doc.rect(0, 28, 210, 3, "F");
+/* =========================================================
+   RELATÓRIOS
+   ========================================================= */
+
+function reportFilters() {
+  return { week: $("reportWeek").value, activity: $("reportActivity").value, team: $("reportTeam").value };
+}
+
+function reportPrograms(f = reportFilters(), { ignoreWeek = false } = {}) {
+  return state.programs.filter(p =>
+    (ignoreWeek || !f.week || p.week === f.week) &&
+    (!f.activity || p.activityId === f.activity) &&
+    (!f.team || p.teamId === f.team));
+}
+
+function renderReports() {
+  fillSelect($("reportWeek"), allWeeks().reverse().map(w => ({ value: w, label: w })), { placeholder: "Todas" });
+  fillSelect($("reportActivity"), state.activities.map(a => ({ value: a.id, label: a.name })), { placeholder: "Todas" });
+  fillSelect($("reportTeam"), state.teams.map(t => ({ value: t.id, label: t.nome })), { placeholder: "Todas" });
+
+  const f = reportFilters();
+  const programs = reportPrograms(f);
+  const s = summarize(programs);
+  setText("reportPlanned", s.total);
+  setText("reportDone", s.done);
+  setText("reportPending", s.pending);
+  setText("reportRate", `${s.rate}%`);
+  $("reportRateBar").style.width = `${s.rate}%`;
+
+  const trendSource = reportPrograms(f, { ignoreWeek: true });
+  renderBarChart($("reportWeekly"), weeklySeries(trendSource, sortWeeks(trendSource.map(p => p.week)).slice(-16)), f.week);
+  renderProgressList($("reportTeams"), byTeam(programs), "Sem dados no recorte.");
+  renderProgressList($("reportActivities"), byActivity(programs), "Sem dados no recorte.");
+}
+
+/* =========================================================
+   ATIVIDADES E COLUNAS
+   ========================================================= */
+
+function renderActivities() {
+  if (!activityById(state.activityId)) state.activityId = state.activities[0]?.id || null;
+  setText("activityCount", state.activities.length);
+  $("activityList").innerHTML = state.activities.map(a => `
+    <button class="select-item ${a.id === state.activityId ? "active" : ""}" type="button" data-activity="${escapeHTML(a.id)}">
+      <strong>${escapeHTML(a.name)}</strong>
+      <small>${activityColumns(a).length} coluna(s) · ${state.programs.filter(p => p.activityId === a.id).length} programação(ões)</small>
+    </button>`).join("") || `<div class="empty inline"><span>Nenhuma atividade.</span></div>`;
+
+  const activity = activityById(state.activityId);
+  $("activityEmpty").classList.toggle("hidden", Boolean(activity));
+  $("activityEditor").classList.toggle("hidden", !activity);
+  if (!activity) return;
+
+  const cols = activity.columns;
+  setText("activityTitle", activity.name);
+  setText("activityDescription", activity.description || "Sem descrição.");
+  setText("activityColCount", cols.length);
+  setText("activityReqCount", cols.filter(c => c.required).length);
+  setText("activityEditCount", cols.filter(c => c.technicianEditable).length);
+  setText("activityProgCount", state.programs.filter(p => p.activityId === activity.id).length);
+  setText("templateFileName", `template_${makeKey(activity.name)}.xlsx`);
+
+  $("columnList").innerHTML = cols.map((c, i) => {
+    const reserved = RESERVED_COLUMN_KEYS.has(c.key);
+    return `<div class="column-row" draggable="true" data-column="${escapeHTML(c.id)}">
+      <span class="grip" title="Arrastar"><svg class="icon"><use href="#i-grip"/></svg></span>
+      <span class="order">${i + 1}</span>
+      <div class="name"><strong>${escapeHTML(c.label)}</strong><small>${escapeHTML(c.key)}</small></div>
+      <span class="type"><span class="chip">${COLUMN_TYPES[c.type]}</span></span>
+      <div class="flags">
+        ${c.required ? `<span class="chip danger">Obrigatória</span>` : ""}
+        ${c.technicianEditable ? `<span class="chip primary">Editável em campo</span>` : ""}
+        ${c.type === "select" ? `<span class="chip" title="${escapeHTML(c.options.join(", "))}">${c.options.length} opções</span>` : ""}
+        ${reserved ? `<span class="chip warn" title="Coberta pelas colunas fixas SEMANA/ATIVIDADE/EQUIPE ou pelos registros de execução">Ignorada no template</span>` : ""}
+      </div>
+      <div class="row-actions">
+        <button class="icon-btn sm" type="button" data-move="-1" data-col="${escapeHTML(c.id)}" ${i === 0 ? "disabled" : ""} title="Subir"><svg class="icon"><use href="#i-up"/></svg></button>
+        <button class="icon-btn sm" type="button" data-move="1" data-col="${escapeHTML(c.id)}" ${i === cols.length - 1 ? "disabled" : ""} title="Descer"><svg class="icon"><use href="#i-down"/></svg></button>
+        <button class="icon-btn sm" type="button" data-edit-col="${escapeHTML(c.id)}" title="Editar"><svg class="icon"><use href="#i-edit"/></svg></button>
+        <button class="icon-btn sm danger" type="button" data-delete-col="${escapeHTML(c.id)}" title="Excluir"><svg class="icon"><use href="#i-trash"/></svg></button>
+      </div>
+    </div>`;
+  }).join("");
+
+  const tcols = templateColumns(activity);
+  $("templatePreview").innerHTML = `<thead><tr>${tcols.map(c => `<th>${escapeHTML(c.label)}${c.required ? ' <span class="req">*</span>' : ""}</th>`).join("")}</tr></thead>
+    <tbody><tr>${tcols.map(c => `<td>${escapeHTML(c.key === "week" ? weekLabel(currentWeekNumber()) : c.key === "activity" ? activity.name : c.fixed ? "" : c.type === "select" ? (c.options[0] || "opção") : c.type === "date" ? "DD/MM/AAAA" : c.type === "number" ? "0" : c.type === "boolean" ? "SIM" : "")}</td>`).join("")}</tr></tbody>`;
+}
+
+function openActivityModal(id = null) {
+  const activity = id ? activityById(id) : null;
+  state.editingActivityId = activity?.id || null;
+  setText("activityModalTitle", activity ? "Editar atividade" : "Nova atividade");
+  $("afName").value = activity?.name || "";
+  $("afDescription").value = activity?.description || "";
+  setMessage("activityFormMessage", "");
+  openModal("activityModal");
+}
+
+async function saveActivity(event) {
+  event.preventDefault();
+  const name = $("afName").value.trim().replace(/\s+/g, " ");
+  const description = $("afDescription").value.trim();
+  if (!name) return setMessage("activityFormMessage", "Informe o nome.");
+  if (state.activities.some(a => normalizeText(a.name) === normalizeText(name) && a.id !== state.editingActivityId)) {
+    return setMessage("activityFormMessage", "Já existe uma atividade com esse nome.");
+  }
+  await withButton(event.submitter, async () => {
+    try {
+      await withBusy(async () => {
+        const sb = requireDb();
+        if (state.editingActivityId) {
+          const { error } = await sb.from("tb_atividades").update({ nome: name, descricao: description || null, updated_at: new Date().toISOString() }).eq("id", state.editingActivityId);
+          if (error) throw error;
+          Object.assign(activityById(state.editingActivityId), { name, description });
+        } else {
+          const { data, error } = await sb.from("tb_atividades").insert({ nome: name, descricao: description || null, ativo: true }).select("id").single();
+          if (error) throw error;
+          state.activities.push({ id: data.id, name, description, columns: [] });
+          state.activityId = data.id;
+        }
+      });
+      closeModal("activityModal");
+      renderActivities();
+      toast("Atividade salva.");
+    } catch (error) {
+      setMessage("activityFormMessage", dbErrorMessage(error));
+    }
+  });
+}
+
+async function deactivateActivity() {
+  const activity = activityById(state.activityId);
+  if (!activity) return;
+  const count = state.programs.filter(p => p.activityId === activity.id).length;
+  const ok = await confirmDialog({
+    title: `Desativar “${activity.name}”?`,
+    text: `A atividade deixa de aparecer para programação e para o campo.${count ? ` As ${count} programação(ões) existentes são preservadas no banco.` : ""}`,
+    okLabel: "Desativar", danger: true
+  });
+  if (!ok) return;
+  try {
+    await withBusy(async () => {
+      const { error } = await requireDb().from("tb_atividades").update({ ativo: false, updated_at: new Date().toISOString() }).eq("id", activity.id);
+      if (error) throw error;
+    });
+    state.activities = state.activities.filter(a => a.id !== activity.id);
+    state.activityId = state.activities[0]?.id || null;
+    renderActivities();
+    toast("Atividade desativada.");
+  } catch (error) {
+    toast(dbErrorMessage(error), "error");
+  }
+}
+
+function openColumnModal(id = null) {
+  const activity = activityById(state.activityId);
+  if (!activity) return;
+  const column = id ? activity.columns.find(c => c.id === id) : null;
+  state.editingColumnId = column?.id || null;
+  setText("columnModalTitle", column ? "Editar coluna" : "Nova coluna");
+  $("cfLabel").value = column?.label || "";
+  $("cfKey").value = column?.key || "";
+  $("cfKey").disabled = Boolean(column);
+  setText("cfKeyHint", column ? "A chave não pode ser alterada: os dados já gravados usam este identificador." : "Gerada a partir do nome. Identificador usado no banco.");
+  $("cfType").value = column?.type || "text";
+  $("cfOptions").value = (column?.options || []).join(", ");
+  $("cfRequired").checked = Boolean(column?.required);
+  $("cfEditable").checked = Boolean(column?.technicianEditable);
+  $("cfOptionsWrap").classList.toggle("hidden", $("cfType").value !== "select");
+  setMessage("columnFormMessage", "");
+  openModal("columnModal");
+}
+
+async function saveColumn(event) {
+  event.preventDefault();
+  const activity = activityById(state.activityId);
+  if (!activity) return;
+  const editing = activity.columns.find(c => c.id === state.editingColumnId) || null;
+  const label = $("cfLabel").value.trim().replace(/\s+/g, " ");
+  const key = editing ? editing.key : makeKey($("cfKey").value || label);
+  const type = $("cfType").value;
+  const options = type === "select" ? [...new Set($("cfOptions").value.split(",").map(o => o.trim()).filter(Boolean))] : [];
+
+  if (!label || !key) return setMessage("columnFormMessage", "Informe o nome da coluna.");
+  if (type === "select" && !options.length) return setMessage("columnFormMessage", "Informe ao menos uma opção para a lista.");
+  if (activity.columns.some(c => c.id !== editing?.id && (c.key === key || makeKey(c.label) === makeKey(label)))) {
+    return setMessage("columnFormMessage", "Já existe uma coluna com esse nome ou chave nesta atividade.");
+  }
+  if (!editing && FIXED_COLUMNS.some(f => makeKey(f.label) === makeKey(label) || f.key === key)) {
+    return setMessage("columnFormMessage", `“${label}” já é uma coluna fixa do template.`);
+  }
+
+  const payload = {
+    rotulo: label, tipo: type, obrigatorio: $("cfRequired").checked, editavel_tecnico: $("cfEditable").checked,
+    opcoes: options, updated_at: new Date().toISOString()
+  };
+
+  await withButton(event.submitter, async () => {
+    try {
+      await withBusy(async () => {
+        const sb = requireDb();
+        if (editing) {
+          const { error } = await sb.from("tb_atividade_colunas").update(payload).eq("id", editing.id);
+          if (error) throw error;
+          Object.assign(editing, { label, type, required: payload.obrigatorio, technicianEditable: payload.editavel_tecnico, options });
+        } else {
+          const ordem = activity.columns.length;
+          const { data, error } = await sb.from("tb_atividade_colunas").insert({ ...payload, atividade_id: activity.id, chave: key, ordem }).select("*").single();
+          if (error) throw error;
+          activity.columns.push(mapColumn(data));
+        }
+      });
+      closeModal("columnModal");
+      renderActivities();
+      toast("Coluna salva.");
+    } catch (error) {
+      setMessage("columnFormMessage", dbErrorMessage(error));
+    }
+  });
+}
+
+async function deleteColumn(id) {
+  const activity = activityById(state.activityId);
+  const column = activity?.columns.find(c => c.id === id);
+  if (!column) return;
+  const ok = await confirmDialog({
+    title: `Excluir a coluna “${column.label}”?`,
+    text: "Ela sai do template, da tabela e da tela de campo. Os valores já importados permanecem gravados nas programações.",
+    okLabel: "Excluir", danger: true
+  });
+  if (!ok) return;
+  try {
+    await withBusy(async () => {
+      const { error } = await requireDb().from("tb_atividade_colunas").delete().eq("id", id);
+      if (error) throw error;
+    });
+    activity.columns = activity.columns.filter(c => c.id !== id);
+    await persistColumnOrder(activity);
+    renderActivities();
+    toast("Coluna excluída.");
+  } catch (error) {
+    toast(dbErrorMessage(error), "error");
+  }
+}
+
+async function persistColumnOrder(activity) {
+  const changed = activity.columns.map((c, i) => ({ c, i })).filter(({ c, i }) => c.ordem !== i);
+  if (!changed.length) return;
+  await withBusy(async () => {
+    const sb = requireDb();
+    const results = await Promise.all(changed.map(({ c, i }) => sb.from("tb_atividade_colunas").update({ ordem: i }).eq("id", c.id)));
+    const failed = results.find(r => r.error);
+    if (failed) throw failed.error;
+    changed.forEach(({ c, i }) => { c.ordem = i; });
+  });
+}
+
+async function moveColumn(id, toIndex) {
+  const activity = activityById(state.activityId);
+  if (!activity) return;
+  const from = activity.columns.findIndex(c => c.id === id);
+  if (from < 0 || toIndex < 0 || toIndex >= activity.columns.length || from === toIndex) return;
+  const [moved] = activity.columns.splice(from, 1);
+  activity.columns.splice(toIndex, 0, moved);
+  renderActivities();
+  try { await persistColumnOrder(activity); }
+  catch (error) { toast(`Ordem não salva: ${dbErrorMessage(error)}`, "error"); }
+}
+
+function bindColumnDrag() {
+  const list = $("columnList");
+  let dragId = null;
+  list.addEventListener("dragstart", e => {
+    const row = e.target.closest(".column-row");
+    if (!row) return;
+    dragId = row.dataset.column;
+    row.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+  });
+  list.addEventListener("dragend", () => {
+    dragId = null;
+    list.querySelectorAll(".dragging,.drag-over").forEach(el => el.classList.remove("dragging", "drag-over"));
+  });
+  list.addEventListener("dragover", e => {
+    const row = e.target.closest(".column-row");
+    if (!row || !dragId) return;
+    e.preventDefault();
+    list.querySelectorAll(".drag-over").forEach(el => el !== row && el.classList.remove("drag-over"));
+    row.classList.add("drag-over");
+  });
+  list.addEventListener("drop", e => {
+    const row = e.target.closest(".column-row");
+    if (!row || !dragId) return;
+    e.preventDefault();
+    const activity = activityById(state.activityId);
+    moveColumn(dragId, activity.columns.findIndex(c => c.id === row.dataset.column));
+  });
+}
+
+function exportActivityForm() {
+  const activity = activityById(state.activityId);
+  if (!activity) return;
+  const jsPDF = window.jspdf?.jsPDF;
+  if (!jsPDF) return toast("A biblioteca de PDF não carregou.", "error");
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  let y = pdfHeader(doc, `Formulário de campo · ${activity.name}`, "Preenchimento manual");
+  doc.setTextColor(15, 27, 45);
+  doc.setFontSize(9);
+  doc.text("Semana: ____________    Data: ____/____/________    Equipe: ________________________________", 12, y);
+  y += 10;
+  activityColumns(activity).forEach(c => {
+    if (y > 260) { doc.addPage(); y = 18; }
+    doc.setDrawColor(207, 216, 227);
+    doc.setFillColor(248, 250, 252);
+    doc.rect(12, y, 62, 9, "FD");
+    doc.rect(74, y, 124, 9);
+    doc.setFont("helvetica", "bold");
+    doc.text(String(c.label).slice(0, 34), 15, y + 6);
+    doc.setFont("helvetica", "normal");
+    if (c.type === "select" || c.type === "boolean") {
+      const opts = c.type === "boolean" ? ["SIM", "NÃO"] : c.options;
+      let x = 78;
+      opts.slice(0, 5).forEach(o => { doc.rect(x, y + 2.5, 4, 4); doc.text(String(o).slice(0, 16), x + 6, y + 6); x += 6 + Math.min(16, String(o).length) * 1.9 + 8; });
+    }
+    y += 11;
+  });
+  if (y > 230) { doc.addPage(); y = 18; }
+  y += 4;
+  doc.setFont("helvetica", "bold");
+  doc.text("Observações", 12, y);
+  doc.rect(12, y + 3, 186, 34);
+  y += 48;
+  doc.setFont("helvetica", "normal");
+  doc.text("Executante: _____________________________________     Assinatura: ______________________________", 12, y);
+  pdfFooter(doc);
+  doc.save(`formulario_${makeKey(activity.name)}.pdf`);
+}
+
+/* =========================================================
+   EQUIPES, PESSOAS E SEMANAS
+   ========================================================= */
+
+function renderEquipes() {
+  const q = normalizeText($("peopleSearch").value);
+  const people = [...state.people].sort(sortByName).filter(p => !q || normalizeText(`${p.nome} ${p.cracha} ${teamName(p.equipe_id)}`).includes(q));
+  setText("peopleMeta", `${state.people.filter(p => p.ativo).length} ativo(s) de ${state.people.length}`);
+  $("peopleBody").innerHTML = people.map(p => `<tr>
+    <td><strong>${escapeHTML(p.nome)}</strong></td>
+    <td class="mono">${escapeHTML(dash(p.cracha))}</td>
+    <td>${escapeHTML(dash(teamName(p.equipe_id)))}</td>
+    <td>${p.perfil === "ADMINISTRADOR" ? `<span class="chip primary">Administrador</span>` : `<span class="chip">Campo</span>`}</td>
+    <td><span class="status ${p.ativo ? "done" : "inactive"}">${p.ativo ? "Ativo" : "Inativo"}</span></td>
+    <td class="actions-cell"><button class="icon-btn sm" type="button" data-edit-person="${escapeHTML(p.id)}" title="Editar"><svg class="icon"><use href="#i-edit"/></svg></button></td>
+  </tr>`).join("");
+  $("peopleEmpty").classList.toggle("hidden", people.length > 0);
+
+  setText("teamCount", state.teams.length);
+  $("teamList").innerHTML = state.teams.map(t => {
+    const members = state.people.filter(p => p.equipe_id === t.id && p.ativo).length;
+    return `<div class="row-item ${t.ativo ? "" : "inactive"}">
+      <div class="grow"><strong>${escapeHTML(t.nome)}</strong><small>${escapeHTML(DISCIPLINE_LABELS[t.disciplina] || t.disciplina || "—")} · ${members} pessoa(s)</small></div>
+      <button class="btn ghost sm" type="button" data-toggle-team="${escapeHTML(t.id)}">${t.ativo ? "Desativar" : "Reativar"}</button>
+    </div>`;
+  }).join("");
+
+  setText("weekCount", state.weeks.length);
+  const current = weekLabel(currentWeekNumber());
+  $("weekList").innerHTML = state.weeks.slice().reverse().map(w => `<span class="chip ${w === current ? "primary" : ""}">${escapeHTML(w)}</span>`).join("") || `<span class="muted sm">Nenhuma semana cadastrada.</span>`;
+}
+
+async function saveTeam(event) {
+  event.preventDefault();
+  const name = $("teamName").value.trim().replace(/\s+/g, " ");
+  const discipline = $("teamDiscipline").value;
+  if (!name || !discipline) return setMessage("teamMessage", "Informe nome e disciplina.");
+  if (state.teams.some(t => normalizeText(t.nome) === normalizeText(name))) return setMessage("teamMessage", `A equipe “${name}” já existe.`);
+  await withButton(event.submitter, async () => {
+    try {
+      await withBusy(async () => {
+        const { data, error } = await requireDb().from("tb_equipes").insert({ nome: name, disciplina: discipline, ativo: true }).select("id,nome,disciplina,ativo").single();
+        if (error) throw error;
+        state.teams = [...state.teams, { ...data, ativo: data.ativo !== false }].sort(sortByName);
+      });
+      $("teamForm").reset();
+      setMessage("teamMessage", `Equipe “${name}” cadastrada.`, true);
+      renderEquipes();
+    } catch (error) {
+      setMessage("teamMessage", dbErrorMessage(error));
+    }
+  });
+}
+
+async function toggleTeam(id) {
+  const team = teamById(id);
+  if (!team) return;
+  try {
+    await withBusy(async () => {
+      const { error } = await requireDb().from("tb_equipes").update({ ativo: !team.ativo }).eq("id", id);
+      if (error) throw error;
+    });
+    team.ativo = !team.ativo;
+    renderEquipes();
+  } catch (error) {
+    toast(dbErrorMessage(error), "error");
+  }
+}
+
+async function saveWeek(event) {
+  event.preventDefault();
+  const n = Number($("weekNumber").value);
+  if (!Number.isInteger(n) || n < 1) return setMessage("weekMessage", "Informe um número de semana válido.");
+  const semana = weekLabel(n);
+  if (state.weeks.includes(semana)) return setMessage("weekMessage", `${semana} já está cadastrada.`);
+  await withButton(event.submitter, async () => {
+    try {
+      await withBusy(async () => {
+        const { error } = await requireDb().from("tb_semanas").insert({ semana, ativa: true });
+        if (error) throw error;
+      });
+      state.weeks = sortWeeks([...state.weeks, semana]);
+      $("weekForm").reset();
+      setMessage("weekMessage", `${semana} criada.`, true);
+      renderEquipes();
+    } catch (error) {
+      setMessage("weekMessage", dbErrorMessage(error));
+    }
+  });
+}
+
+function randomAccessCode() {
+  const used = new Set(state.people.map(p => String(p.cracha)));
+  let code;
+  do { code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 900000 + 100000); } while (used.has(code));
+  return code;
+}
+
+function openPersonModal(id = null) {
+  const person = id ? personById(id) : null;
+  state.editingPersonId = person?.id || null;
+  setText("personModalTitle", person ? "Editar pessoa" : "Nova pessoa");
+  $("psName").value = person?.nome || "";
+  $("psCode").value = person?.cracha || randomAccessCode();
+  fillSelect($("psTeam"), state.teams.filter(t => t.ativo || t.id === person?.equipe_id).map(t => ({ value: t.id, label: t.nome })), { value: person?.equipe_id || "", placeholder: "Sem equipe" });
+  $("psRole").value = person?.perfil === "ADMINISTRADOR" ? "ADMINISTRADOR" : "EXECUTANTE";
+  $("psStatus").value = person && !person.ativo ? "0" : "1";
+  setMessage("personFormMessage", "");
+  openModal("personModal");
+}
+
+async function savePerson(event) {
+  event.preventDefault();
+  const nome = $("psName").value.trim().replace(/\s+/g, " ");
+  const cracha = $("psCode").value.trim();
+  const team = teamById($("psTeam").value);
+  if (!nome || !cracha) return setMessage("personFormMessage", "Nome e código são obrigatórios.");
+  if (cracha.length < 4) return setMessage("personFormMessage", "Use um código com pelo menos 4 dígitos (recomendado: 6).");
+  if (state.people.some(p => String(p.cracha) === cracha && p.id !== state.editingPersonId)) return setMessage("personFormMessage", "Este código já pertence a outra pessoa.");
+  const payload = {
+    nome, cracha, perfil: $("psRole").value, ativo: $("psStatus").value === "1",
+    equipe_id: team?.id || null, disciplina: team?.disciplina || null, updated_at: new Date().toISOString()
+  };
+  if (state.editingPersonId === state.user.id && (!payload.ativo || payload.perfil !== "ADMINISTRADOR")) {
+    return setMessage("personFormMessage", "Você não pode remover o seu próprio acesso de administrador.");
+  }
+  await withButton(event.submitter, async () => {
+    try {
+      await withBusy(async () => {
+        const sb = requireDb();
+        const query = state.editingPersonId
+          ? sb.from("tb_pessoas").update(payload).eq("id", state.editingPersonId)
+          : sb.from("tb_pessoas").insert(payload);
+        const { error } = await query;
+        if (error) throw error;
+        await loadPeople();
+      });
+      closeModal("personModal");
+      renderEquipes();
+      toast("Pessoa salva.");
+    } catch (error) {
+      setMessage("personFormMessage", dbErrorMessage(error));
+    }
+  });
+}
+
+/* =========================================================
+   PERFIL
+   ========================================================= */
+
+function renderProfile() {
+  const u = state.user;
+  if (!u) return;
+  setText("profileAvatar", initials(u.nome));
+  setText("profileName", u.nome);
+  setText("profileRole", u.role === "admin" ? "Administrador · Planejamento" : "Equipe de campo");
+  const rows = [
+    ["E-mail", u.email],
+    ["Código de acesso", u.role === "technician" ? u.cracha : ""],
+    ["Equipe", teamName(u.equipeId)],
+    ["Disciplina", DISCIPLINE_LABELS[u.disciplina] || u.disciplina],
+    ["Semana atual", weekLabel(currentWeekNumber())]
+  ].filter(([, v]) => v);
+  $("profileInfo").innerHTML = rows.map(([k, v]) => `<div><dt>${escapeHTML(k)}</dt><dd>${escapeHTML(v)}</dd></div>`).join("");
+}
+
+/* =========================================================
+   CAMPO — dados (RPC seguro com fallback para acesso direto)
+   ========================================================= */
+
+const fieldCode = () => sessionStorage.getItem("ppaFieldCode") || "";
+
+// Tenta a função segura do banco (migration 008); se ela não existir, usa as tabelas diretamente.
+async function callFieldRpc(name, params) {
+  if (!state.rpcAvailable) return { fallback: true };
+  const { data, error } = await requireDb().rpc(name, params);
+  if (error && isMissingFunction(error)) {
+    state.rpcAvailable = false;
+    console.warn(`Função ${name} não encontrada — usando acesso direto às tabelas. Execute 008_tecnico_rpc_seguro.sql.`);
+    return { fallback: true };
+  }
+  if (error) throw error;
+  return { data };
+}
+
+async function loadFieldWeek() {
+  const weekNum = state.field.weekNum;
+  const rpc = await callFieldRpc("tecnico_programacao", { p_cracha: fieldCode(), p_semana: weekNum });
+  let programs;
+  let executions;
+  let equipment;
+
+  if (!rpc.fallback) {
+    const rows = Array.isArray(rpc.data) ? rpc.data : [];
+    programs = rows.map(r => mapProgram(r));
+    executions = rows.flatMap(r => (r.execucoes || []).map(e => ({ ...e, programacao_id: r.id })));
+    equipment = rows.filter(r => r.equipamento).map(r => r.equipamento);
+  } else {
+    const sb = requireDb();
+    const query = () => {
+      let q = sb.from("tb_programacoes").select(PROGRAM_COLUMNS).eq("semana", weekNum);
+      if (state.user.equipeId) q = q.eq("equipe_id", state.user.equipeId);
+      return q.order("created_at").order("id");
+    };
+    programs = (await fetchAll(query)).map(mapProgram);
+    const ids = programs.map(p => p.id);
+    [executions, equipment] = await Promise.all([
+      ids.length ? fetchIn("tb_execucoes", "id,programacao_id,executante_id,executado_em,observacao", "programacao_id", ids) : [],
+      fetchIn("tb_equipamentos", "id,tag,forn,sys,subsys,loop,service,tipe,descricao", "id", programs.map(p => p.equipmentId))
+    ]);
+  }
+
+  const activeIds = new Set(state.activities.map(a => a.id));
+  state.field.programs = programs.filter(p => activeIds.has(p.activityId));
+  state.executions = setExecutions(executions);
+  state.equipment = new Map(equipment.map(e => [e.id, e]));
+  const visible = new Set(state.field.programs.map(p => p.id));
+  state.field.selected = new Set([...state.field.selected].filter(id => visible.has(id) && !isDone(state.field.programs.find(p => p.id === id))));
+  if (!visible.has(state.field.activeId)) state.field.activeId = null;
+}
+
+async function fieldRegister(ids, observacao) {
+  const rpc = await callFieldRpc("tecnico_registrar_execucao", { p_cracha: fieldCode(), p_programacao_ids: ids, p_observacao: observacao || null });
+  if (!rpc.fallback) return Array.isArray(rpc.data) ? rpc.data : [];
+
+  const sb = requireDb();
+  const now = new Date().toISOString();
+  const { data, error } = await sb.from("tb_execucoes")
+    .insert(ids.map(id => ({ programacao_id: id, executante_id: state.user.id, executado_em: now, observacao: observacao || null })))
+    .select("id,programacao_id,executante_id,executado_em,observacao");
+  if (error) throw error;
+  const { error: statusError } = await sb.from("tb_programacoes").update({ status: "EXECUTADO", updated_at: now }).in("id", ids);
+  if (statusError) console.warn("Execução gravada, mas o status da programação não foi atualizado:", statusError.message);
+  return data || [];
+}
+
+async function fieldSaveFields(program, values) {
+  const rpc = await callFieldRpc("tecnico_salvar_campos", { p_cracha: fieldCode(), p_programacao_id: program.id, p_dados: values });
+  if (!rpc.fallback) return rpc.data && typeof rpc.data === "object" ? rpc.data : { ...program.customData, ...values };
+
+  const merged = { ...program.customData, ...values };
+  const { error } = await requireDb().from("tb_programacoes").update({ dados_personalizados: merged, updated_at: new Date().toISOString() }).eq("id", program.id);
+  if (error) throw error;
+  return merged;
+}
+
+/* =========================================================
+   CAMPO — telas
+   ========================================================= */
+
+function filteredFieldPrograms() {
+  const f = state.field;
+  const q = normalizeText(f.search);
+  return f.programs.filter(p => {
+    if (f.activity && p.activityId !== f.activity) return false;
+    if (f.status === "done" && !isDone(p)) return false;
+    if (f.status === "pending" && isDone(p)) return false;
+    if (q) {
+      const activity = activityById(p.activityId);
+      const hay = [activity?.name, p.note, ...activityColumns(activity).map(c => columnValue(p, c))].map(normalizeText).join(" ");
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  }).sort((a, b) => Number(isDone(a)) - Number(isDone(b))
+    || String(activityById(a.activityId)?.name).localeCompare(String(activityById(b.activityId)?.name), "pt-BR")
+    || String(programTitle(a)).localeCompare(String(programTitle(b)), "pt-BR", { numeric: true }));
+}
+
+function executorName(execution) {
+  if (execution.executante_nome) return execution.executante_nome;
+  if (execution.executante_id === state.user?.id) return state.user.nome;
+  return personById(execution.executante_id)?.nome || "Outro integrante";
+}
+
+function renderField() {
+  const f = state.field;
+  const all = f.programs;
+  const s = summarize(all);
+  setText("fieldWeek", weekLabel(f.weekNum));
+  setText("fieldTeamLabel", teamName(state.user.equipeId) ? `Equipe ${teamName(state.user.equipeId).replace(/^equipe\s+/i, "")}` : "Todas as equipes");
+  setText("fieldProgressText", `${s.done} de ${s.total} executadas · ${s.rate}%`);
+  $("fieldProgressBar").style.width = `${s.rate}%`;
+  setText("fieldTotal", s.total);
+  setText("fieldDone", s.done);
+  setText("fieldPending", s.pending);
+
+  const acts = state.activities.filter(a => all.some(p => p.activityId === a.id));
+  fillSelect($("fieldActivity"), acts.map(a => ({ value: a.id, label: a.name })), { value: f.activity, placeholder: "Todas as atividades" });
+  f.activity = $("fieldActivity").value;
+  document.querySelectorAll("[data-field-status]").forEach(b => b.classList.toggle("active", b.dataset.fieldStatus === f.status));
+
+  const rows = filteredFieldPrograms();
+  setText("fieldListMeta", `${rows.length} de ${all.length} item(ns)`);
+  $("fieldList").innerHTML = rows.map(p => {
+    const activity = activityById(p.activityId);
+    const done = isDone(p);
+    const title = titleColumn(activity);
+    const fields = activityColumns(activity).filter(c => c !== title).map(c => [c, columnValue(p, c)]).filter(([, v]) => v !== "").slice(0, 4);
+    const last = executionsOf(p.id).at(-1);
+    return `<article class="task ${done ? "done" : ""} ${p.id === f.activeId ? "active" : ""}" data-task="${escapeHTML(p.id)}">
+      <label class="check" title="${done ? "Já executada" : "Selecionar"}"><input type="checkbox" data-select="${escapeHTML(p.id)}" ${f.selected.has(p.id) ? "checked" : ""} ${done ? "disabled" : ""} aria-label="Selecionar"></label>
+      <div>
+        <div class="task-head"><span class="chip primary">${escapeHTML(activity?.name || "")}</span></div>
+        <div class="task-title">${escapeHTML(programTitle(p))}</div>
+        <div class="task-fields">${fields.map(([c, v]) => `<span>${escapeHTML(c.label)} <b>${escapeHTML(formatColumnValue(c, v))}</b></span>`).join("")}</div>
+      </div>
+      <div class="task-side">
+        <span class="status ${done ? "done" : "pending"}">${done ? "Executada" : "Pendente"}</span>
+        ${last ? `<small>${escapeHTML(fmtDateTime(last.executado_em))}</small>` : p.date ? `<small>Prev. ${escapeHTML(fmtDate(p.date))}</small>` : ""}
+      </div>
+    </article>`;
+  }).join("");
+  $("fieldEmpty").classList.toggle("hidden", rows.length > 0);
+  setText("fieldEmptyText", all.length ? "Ajuste a busca ou os filtros." : `Não há programação para ${teamName(state.user.equipeId) || "a equipe"} em ${weekLabel(f.weekNum)}.`);
+
+  const selectable = rows.filter(p => !isDone(p));
+  const allSel = $("fieldSelectAll");
+  allSel.checked = selectable.length > 0 && selectable.every(p => f.selected.has(p.id));
+  allSel.indeterminate = !allSel.checked && selectable.some(p => f.selected.has(p.id));
+  allSel.disabled = !selectable.length;
+  renderBulkBar();
+  renderFieldDetail();
+}
+
+function renderBulkBar() {
+  const n = state.field.selected.size;
+  $("bulkBar").classList.toggle("hidden", n === 0 || currentScreen() !== "campo");
+  setText("bulkCount", n);
+}
+
+function renderFieldDetail() {
+  const p = state.field.programs.find(x => x.id === state.field.activeId);
+  $("fieldDetailEmpty").classList.toggle("hidden", Boolean(p));
+  $("fieldDetailBody").classList.toggle("hidden", !p);
+  if (!p) { closeFieldSheet(); return; }
+
+  const activity = activityById(p.activityId);
+  const done = isDone(p);
+  const executions = executionsOf(p.id);
+  setText("detailActivity", activity?.name || "");
+  setText("detailTitle", programTitle(p));
+  setText("detailMeta", [p.week, teamName(p.teamId), p.date ? `previsto ${fmtDate(p.date)}` : ""].filter(Boolean).join(" · "));
+  const status = $("detailStatus");
+  status.className = `status ${done ? "done" : "pending"}`;
+  status.textContent = done ? `Executada · ${executions.length} registro(s)` : "Pendente";
+
+  const cols = activityColumns(activity);
+  const host = $("detailFields");
+  host.innerHTML = cols.map(c => {
+    const value = columnValue(p, c);
+    if (!c.technicianEditable) return `<div class="ro"><span>${escapeHTML(c.label)}</span><strong>${escapeHTML(formatColumnValue(c, value))}</strong></div>`;
+    return "";
+  }).join("") + (p.note ? `<div class="ro" style="grid-column:1/-1"><span>Observação do planejamento</span><strong>${escapeHTML(p.note)}</strong></div>` : "");
+
+  const editable = { ...activity, columns: cols.filter(c => c.technicianEditable) };
+  if (editable.columns.length) {
+    const wrap = document.createElement("div");
+    wrap.style.gridColumn = "1 / -1";
+    wrap.className = "form-grid";
+    wrap.id = "detailEditable";
+    renderCustomInputs(wrap, editable, Object.fromEntries(editable.columns.map(c => [c.key, columnValue(p, c)])), { prefix: "df" });
+    host.appendChild(wrap);
+  }
+  $("detailSaveRow").classList.toggle("hidden", !editable.columns.length);
+
+  const reg = $("detailRegister");
+  reg.querySelector("span").textContent = done ? "Registrar nova execução" : "Registrar execução";
+  reg.classList.toggle("ghost", done);
+  reg.classList.toggle("primary", !done);
+
+  $("detailLog").innerHTML = executions.slice().reverse().map(e => `
+    <div class="timeline-item"><div>
+      <strong>${escapeHTML(fmtDateTime(e.executado_em))}</strong>
+      <small>${escapeHTML(executorName(e))}</small>
+      ${e.observacao ? `<p>${escapeHTML(e.observacao)}</p>` : ""}
+    </div></div>`).join("");
+}
+
+function openFieldItem(id) {
+  if (state.field.activeId !== id) $("detailObs").value = "";
+  state.field.activeId = id;
+  document.querySelectorAll(".task").forEach(el => el.classList.toggle("active", el.dataset.task === id));
+  renderFieldDetail();
+  if (window.matchMedia("(max-width: 960px)").matches) {
+    $("fieldDetail").classList.add("open");
+    document.body.classList.add("sheet-open");
+  }
+}
+
+function closeFieldSheet() {
+  $("fieldDetail").classList.remove("open");
+  document.body.classList.remove("sheet-open");
+}
+
+async function registerExecution(ids, button) {
+  const programs = ids.map(id => state.field.programs.find(p => p.id === id)).filter(Boolean);
+  if (!programs.length) return;
+  const repeat = programs.length === 1 && isDone(programs[0]);
+  if (repeat) {
+    const ok = await confirmDialog({ title: "Registrar nova execução?", text: "Este item já possui registro. Um novo registro será acrescentado ao histórico.", okLabel: "Registrar" });
+    if (!ok) return;
+  }
+  const obs = programs.length === 1 ? $("detailObs").value.trim() : "";
+  await withButton(button, async () => {
+    try {
+      const created = await withBusy(() => fieldRegister(programs.map(p => p.id), obs));
+      created.forEach(e => {
+        const list = state.executions.get(e.programacao_id) || [];
+        list.push(e);
+        state.executions.set(e.programacao_id, list);
+      });
+      programs.forEach(p => { p.status = "EXECUTADO"; state.field.selected.delete(p.id); });
+      $("detailObs").value = "";
+      renderField();
+      toast(programs.length === 1 ? "Execução registrada." : `${programs.length} execuções registradas.`);
+    } catch (error) {
+      toast(dbErrorMessage(error, "Não foi possível registrar."), "error");
+    }
+  });
+}
+
+async function saveDetailFields() {
+  const p = state.field.programs.find(x => x.id === state.field.activeId);
+  const host = $("detailEditable");
+  if (!p || !host) return;
+  const { data } = collectCustomInputs(host);
+  await withButton($("detailSave"), async () => {
+    try {
+      p.customData = await withBusy(() => fieldSaveFields(p, data));
+      renderField();
+      toast("Campos salvos.");
+    } catch (error) {
+      toast(dbErrorMessage(error, "Não foi possível salvar os campos."), "error");
+    }
+  });
+}
+
+async function changeFieldWeek(delta) {
+  state.field.weekNum += delta;
+  state.field.selected.clear();
+  state.field.activeId = null;
+  setText("fieldWeek", weekLabel(state.field.weekNum));
+  try { await withBusy(loadFieldWeek); }
+  catch (error) { toast(dbErrorMessage(error), "error"); state.field.programs = []; }
+  renderScreen();
+}
+
+function renderFieldHistory() {
+  setText("historyWeek", weekLabel(state.field.weekNum));
+  const items = state.field.programs.flatMap(p => executionsOf(p.id).map(e => ({ p, e })))
+    .sort((a, b) => String(b.e.executado_em).localeCompare(String(a.e.executado_em)));
+  $("historyList").innerHTML = items.length ? items.map(({ p, e }) => `
+    <div class="timeline-item"><div>
+      <strong>${escapeHTML(programTitle(p))}</strong>
+      <small>${escapeHTML(activityById(p.activityId)?.name || "")} · ${escapeHTML(fmtDateTime(e.executado_em))} · ${escapeHTML(executorName(e))}</small>
+      ${e.observacao ? `<p>${escapeHTML(e.observacao)}</p>` : ""}
+    </div></div>`).join("") : `<div class="empty inline"><strong>Nenhuma execução nesta semana.</strong><span>Os registros feitos em “Atividades da semana” aparecem aqui.</span></div>`;
+}
+
+/* =========================================================
+   EXPORTAÇÃO — PDF e JPEG
+   ========================================================= */
+
+function hexToRgb(hex) {
+  const m = String(hex).replace("#", "").match(/^([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  return m ? m.slice(1).map(x => parseInt(x, 16)) : [15, 27, 45];
+}
+
+function pdfHeader(doc, title, subtitle) {
+  const s = state.settings;
+  doc.setFillColor(...hexToRgb(s.header));
+  doc.rect(0, 0, 210, 30, "F");
+  doc.setFillColor(...hexToRgb(s.primary));
+  doc.rect(0, 30, 210, 1.6, "F");
+  let x = 12;
+  if (s.logo) {
+    try {
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(10, 6, 30, 18, 2, 2, "F");
+      const props = doc.getImageProperties(s.logo);
+      const ratio = Math.min(26 / props.width, 14 / props.height);
+      doc.addImage(s.logo, "PNG", 25 - props.width * ratio / 2, 15 - props.height * ratio / 2, props.width * ratio, props.height * ratio);
+      x = 46;
+    } catch (error) { console.warn("Logo não aplicada ao PDF:", error); }
+  }
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(15);
-  doc.text("PLANNING PRO", 28, 13);
+  doc.setFontSize(14);
+  doc.text(title, x, 14);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.text(subtitle, 28, 20);
-  doc.text(`Responsável: ${currentUserLabel()}`, 28, 26);
+  doc.setFontSize(8.5);
+  doc.text(`${subtitle} · Responsável: ${state.user?.nome || "—"}`, x, 21);
+  return 42;
+}
 
-  doc.setTextColor(15, 30, 48);
-  doc.setFillColor(248, 250, 252);
-  doc.roundedRect(10, 39, 190, 23, 3, 3, "F");
-  const cards = [["PREVISTO", planned], ["EXECUTADO", done], ["PENDENTE", pending], ["EXECUÇÃO", `${pct}%`]];
-  cards.forEach((card, index) => {
-    const x = 15 + index * 47;
+function pdfFooter(doc) {
+  const pages = doc.getNumberOfPages();
+  for (let i = 1; i <= pages; i++) {
+    doc.setPage(i);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(120, 134, 152);
+    doc.text(`Gerado em ${nowStamp()} · Planning Pro`, 12, 290);
+    doc.text(`${i}/${pages}`, 198, 290, { align: "right" });
+  }
+}
+
+function pdfKpis(doc, y, s) {
+  const cards = [["PROGRAMADAS", s.total], ["EXECUTADAS", s.done], ["PENDENTES", s.pending], ["REALIZAÇÃO", `${s.rate}%`]];
+  cards.forEach(([label, value], i) => {
+    const x = 12 + i * 47;
+    doc.setFillColor(244, 246, 249);
+    doc.roundedRect(x, y, 44, 20, 2, 2, "F");
     doc.setFont("helvetica", "bold");
     doc.setFontSize(7);
-    doc.setTextColor(settings.primary);
-    doc.text(card[0], x, 46);
-    doc.setFontSize(13);
-    doc.setTextColor(15, 30, 48);
-    doc.text(String(card[1]), x, 56);
+    doc.setTextColor(...hexToRgb(state.settings.primary));
+    doc.text(label, x + 4, y + 7);
+    doc.setFontSize(14);
+    doc.setTextColor(15, 27, 45);
+    doc.text(String(value), x + 4, y + 16);
   });
+  return y + 28;
+}
 
-  let y = 72;
-  doc.setFillColor(settings.header);
-  doc.rect(10, y, 190, 9, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(7);
-  doc.text("ATIVIDADE", 14, y + 6);
-  doc.text("PREVISTO", 125, y + 6);
-  doc.text("EXECUTADO", 153, y + 6);
-  doc.text("PENDENTE", 180, y + 6);
-  y += 9;
-
-  rows.forEach((row, index) => {
-    doc.setFillColor(index % 2 ? 248 : 255, index % 2 ? 250 : 255, index % 2 ? 252 : 255);
-    doc.rect(10, y, 190, 8, "F");
+function pdfTable(doc, y, title, headers, rows, widths) {
+  if (y > 250) { doc.addPage(); y = 18; }
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(15, 27, 45);
+  doc.text(title, 12, y);
+  y += 4;
+  const drawHead = () => {
+    doc.setFillColor(...hexToRgb(state.settings.header));
+    doc.rect(12, y, 186, 7, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(7);
+    let x = 14;
+    headers.forEach((h, i) => { doc.text(h, i === 0 ? x : x + widths[i] - 4, y + 4.8, { align: i === 0 ? "left" : "right" }); x += widths[i]; });
+    y += 7;
+  };
+  drawHead();
+  doc.setFont("helvetica", "normal");
+  rows.forEach((row, r) => {
+    if (y > 278) { doc.addPage(); y = 18; drawHead(); doc.setFont("helvetica", "normal"); }
+    if (r % 2) { doc.setFillColor(248, 250, 252); doc.rect(12, y, 186, 6.5, "F"); }
     doc.setTextColor(35, 48, 65);
-    doc.text(String(row.label).slice(0, 48), 14, y + 5.3);
-    doc.text(String(row.planned), 129, y + 5.3);
-    doc.setTextColor(settings.accent);
-    doc.text(String(row.done), 158, y + 5.3);
-    doc.setTextColor(217, 119, 6);
-    doc.text(String(row.pending), 185, y + 5.3);
-    y += 8;
+    doc.setFontSize(7.5);
+    let x = 14;
+    row.forEach((cell, i) => {
+      const text = String(cell ?? "");
+      doc.text(i === 0 ? text.slice(0, Math.floor(widths[0] / 1.7)) : text, i === 0 ? x : x + widths[i] - 4, y + 4.5, { align: i === 0 ? "left" : "right" });
+      x += widths[i];
+    });
+    y += 6.5;
   });
+  return y + 8;
+}
 
-  doc.setTextColor(100, 116, 139);
-  doc.setFontSize(6.5);
-  doc.text(`Gerado em ${nowBR()} • Planning Pro`, 10, 286);
+function groupRows(groups) {
+  return groups.map(g => [g.label, g.total, g.done, g.pending, `${g.rate}%`]);
+}
+
+function exportSummaryPDF(title, subtitle, programs, filename) {
+  const jsPDF = window.jspdf?.jsPDF;
+  if (!jsPDF) return toast("A biblioteca de PDF não carregou.", "error");
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  let y = pdfHeader(doc, title, subtitle);
+  y = pdfKpis(doc, y, summarize(programs));
+  const headers = ["", "PROG.", "EXEC.", "PEND.", "%"];
+  const widths = [106, 20, 20, 20, 20];
+  y = pdfTable(doc, y, "Por atividade", ["ATIVIDADE", ...headers.slice(1)], groupRows(byActivity(programs)), widths);
+  pdfTable(doc, y, "Por equipe", ["EQUIPE", ...headers.slice(1)], groupRows(byTeam(programs)), widths);
+  pdfFooter(doc);
   doc.save(filename);
 }
 
 function exportDashboardPDF() {
-  const filters = dashboardFilterState();
-  exportStyledPDF(`Relatório gerencial • ${filters.week || "Todas as semanas"}`, reportRowsForDashboard(), `dashboard-${filters.week || "todas"}.pdf`);
+  const week = state.dashboardWeek;
+  exportSummaryPDF("Previsto x realizado", `Semana ${week}`, state.programs.filter(p => p.week === week), `dashboard_${week}.pdf`);
 }
 
-function exportTechReportPDF() {
-  const rows = state.rows.filter(row => normalizeWeek(row.Week) === activeDashboardWeek());
-  const done = rows.filter(hasLog).length;
-  exportStyledPDF(`Relatório de campo • ${currentWeek()}`, [{ label: "Total da semana", planned: rows.length, done, pending: Math.max(rows.length - done, 0), pct: rows.length ? Math.round(done / rows.length * 100) : 0 }], `campo-${activeDashboardWeek()}.pdf`);
+function exportReportPDF() {
+  const f = reportFilters();
+  const parts = [f.week || "Todas as semanas", activityById(f.activity)?.name, teamName(f.team)].filter(Boolean);
+  exportSummaryPDF("Relatório de programação", parts.join(" · "), reportPrograms(f), `relatorio_${makeKey(parts.join("_")) || "geral"}.pdf`);
 }
 
-/* =========================
-   MODULE EXCEL / RECORDS
-   ========================= */
-
-function exportModuleMask() {
-  const module = selectedModule();
-  if (!module) {
-    toast("Selecione um módulo.");
-    return;
-  }
-
-  const headers = module.columns.map(column => column.label);
-  const blank = module.columns.map(() => "");
-  if (window.XLSX) {
-    const sheet = XLSX.utils.aoa_to_sheet([headers, blank]);
-    sheet["!cols"] = module.columns.map(column => ({ wch: Math.max(12, Math.min(32, column.label.length + 3)) }));
-    const info = XLSX.utils.aoa_to_sheet([
-      ["Módulo", module.name],
-      ["Instruções", "Não altere os cabeçalhos. Campos com * são obrigatórios."],
-      ["Importação", "As importações do cadastro Ponto a Ponto são cumulativas."]
-    ]);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, sheet, "Importação");
-    XLSX.utils.book_append_sheet(workbook, info, "Leia-me");
-    XLSX.writeFile(workbook, `mascara_${makeKey(module.name)}.xlsx`);
-  } else {
-    exportCSV(headers, [blank], `mascara_${makeKey(module.name)}.csv`);
-  }
-}
-
-function triggerModuleImport() {
-  const module = selectedModule();
-  if (!module) {
-    toast("Selecione um módulo.");
-    return;
-  }
-  if ($("moduleExcelInput")) {
-    $("moduleExcelInput").value = "";
-    $("moduleExcelInput").click();
-  }
-}
-
-function validateAndMapImportRows(rows, module) {
-  if (!rows.length) throw new Error("Arquivo sem dados.");
-  const headers = rows[0].map(value => String(value ?? "").trim());
-  const normalized = headers.map(makeKey);
-  const missing = module.columns.filter(column => column.required && !normalized.includes(makeKey(column.label)) && !normalized.includes(makeKey(column.key)));
-  if (missing.length) throw new Error(`Colunas obrigatórias ausentes: ${missing.map(column => column.label).join(", ")}.`);
-
-  const imported = rows.slice(1)
-    .filter(row => row.some(value => String(value ?? "").trim() !== ""))
-    .map((row, index) => {
-      const data = { _linha_excel: index + 2, _imported_at: new Date().toISOString() };
-      module.columns.forEach(column => {
-        const position = normalized.findIndex(header => header === makeKey(column.label) || header === makeKey(column.key));
-        data[column.key] = position >= 0 ? row[position] ?? "" : "";
-      });
-      return data;
-    });
-  return { headers, imported };
-}
-
-function openImportModeModal(file, rows) {
-  const module = selectedModule();
-  if (!module) return;
-  state.pendingImport = { fileName: file.name, rows, modId: module.id };
-  $("importFileName") && ($("importFileName").textContent = file.name);
-  $("importExistingCount") && ($("importExistingCount").textContent = (moduleRecordStore()[module.id] || []).length);
-  $("importModeDescription") && ($("importModeDescription").textContent = `${rows.imported.length} registro(s) encontrado(s) para “${module.name}”.`);
-  $("importModeMessage") && ($("importModeMessage").textContent = "");
-  $("importModeModal")?.classList.remove("hidden");
-}
-
-function closeImportModeModal() {
-  $("importModeModal")?.classList.add("hidden");
-  state.pendingImport = null;
-}
-
-async function persistImportedRecords(module, records, mode) {
-  const store = moduleRecordStore();
-  const existing = Array.isArray(store[module.id]) ? store[module.id] : [];
-  const stamped = records.map(record => ({ ...record, _module_id: module.id, _import_id: `imp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` }));
-  store[module.id] = mode === "append" || mode === "new" ? [...existing, ...stamped] : stamped;
-  persistModuleRecords();
-  return store[module.id];
-}
-
-async function confirmModuleImport(mode) {
-  const pending = state.pendingImport;
-  const module = pending ? moduleById(pending.modId) : null;
-  if (!pending || !module) return;
-
-  try {
-    if (module.id === "ppa") {
-      const sb = getSupabaseClient();
-      if (!sb) throw new Error("Supabase não está configurado.");
-
-      let processed = 0;
-      for (const record of pending.rows.imported) {
-        const tag = String(record.tag || "").trim();
-        if (!tag) continue;
-
-        const payload = {
-          tag,
-          forn: record.forn || null,
-          sys: record.sys || null,
-          subsys: record.subsys || null,
-          loop: record.loop || null,
-          service: record.service || null,
-          tipe: record.type || record.tipe || null,
-          descricao: record.descricao || null,
-          ativo: true,
-          updated_at: new Date().toISOString()
-        };
-
-        const { data: existing, error: findError } = await sb
-          .from("tb_equipamentos")
-          .select("id")
-          .eq("tag", tag)
-          .limit(1)
-          .maybeSingle();
-        if (findError) throw findError;
-
-        if (existing) {
-          const { error } = await sb.from("tb_equipamentos").update(payload).eq("id", existing.id);
-          if (error) throw error;
-        } else {
-          const { error } = await sb.from("tb_equipamentos").insert(payload);
-          if (error) throw error;
-        }
-        processed += 1;
-      }
-      toast(`${processed} equipamento(s) importado(s). A base anterior foi preservada.`);
-    }
-
-    const records = await persistImportedRecords(module, pending.rows.imported, "append");
-    if ($("importModeMessage")) {
-      $("importModeMessage").textContent = `Importação concluída: ${pending.rows.imported.length} registro(s). Base total: ${records.length}.`;
-      $("importModeMessage").classList.add("ok");
-    }
-
-    setTimeout(closeImportModeModal, 400);
-    if (module.id === "ppa") {
-      await loadData();
-      populateFilters();
-      renderTable();
-      renderDashboard();
-    }
-    renderModules();
-  } catch (error) {
-    console.error("Erro na importação do módulo:", error);
-    if ($("importModeMessage")) $("importModeMessage").textContent = error?.message || "Não foi possível importar.";
-  }
-}
-
-async function importModuleFile(file) {
-  const module = selectedModule();
-  if (!module || !file) return;
-  try {
-    const rows = await readModuleFile(file);
-    const mapped = validateAndMapImportRows(rows, module);
-    if (!mapped.imported.length) throw new Error("O arquivo não possui linhas de dados para importar.");
-    openImportModeModal(file, mapped);
-  } catch (error) {
-    if ($("importResultMessage")) $("importResultMessage").textContent = error?.message || "Não foi possível importar o arquivo.";
-  }
-}
-
-/* =========================
-   PROGRAMMING / MISC
-   ========================= */
-
-function syncImportedPpa(records, module, mode = "append") {
-  const mapped = records
-    .map(record => ({
-      FORN: record.forn || "",
-      SYS: record.sys || "",
-      SUBSYS: record.subsys || "",
-      LOOP: record.loop || "",
-      TAG: record.tag || "",
-      SERVICE: record.service || "",
-      TIPE: record.type || record.tipe || "",
-      DESCRIÇÃO: record.descricao || "",
-      Week: normalizeWeek(record.week || currentWeek()),
-      Logs: record.logs || ""
-    }))
-    .filter(row => row.TAG);
-  state.rows = mode === "append" ? [...state.rows, ...mapped] : mapped;
-}
-
-async function syncAll() {
-  try {
-    loadModuleCatalog();
-    loadProgramHistory();
-
-    const modulesLoaded = await loadModulesFromDB();
-    if (state.role === "admin" && !modulesLoaded) {
-      await syncModulesToDB();
-      await loadModulesFromDB();
-    }
-
-    if (state.role === "technician") {
-      const sb = getSupabaseClient();
-      const { data: teamsData, error: teamsError } = await sb.from("tb_equipes").select("id,nome,disciplina,ativo").order("nome");
-      if (teamsError) throw teamsError;
-      state.teams = (teamsData || []).map(team => ({ id: team.id, dbId: team.id, name: team.nome, nome: team.nome, disciplina: team.disciplina, ativo: team.ativo !== false }));
-    } else {
-      await loadTeamsAndPeople();
-    }
-    await loadWeeks();
-    await loadProgramacoes();
-
-    if (state.role === "technician") {
-      await loadData();
-      populateFilters();
-      renderTable();
-      renderHistory();
-      renderDashboard();
-    }
-
-    if (state.role === "admin") {
-      renderDashboard();
-      renderProgramacao();
-      renderModules();
-      renderAccesses();
-    }
-
-    if ($("currentDateTime")) $("currentDateTime").textContent = nowBR();
-    if ($("currentWeek")) $("currentWeek").textContent = activeDashboardWeek();
-  } catch (error) {
-    console.error("Erro na sincronização:", error);
-    toast(error?.message || "Não foi possível sincronizar todos os dados.");
-  }
-}
-
-/* =========================
-   EVENTS
-   ========================= */
-
-function exportActivityPdfTemplate() {
-  const module = selectedModule();
-  if (!module) return toast("Selecione uma atividade primeiro.");
+function exportFieldPDF() {
   const jsPDF = window.jspdf?.jsPDF;
-  if (!jsPDF) return toast("Biblioteca PDF não carregada.");
-  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-  const isPres = /preserva/i.test(module.name);
-  const isLoop = /loop/i.test(module.name);
-  doc.setFontSize(18); doc.text("PLANNING PRO", 15, 18);
-  doc.setFontSize(13); doc.text(`Relatório de ${module.name}`, 15, 27);
-  doc.setFontSize(9); doc.text(`Semana: __________________    Data: ____/____/______`, 15, 36);
-  doc.text("Equipe: ______________________________________________", 15, 43);
-  doc.text("Responsável: __________________________________________", 15, 50);
-  let y = 62;
-  if (isLoop) {
-    doc.setFontSize(11); doc.text("IDENTIFICAÇÃO DO LOOP", 15, y); y += 8;
-    ["TAG", "LOOP", "SYS", "SUBSYS", "FORN."].forEach(label => { doc.rect(15,y,55,9); doc.text(label,18,y+6); doc.line(70,y,195,y); doc.text("________________________________",73,y+6); y+=11; });
-    y+=3; doc.text("RESULTADO DO TESTE",15,y); y+=8;
-    ["APROVADO", "REPROVADO", "PENDENTE"].forEach((v,i)=>{doc.rect(15+i*38,y,5,5);doc.text(v,22+i*38,y+4);}); y+=12;
-    doc.text("Observações:",15,y); y+=5; doc.rect(15,y,180,45); y+=53;
-    doc.text("Assinatura do executante: ______________________________",15,y);
-  } else if (isPres) {
-    doc.setFontSize(11); doc.text("REGISTRO DE PRESERVAÇÃO",15,y); y+=8;
-    ["TAG", "EQUIPAMENTO", "SYS", "SUBSYS", "MÉTODO", "STATUS"].forEach(label=>{doc.rect(15,y,55,9);doc.text(label,18,y+6);doc.line(70,y,195,y);doc.text("________________________________",73,y+6);y+=11;});
-    y+=4; doc.text("FOTO DO EQUIPAMENTO",15,y); y+=5; doc.rect(15,y,80,58); doc.text("Inserir foto",45,y+31); doc.rect(105,y,90,58); doc.text("Inserir foto / evidência",127,y+31); y+=66;
-    doc.text("Observações:",15,y); y+=5; doc.rect(15,y,180,35); y+=43; doc.text("Assinatura do executante: ______________________________",15,y);
-  } else {
-    doc.text("ESTRUTURA DA ATIVIDADE",15,y); y+=8;
-    module.columns.filter(c=>!['week','logs'].includes(c.key)).forEach(c=>{ if(y>275){doc.addPage();y=20;} doc.rect(15,y,55,8);doc.text(String(c.label).slice(0,28),18,y+5.5);doc.line(70,y,195,y);y+=10; });
-  }
-  doc.setFontSize(7); doc.text("Modelo gerado pelo Planning Pro",15,290);
-  doc.save(`modelo-${makeKey(module.name)}.pdf`);
+  if (!jsPDF) return toast("A biblioteca de PDF não carregou.", "error");
+  const programs = filteredFieldPrograms();
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const week = weekLabel(state.field.weekNum);
+  let y = pdfHeader(doc, "Relatório de campo", `${week} · ${teamName(state.user.equipeId) || "Todas as equipes"}`);
+  y = pdfKpis(doc, y, summarize(programs));
+  const rows = programs.map(p => {
+    const last = executionsOf(p.id).at(-1);
+    return [`${programTitle(p)} · ${activityById(p.activityId)?.name || ""}`, isDone(p) ? "EXECUTADA" : "PENDENTE", last ? fmtDateTime(last.executado_em) : "—"];
+  });
+  pdfTable(doc, y, "Itens programados", ["ITEM", "SITUAÇÃO", "ÚLTIMO REGISTRO"], rows, [116, 30, 40]);
+  pdfFooter(doc);
+  doc.save(`campo_${week}.pdf`);
 }
+
+function exportDashboardJPEG() {
+  const week = state.dashboardWeek;
+  const programs = state.programs.filter(p => p.week === week);
+  const s = summarize(programs);
+  const groups = byActivity(programs);
+  const teams = byTeam(programs);
+  const settings = state.settings;
+  const W = 1600;
+  const rowH = 54;
+  const H = 360 + (groups.length + teams.length) * rowH + 200;
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#f4f6f9";
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = settings.header;
+  ctx.fillRect(0, 0, W, 150);
+  ctx.fillStyle = settings.primary;
+  ctx.fillRect(0, 150, W, 6);
+  ctx.fillStyle = "#fff";
+  ctx.font = "700 40px Inter, Arial";
+  ctx.fillText("Previsto x realizado", 60, 72);
+  ctx.font = "22px Inter, Arial";
+  ctx.fillText(`Semana ${week} · ${state.user?.nome || ""} · ${nowStamp()}`, 60, 112);
+
+  [["PROGRAMADAS", s.total], ["EXECUTADAS", s.done], ["PENDENTES", s.pending], ["REALIZAÇÃO", `${s.rate}%`]].forEach(([label, value], i) => {
+    const x = 60 + i * 375;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(x, 190, 350, 120);
+    ctx.fillStyle = settings.primary;
+    ctx.font = "700 18px Inter, Arial";
+    ctx.fillText(label, x + 24, 228);
+    ctx.fillStyle = "#0f1b2d";
+    ctx.font = "700 48px Inter, Arial";
+    ctx.fillText(String(value), x + 24, 288);
+  });
+
+  let y = 360;
+  const block = (title, list) => {
+    ctx.fillStyle = "#0f1b2d";
+    ctx.font = "700 24px Inter, Arial";
+    ctx.fillText(title, 60, y);
+    y += 24;
+    list.forEach(g => {
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(60, y, W - 120, rowH - 8);
+      ctx.fillStyle = "#0f1b2d";
+      ctx.font = "600 20px Inter, Arial";
+      ctx.fillText(String(g.label).slice(0, 48), 80, y + 31);
+      ctx.fillStyle = "#e2e8ef";
+      ctx.fillRect(760, y + 18, 560, 12);
+      ctx.fillStyle = settings.chartDone;
+      ctx.fillRect(760, y + 18, 560 * g.rate / 100, 12);
+      ctx.fillStyle = "#5a6a7e";
+      ctx.font = "600 20px Inter, Arial";
+      ctx.fillText(`${g.done}/${g.total} · ${g.rate}%`, 1350, y + 31);
+      y += rowH;
+    });
+    y += 40;
+  };
+  block("Por atividade", groups);
+  block("Por equipe", teams);
+
+  canvas.toBlob(blob => downloadBlob(blob, `dashboard_${week}.jpg`), "image/jpeg", 0.92);
+}
+
+/* =========================================================
+   EVENTOS
+   ========================================================= */
 
 function bindEvents() {
-  // Navegação principal — mantém telas, perfil e configurações acessíveis por perfil.
-  document.querySelectorAll("[data-screen]").forEach(button => {
-    button.addEventListener("click", event => {
-      event.preventDefault();
-      const screen = button.dataset.screen;
-      if (screen) nav(screen);
-      const sidebar = $("appSidebar");
-      if (sidebar && window.innerWidth <= 900) sidebar.classList.remove("mobile-open");
-    });
-  });
+  // Login
+  document.querySelectorAll(".access-option").forEach(b => b.addEventListener("click", () => showLoginStep(b.dataset.role)));
+  document.querySelectorAll("[data-back-login]").forEach(b => b.addEventListener("click", () => showLoginStep("chooser")));
+  $("adminLoginForm").addEventListener("submit", loginAdmin);
+  $("technicianLoginForm").addEventListener("submit", loginTechnician);
 
-  document.querySelectorAll(".access-option").forEach(button => {
-    button.addEventListener("click", () => showLogin(button.dataset.role));
+  // Shell
+  window.addEventListener("hashchange", route);
+  document.querySelectorAll(".nav-item[data-screen]").forEach(b => b.addEventListener("click", () => goTo(b.dataset.screen)));
+  $("sidebarToggle").addEventListener("click", () => {
+    const collapsed = $("appShell").classList.toggle("collapsed");
+    localStorage.setItem("ppaSidebarCollapsed", collapsed ? "1" : "0");
   });
+  $("mobileMenuBtn").addEventListener("click", () => { $("sidebar").classList.add("open"); $("sidebarOverlay").classList.add("show"); });
+  $("sidebarOverlay").addEventListener("click", () => { closeSidebar(); closeFieldSheet(); });
+  $("themeToggle").addEventListener("click", toggleTheme);
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", applyTheme);
+  $("logoutBtn").addEventListener("click", logout);
 
-  document.querySelectorAll("[data-back-login]").forEach(button => {
-    button.addEventListener("click", backToAccessChooser);
+  // Modais
+  document.addEventListener("click", e => {
+    const closer = e.target.closest("[data-close-modal]");
+    if (closer) closeModal(closer.closest(".modal").id);
   });
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    const open = [...document.querySelectorAll(".modal:not(.hidden)")].at(-1);
+    if (open) closeModal(open.id);
+    else { closeSidebar(); closeFieldSheet(); }
+  });
+  $("confirmOk").addEventListener("click", () => resolveConfirm(true));
+  $("confirmCancel").addEventListener("click", () => resolveConfirm(false));
 
-  $("adminLoginForm")?.addEventListener("submit", async event => {
-    event.preventDefault();
-    const email = $("adminEmail")?.value.trim() || "";
-    const password = $("adminPassword")?.value || "";
-    if (!email || !password) {
-      if ($("adminLoginMessage")) $("adminLoginMessage").textContent = "Informe e-mail e senha.";
-      return;
+  // Dashboard
+  $("dashboardWeek").addEventListener("change", e => { state.dashboardWeek = e.target.value; renderDashboard(); });
+  $("dashboardRefresh").addEventListener("click", e => withButton(e.currentTarget, async () => { await syncAll(); renderDashboard(); toast("Dados atualizados."); }));
+  $("dashboardPdf").addEventListener("click", exportDashboardPDF);
+  $("dashboardJpeg").addEventListener("click", exportDashboardJPEG);
+
+  // Programação
+  $("programActivity").addEventListener("change", e => { Object.assign(state.program, { activityId: e.target.value, week: "", page: 0 }); renderProgramacao(); });
+  $("programWeekFilter").addEventListener("change", e => { state.program.week = e.target.value; state.program.page = 0; renderProgramacao(); });
+  $("programTeamFilter").addEventListener("change", e => { state.program.team = e.target.value; state.program.page = 0; renderProgramacao(); });
+  $("programStatusFilter").addEventListener("change", e => { state.program.status = e.target.value; state.program.page = 0; renderProgramacao(); });
+  let searchTimer;
+  $("programSearch").addEventListener("input", e => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { state.program.search = e.target.value; state.program.page = 0; renderProgramacao(); }, 200);
+  });
+  $("programTableBody").addEventListener("click", e => {
+    const del = e.target.closest("[data-delete-program]");
+    if (del) deleteProgram(del.dataset.deleteProgram);
+  });
+  $("programPager").addEventListener("click", e => {
+    const b = e.target.closest("[data-page]");
+    if (!b) return;
+    state.program.page += Number(b.dataset.page);
+    renderProgramacao();
+    $("programTableHead").scrollIntoView({ block: "nearest" });
+  });
+  $("programTemplateBtn").addEventListener("click", () => downloadTemplate(activityById(state.program.activityId)));
+  $("programImportBtn").addEventListener("click", () => {
+    if (!activityById(state.program.activityId)) return toast("Cadastre uma atividade primeiro.", "error");
+    $("programFileInput").value = "";
+    $("programFileInput").click();
+  });
+  $("programFileInput").addEventListener("change", e => handleProgramFile(e.target.files?.[0]));
+  $("programExportBtn").addEventListener("click", exportProgramList);
+  $("programNewBtn").addEventListener("click", openProgramModal);
+  $("pfActivity").addEventListener("change", e => renderCustomInputs($("pfCustom"), activityById(e.target.value)));
+  $("programForm").addEventListener("submit", saveProgramForm);
+  $("importConfirm").addEventListener("click", confirmImport);
+  document.querySelectorAll('input[name="importMode"]').forEach(r => r.addEventListener("change", () => {
+    $("importDupWrap").classList.toggle("hidden", r.value === "replace" || !state.pendingImport?.duplicates);
+    setText("importConfirm", document.querySelector('input[name="importMode"]:checked').value === "replace" ? "Substituir e importar" : "Importar");
+  }));
+
+  // Relatórios
+  ["reportWeek", "reportActivity", "reportTeam"].forEach(id => $(id).addEventListener("change", renderReports));
+  $("reportPdf").addEventListener("click", exportReportPDF);
+
+  // Atividades
+  $("activityList").addEventListener("click", e => {
+    const item = e.target.closest("[data-activity]");
+    if (!item) return;
+    state.activityId = item.dataset.activity;
+    renderActivities();
+  });
+  $("activityNewBtn").addEventListener("click", () => openActivityModal());
+  $("activityEditBtn").addEventListener("click", () => openActivityModal(state.activityId));
+  $("activityDeleteBtn").addEventListener("click", deactivateActivity);
+  $("activityForm").addEventListener("submit", saveActivity);
+  $("activityTemplateBtn").addEventListener("click", () => downloadTemplate(activityById(state.activityId)));
+  $("activityPdfBtn").addEventListener("click", exportActivityForm);
+  $("columnNewBtn").addEventListener("click", () => openColumnModal());
+  $("columnForm").addEventListener("submit", saveColumn);
+  $("cfType").addEventListener("change", e => $("cfOptionsWrap").classList.toggle("hidden", e.target.value !== "select"));
+  $("cfLabel").addEventListener("input", e => { if (!state.editingColumnId) $("cfKey").value = makeKey(e.target.value); });
+  $("columnList").addEventListener("click", e => {
+    const move = e.target.closest("[data-move]");
+    const edit = e.target.closest("[data-edit-col]");
+    const del = e.target.closest("[data-delete-col]");
+    if (move) {
+      const activity = activityById(state.activityId);
+      const index = activity.columns.findIndex(c => c.id === move.dataset.col);
+      moveColumn(move.dataset.col, index + Number(move.dataset.move));
     }
-    if (email.toLowerCase() !== "thiagomoraes.projetos@gmail.com") {
-      if ($("adminLoginMessage")) $("adminLoginMessage").textContent = "Esta conta não possui acesso administrativo.";
-      return;
-    }
-    await loginAdmin(email, password);
+    if (edit) openColumnModal(edit.dataset.editCol);
+    if (del) deleteColumn(del.dataset.deleteCol);
   });
+  bindColumnDrag();
 
-  $("technicianLoginForm")?.addEventListener("submit", async event => {
-    event.preventDefault();
-    const code = $("techAccessCode")?.value.trim() || "";
-    if (!code) {
-      if ($("techLoginMessage")) $("techLoginMessage").textContent = "Informe o código de acesso.";
-      return;
-    }
-    await loginTechnician(code);
+  // Equipes e acessos
+  $("peopleSearch").addEventListener("input", renderEquipes);
+  $("peopleBody").addEventListener("click", e => { const b = e.target.closest("[data-edit-person]"); if (b) openPersonModal(b.dataset.editPerson); });
+  $("teamList").addEventListener("click", e => { const b = e.target.closest("[data-toggle-team]"); if (b) toggleTeam(b.dataset.toggleTeam); });
+  $("personNewBtn").addEventListener("click", () => openPersonModal());
+  $("personForm").addEventListener("submit", savePerson);
+  $("psGenerate").addEventListener("click", () => { $("psCode").value = randomAccessCode(); });
+  $("teamForm").addEventListener("submit", saveTeam);
+  $("weekForm").addEventListener("submit", saveWeek);
+
+  // Configurações
+  $("settingsLogo").addEventListener("change", async e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try { state.settings.logo = await readLogo(file); renderSettings(); }
+    catch (error) { setMessage("settingsMessage", error.message); }
   });
+  $("settingsLogoRemove").addEventListener("click", () => { state.settings.logo = ""; $("settingsLogo").value = ""; renderSettings(); });
+  ["settingsPrimary", "settingsHeader", "settingsPlanned", "settingsDone"].forEach(id => $(id).addEventListener("input", () => {
+    Object.assign(state.settings, { primary: $("settingsPrimary").value, header: $("settingsHeader").value, chartPlanned: $("settingsPlanned").value, chartDone: $("settingsDone").value });
+    applySettings();
+    renderSettings();
+  }));
+  $("settingsSave").addEventListener("click", () => { if (saveSettings()) setMessage("settingsMessage", "Configurações salvas neste navegador.", true); });
+  $("settingsReset").addEventListener("click", () => { state.settings = { ...DEFAULT_SETTINGS }; saveSettings(); renderSettings(); setMessage("settingsMessage", "Padrão restaurado.", true); });
 
-  $("downloadProgramTemplateBtn") && ($("downloadProgramTemplateBtn").onclick = downloadProgramTemplate);
-  $("importProgramExcelBtn") && ($("importProgramExcelBtn").onclick = () => { $("programExcelInput").value = ""; $("programExcelInput").click(); });
-  $("programExcelInput")?.addEventListener("change", event => importProgramFile(event.target.files?.[0]));
-
-  $("closeProgramImportModal") && ($("closeProgramImportModal").onclick = closeProgramImportModal);
-  $("cancelProgramImport") && ($("cancelProgramImport").onclick = closeProgramImportModal);
-  $("programImportModal .modal-backdrop") && ($( "programImportModal .modal-backdrop").onclick = closeProgramImportModal);
-  document.querySelectorAll("[data-program-import-mode]").forEach(button => {
-    button.onclick = () => confirmProgramImport(button.dataset.programImportMode);
+  // Campo
+  $("fieldWeekPrev").addEventListener("click", () => changeFieldWeek(-1));
+  $("fieldWeekNext").addEventListener("click", () => changeFieldWeek(1));
+  $("fieldRefresh").addEventListener("click", e => withButton(e.currentTarget, async () => { await syncAll(); renderScreen(); toast("Dados atualizados."); }));
+  $("fieldPdf").addEventListener("click", exportFieldPDF);
+  let fieldTimer;
+  $("fieldSearch").addEventListener("input", e => { clearTimeout(fieldTimer); fieldTimer = setTimeout(() => { state.field.search = e.target.value; renderField(); }, 150); });
+  $("fieldActivity").addEventListener("change", e => { state.field.activity = e.target.value; renderField(); });
+  document.querySelectorAll("[data-field-status]").forEach(b => b.addEventListener("click", () => { state.field.status = b.dataset.fieldStatus; renderField(); }));
+  $("fieldList").addEventListener("click", e => {
+    if (e.target.closest(".check")) return;
+    const task = e.target.closest("[data-task]");
+    if (task) openFieldItem(task.dataset.task);
   });
-
-  $("closeProgramModal") && ($("closeProgramModal").onclick = closeProgramModal);
-  $("cancelProgramModal") && ($("cancelProgramModal").onclick = closeProgramModal);
-  $("programModal .modal-backdrop") && ($("programModal .modal-backdrop").onclick = closeProgramModal);
-  $("programForm")?.addEventListener("submit", event => { event.preventDefault(); createProgramacao(); });
-  $("programActivity") && ($("programActivity").onchange = () => renderProgramCustomFields($("programActivity").value));
-  $("programTeam") && ($("programTeam").onchange = () => { $("programFormMessage") && ($("programFormMessage").textContent = ""); });
-  $("editProgramConfirmation") && ($("editProgramConfirmation").onclick = showProgramEditStep);
-  $("confirmProgramConfirmation") && ($("confirmProgramConfirmation").onclick = confirmProgramacao);
-  document.querySelectorAll("[data-program-mode]").forEach(button => button.onclick = () => setProgramMode(button.dataset.programMode));
-
-  $("refreshDashboard") && ($("refreshDashboard").onclick = async () => { await syncAll(); toast("Dashboard atualizado."); });
-  $("exportDashboardPdfBtn") && ($("exportDashboardPdfBtn").onclick = exportDashboardPDF);
-  $("exportDashboardJpegBtn") && ($("exportDashboardJpegBtn").onclick = exportDashboardJPEG);
-  $("exportTechJpegBtn") && ($("exportTechJpegBtn").onclick = exportTechReportJPEG);
-  $("exportTechPdfBtn") && ($("exportTechPdfBtn").onclick = exportTechReportPDF);
-
-  $("tagSearch")?.addEventListener("input", () => { if ($("clearSearch")) $("clearSearch").style.display = $("tagSearch").value ? "block" : "none"; renderTable(); });
-  $("clearSearch") && ($("clearSearch").onclick = () => { $("tagSearch").value = ""; $("clearSearch").style.display = "none"; renderTable(); });
-  $("sysFilter") && ($("sysFilter").onchange = renderTable);
-  $("subsysFilter") && ($("subsysFilter").onchange = renderTable);
-  $("selectAllTags") && ($("selectAllTags").onchange = toggleSelectAllTags);
-  $("registerSelectedBtn") && ($("registerSelectedBtn").onclick = registerSelectedPontos);
-  $("registerBtn") && ($("registerBtn").onclick = registerPonto);
-  $("repeatBtn") && ($("repeatBtn").onclick = () => $("confirmModal")?.classList.remove("hidden"));
-  ["closeModal", "cancelModal"].forEach(id => { if ($(id)) $(id).onclick = () => $("confirmModal")?.classList.add("hidden"); });
-  $("confirmModal .modal-backdrop") && ($("confirmModal .modal-backdrop").onclick = () => $("confirmModal")?.classList.add("hidden"));
-  $("confirmRepeat") && ($("confirmRepeat").onclick = async () => { $("confirmModal")?.classList.add("hidden"); await registerPonto(); });
-  $("refreshHistory") && ($("refreshHistory").onclick = async () => { await loadData(); populateFilters(); renderTable(); renderHistory(); toast("Dados atualizados."); });
-  $("logoutBtn") && ($("logoutBtn").onclick = logout);
-
-  $("newActivityBtn") && ($("newActivityBtn").onclick = () => openActivityModal());
-  $("editActivityBtn") && ($("editActivityBtn").onclick = () => openActivityModal(state.selectedModuleId));
-  $("deleteActivityBtn") && ($("deleteActivityBtn").onclick = deleteActivity);
-  $("exportActivityPdfTemplate") && ($("exportActivityPdfTemplate").onclick = exportActivityPdfTemplate);
-  $("newColumnBtn") && ($("newColumnBtn").onclick = () => openColumnModal());
-
-  $("closeActivityModal") && ($("closeActivityModal").onclick = closeActivityModal);
-  $("cancelActivityModal") && ($("cancelActivityModal").onclick = closeActivityModal);
-  $("activityModal .modal-backdrop") && ($("activityModal .modal-backdrop").onclick = closeActivityModal);
-  $("activityForm")?.addEventListener("submit", event => { event.preventDefault(); saveActivity(); });
-
-  $("closeColumnModal") && ($("closeColumnModal").onclick = closeColumnModal);
-  $("cancelColumnModal") && ($("cancelColumnModal").onclick = closeColumnModal);
-  $("columnModal .modal-backdrop") && ($("columnModal .modal-backdrop").onclick = closeColumnModal);
-  $("columnForm")?.addEventListener("submit", event => { event.preventDefault(); saveColumn(); });
-  document.querySelectorAll("[data-column-view]").forEach(button => {
-    button.onclick = () => setColumnViewMode(button.dataset.columnView);
+  $("fieldList").addEventListener("change", e => {
+    const box = e.target.closest("[data-select]");
+    if (!box) return;
+    box.checked ? state.field.selected.add(box.dataset.select) : state.field.selected.delete(box.dataset.select);
+    renderField();
   });
-
-  $("closeImportModeModal") && ($("closeImportModeModal").onclick = closeImportModeModal);
-  $("cancelImportMode") && ($("cancelImportMode").onclick = closeImportModeModal);
-  $("importModeModal .modal-backdrop") && ($("importModeModal .modal-backdrop").onclick = closeImportModeModal);
-  document.querySelectorAll("[data-import-mode]").forEach(button => {
-    button.onclick = () => confirmModuleImport(button.dataset.importMode);
+  $("fieldSelectAll").addEventListener("change", e => {
+    filteredFieldPrograms().filter(p => !isDone(p)).forEach(p => e.target.checked ? state.field.selected.add(p.id) : state.field.selected.delete(p.id));
+    renderField();
   });
-
-  $("closeDeleteModuleConfirm") && ($("closeDeleteModuleConfirm").onclick = () => $("deleteModuleConfirm")?.classList.add("hidden"));
-  $("cancelDeleteModule") && ($("cancelDeleteModule").onclick = () => $("deleteModuleConfirm")?.classList.add("hidden"));
-  $("deleteModuleConfirm .modal-backdrop") && ($("deleteModuleConfirm .modal-backdrop").onclick = () => $("deleteModuleConfirm")?.classList.add("hidden"));
-  $("confirmDeleteModule") && ($("confirmDeleteModule").onclick = confirmDeleteActivity);
-
-  $("newAccessBtn") && ($("newAccessBtn").onclick = () => openAccessModal());
-  $("newWeekBtn") && ($("newWeekBtn").onclick = openWeekModal);
-  $("weekPanelNewBtn") && ($("weekPanelNewBtn").onclick = openWeekModal);
-  $("closeWeekModal") && ($("closeWeekModal").onclick = closeWeekModal);
-  $("cancelWeekModal") && ($("cancelWeekModal").onclick = closeWeekModal);
-  $("weekModal .modal-backdrop") && ($("weekModal .modal-backdrop").onclick = closeWeekModal);
-  $("weekForm")?.addEventListener("submit", createWeek);
-  $("closeAccessModal") && ($("closeAccessModal").onclick = closeAccessModal);
-  $("cancelAccessModal") && ($("cancelAccessModal").onclick = closeAccessModal);
-  $("accessModal .modal-backdrop") && ($("accessModal .modal-backdrop").onclick = closeAccessModal);
-  $("accessForm")?.addEventListener("submit", event => { event.preventDefault(); saveAccess(); });
-  $("generateAccessCodeBtn") && ($("generateAccessCodeBtn").onclick = () => { if ($("accessCodeInput")) $("accessCodeInput").value = randomAccessCode(); });
-  $("accessSearch")?.addEventListener("input", renderAccesses);
-  $("teamForm")?.addEventListener("submit", saveTeam);
-
-  $("reportWeekFilter") && ($("reportWeekFilter").onchange = renderReports);
-  $("reportActivityFilter") && ($("reportActivityFilter").onchange = renderReports);
-  $("reportTeamFilter") && ($("reportTeamFilter").onchange = renderReports);
-  $("refreshReports") && ($("refreshReports").onclick = async () => { await syncAll(); renderReports(); });
-  $("exportReportsPdf") && ($("exportReportsPdf").onclick = () => exportStyledPDF(`Relatório analítico • ${$("reportWeekFilter")?.value || "Todas as semanas"}`, reportRowsForDashboard(), `relatorios-${currentWeek()}.pdf`));
+  $("bulkClear").addEventListener("click", () => { state.field.selected.clear(); renderField(); });
+  $("bulkRegister").addEventListener("click", async e => {
+    const button = e.currentTarget;
+    const ids = [...state.field.selected];
+    const ok = await confirmDialog({ title: `Registrar ${ids.length} execução(ões)?`, text: "Todos os itens selecionados serão marcados como executados agora, em seu nome.", okLabel: "Registrar" });
+    if (ok) registerExecution(ids, button);
+  });
+  $("detailRegister").addEventListener("click", e => registerExecution([state.field.activeId], e.currentTarget));
+  $("detailSave").addEventListener("click", saveDetailFields);
+  $("detailClose").addEventListener("click", closeFieldSheet);
 }
 
-/* =========================
-   INIT
-   ========================= */
-
-function ensurePlanningSidebarBehavior() {
-  const sidebar = $("appSidebar"), shell = $("appShell"), toggle = $("sidebarToggle"), mobileBtn = $("mobileMenuBtn");
-  if (!sidebar || !shell) return;
-  let overlay = $("mobileSidebarOverlay");
-  if (!overlay) { overlay = document.createElement("div"); overlay.id = "mobileSidebarOverlay"; overlay.className = "mobile-sidebar-overlay"; document.body.appendChild(overlay); }
-  const closeMobile = () => { sidebar.classList.remove("mobile-open"); overlay.classList.remove("show"); document.body.classList.remove("menu-open"); mobileBtn?.setAttribute("aria-expanded","false"); };
-  const openMobile = () => { if (window.innerWidth > 900) return; sidebar.classList.remove("collapsed"); sidebar.classList.add("mobile-open"); overlay.classList.add("show"); document.body.classList.add("menu-open"); mobileBtn?.setAttribute("aria-expanded","true"); };
-  const apply = collapsed => { sidebar.classList.toggle("collapsed", collapsed); shell.classList.toggle("sidebar-collapsed", collapsed); toggle?.setAttribute("aria-label", collapsed ? "Expandir menu" : "Recolher menu"); };
-  apply(window.innerWidth > 900 && localStorage.getItem("ppaSidebarCollapsed") === "1");
-  if (toggle) toggle.onclick = e => { e.preventDefault(); if (window.innerWidth <= 900) { openMobile(); return; } const next=!sidebar.classList.contains("collapsed"); apply(next); localStorage.setItem("ppaSidebarCollapsed",next?"1":"0"); };
-  if (mobileBtn) mobileBtn.onclick = e => { e.preventDefault(); e.stopPropagation(); sidebar.classList.contains("mobile-open") ? closeMobile() : openMobile(); };
-  overlay.onclick = closeMobile;
-  document.addEventListener("keydown", e => { if (e.key === "Escape") closeMobile(); });
-  document.querySelectorAll(".nav-item[data-screen]").forEach(item => item.addEventListener("click", () => closeMobile()));
-  window.addEventListener("resize", () => { if (window.innerWidth > 900) closeMobile(); });
-}
-
-function ensureNewProgrammingButton() {
-  // A nova programação agora é preenchida diretamente no cabeçalho da tela.
-}
-
-function injectPlanningEnhancementStyles() {
-  if ($("planningEnhancementStyles")) return;
-
-  const style = document.createElement("style");
-  style.id = "planningEnhancementStyles";
-  style.textContent = `
-    /* Planning Pro — ajustes de usabilidade */
-    .app-shell .sidebar{transition:width .22s ease,padding .22s ease}
-    .app-shell .main-content{transition:margin-left .22s ease,width .22s ease}
-    .app-shell.sidebar-collapsed .main-content{width:calc(100% - 76px);margin-left:76px}
-    .app-shell .sidebar.collapsed{width:76px;padding-left:11px;padding-right:11px}
-    .app-shell .sidebar.collapsed .brand{padding-left:5px;padding-right:5px;gap:0}
-    .app-shell .sidebar.collapsed .brand-copy{opacity:0;width:0;overflow:hidden}
-    .app-shell .sidebar.collapsed .nav-item{justify-content:center;padding-left:10px;padding-right:10px}
-    .app-shell .sidebar.collapsed .nav-label{opacity:0;width:0;overflow:hidden}
-    .app-shell .sidebar.collapsed .sidebar-footer{font-size:0;text-align:center;padding-left:0;padding-right:0}
-    .app-shell .sidebar.collapsed .sidebar-footer .online-dot{margin-right:0}
-    .app-shell .sidebar.collapsed .sidebar-toggle svg{transform:rotate(180deg)}
-
-    .programming-header-card{padding:18px;margin-bottom:14px}
-    .programming-header-title{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}
-    .programming-header-title h3{margin:3px 0 0;font-size:16px}
-    .program-inline-form{display:block}
-    .program-required-grid{display:grid;grid-template-columns:1fr 1.35fr 1fr;gap:12px}
-    .program-required-grid label,.program-inline-form>label{display:flex;flex-direction:column;gap:6px;color:#647386;font-size:9px;font-weight:800;letter-spacing:.05em}
-    .program-required-grid select,.program-inline-form textarea{width:100%;border:1px solid #dce4ed;background:#fff;border-radius:9px;padding:10px 11px;color:#25384e;font:inherit;font-size:11px;outline:none}
-    .program-required-grid select:focus,.program-inline-form textarea:focus{border-color:#8fb1e8;box-shadow:0 0 0 3px rgba(11,92,255,.06)}
-    .program-inline-form .dynamic-form-grid{margin:12px 0}
-    .program-inline-form>label{margin-top:12px}
-    .program-inline-actions{display:flex;justify-content:flex-end;margin-top:14px}
-    .program-list-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 18px 10px}
-    .program-list-head h3{margin:3px 0 0;font-size:15px}
-    @media(max-width:820px){.program-required-grid{grid-template-columns:1fr}.programming-header-title,.program-list-head{align-items:flex-start;flex-direction:column}}
-    .program-confirmation-step{display:block}
-    .program-stepper{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;background:#f3f6fa;border:1px solid #e3e9f0;border-radius:11px;margin-bottom:18px}
-    .program-step{border:0;background:transparent;color:#8793a2;padding:9px 10px;border-radius:8px;font-size:9px;font-weight:800;cursor:default}
-    .program-step.active{background:#fff;color:var(--sys-primary,var(--primary,#0b5cff));box-shadow:0 2px 7px rgba(15,35,60,.06)}
-    .program-confirmation-head{margin-bottom:14px}
-    .program-confirmation-head h3{margin:3px 0 6px;font-size:18px}
-    .program-confirmation-head p{margin:0;color:#718096;font-size:10px;line-height:1.5}
-    .program-confirmation-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:14px}
-    .program-confirmation-card{padding:11px 12px;border:1px solid #e5ebf1;background:#f9fbfd;border-radius:11px;min-width:0}
-    .program-confirmation-card span{display:block;color:#8591a0;font-size:7px;font-weight:800;letter-spacing:.1em;margin-bottom:5px}
-    .program-confirmation-card strong{display:block;color:#25384e;font-size:11px;line-height:1.35;word-break:break-word}
-    .program-flag-box{border:1px solid #dfe7f0;background:#fbfcfe;border-radius:13px;padding:13px;margin-bottom:10px}
-    .program-flag-box>div:first-child strong{display:block;font-size:10px;color:#2d4056;margin-top:2px}
-    .program-flag-box>div:first-child small{display:block;color:#8793a1;font-size:8px;line-height:1.45;margin-top:4px}
-    .program-flag-options{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
-    .program-flag{border:1px solid #dce4ed;background:#fff;border-radius:10px;padding:10px;text-align:left;display:grid;grid-template-columns:24px 1fr;gap:0 8px;transition:.15s;cursor:pointer}
-    .program-flag>span{grid-row:1 / span 2;width:24px;height:24px;border-radius:7px;background:#edf2f7;color:#718096;display:grid;place-items:center;font-size:13px;font-weight:800}
-    .program-flag strong{font-size:9px;color:#44566b;align-self:end}
-    .program-flag small{font-size:7px;color:#8793a1;line-height:1.35;margin-top:2px}
-    .program-flag.active{border-color:#9dbdf5;background:#f6f9ff;box-shadow:0 0 0 2px rgba(11,92,255,.05)}
-    .program-flag.active>span{background:var(--sys-primary,var(--primary,#0b5cff));color:#fff}
-    .program-flag.active strong{color:var(--sys-primary,var(--primary,#0b5cff))}
-    .program-confirmation-actions{margin-top:15px}
-    .profile-extra-row strong{max-width:70%;text-align:right;word-break:break-word}
-    @media(max-width:720px){
-      .app-shell.sidebar-collapsed .main-content{width:100%;margin-left:0}
-      .app-shell .sidebar.collapsed{width:76px}
-      .program-confirmation-grid,.program-flag-options{grid-template-columns:1fr}
-      .profile-extra-row{align-items:flex-start}
-    }
-  `;
-  document.head.appendChild(style);
-}
-
-function enhancePlanningUI() {
-  injectPlanningEnhancementStyles();
-  ensurePlanningSidebarBehavior();
-  ensureNewProgrammingButton();
-  ensureProgramConfirmationUI();
-  hydrateProfileUI();
-}
+/* =========================================================
+   INICIALIZAÇÃO
+   ========================================================= */
 
 async function init() {
-  setupSidebar();
-  enhancePlanningUI();
+  applyTheme();
   loadSettings();
-  loadModuleCatalog();
-  loadProgramHistory();
+  if (localStorage.getItem("ppaSidebarCollapsed") === "1") $("appShell").classList.add("collapsed");
   bindEvents();
 
-  if ($("currentDateTime")) $("currentDateTime").textContent = nowBR();
-  if ($("currentWeek")) $("currentWeek").textContent = activeDashboardWeek();
-  setColumnViewMode(state.columnViewMode);
+  // Remove chaves de versões antigas que guardavam dados de negócio no navegador.
+  ["ppaModules", "ppaModuleRecords", "ppaProgramacoes", "ppaImportedRows", "ppaProgramHistory", "ppaSession", "ppaCurrentWeek", "ppaColumnViewMode"]
+    .forEach(key => { localStorage.removeItem(key); sessionStorage.removeItem(key); });
 
-  const sb = getSupabaseClient();
-  if (!sb) {
-    console.error("Supabase não está configurado. Confira supabase-config.js.");
-    backToAccessChooser();
+  if (!db()) {
+    showLoginStep("chooser");
+    setMessage("adminLoginMessage", "Supabase não configurado. Verifique supabase-config.js.");
+    toast("Supabase não configurado. Verifique supabase-config.js.", "error");
     return;
   }
 
-  const savedSession = sessionStorage.getItem("ppaSession");
-  if (savedSession) {
-    try {
-      const cached = JSON.parse(savedSession);
-      if (cached?.role && ROLE_LABELS[cached.role]) {
-        const authenticated = await loadAuthenticatedProfile();
-        if (authenticated && state.currentUser) {
-          showAppForRole(state.currentUser.role);
-          await syncAll();
-          return;
-        }
-      }
-    } catch (error) {
-      console.warn("Sessão armazenada inválida:", error);
-    }
-  }
-
-  const authenticated = await loadAuthenticatedProfile();
-  if (authenticated && state.currentUser) {
-    showAppForRole(state.currentUser.role);
-    await syncAll();
-    return;
-  }
-
-  backToAccessChooser();
+  const user = await restoreSession();
+  if (user) await enterApp(user);
+  else showLoginStep("chooser");
 }
 
-setInterval(() => {
-  if ($("currentDateTime")) $("currentDateTime").textContent = nowBR();
-  if ($("currentWeek")) $("currentWeek").textContent = activeDashboardWeek();
-}, 1000);
-
 init().catch(error => {
-  console.error("Falha na inicialização do Planning Pro:", error);
-  backToAccessChooser();
+  console.error("Falha na inicialização:", error);
+  showLoginStep("chooser");
+  toast(dbErrorMessage(error, "Falha ao iniciar o sistema."), "error");
 });

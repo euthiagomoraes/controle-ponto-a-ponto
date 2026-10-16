@@ -2,893 +2,749 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#07111f">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0d131c" media="(prefers-color-scheme: dark)">
   <title>Planning Pro</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./styles.css">
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./supabase-config.js"></script>
 </head>
 <body>
 
-<!-- =========================
-     LOGIN / ACCESS SELECTOR
-     ========================= -->
-<div id="loginScreen" class="login-screen">
-  <div class="login-shell">
+<!-- Ícones reutilizados via <use href="#i-..."> -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-dashboard" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17M8 14h2M14 14h2M8 17.5h2"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 3.5v5h5M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14a6 6 0 0 1 3.5 6"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V11M10 20V5M16 20v-6M21 20H3"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></symbol>
+    <symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 10h6M9 14h6M9 18h3"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v12M7 11l5 5 5-5M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+    <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.2"/><circle cx="15" cy="6" r="1.2"/><circle cx="9" cy="12" r="1.2"/><circle cx="15" cy="12" r="1.2"/><circle cx="9" cy="18" r="1.2"/><circle cx="15" cy="18" r="1.2"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 19 6v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3Z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-helmet" viewBox="0 0 24 24"><path d="M4 16a8 8 0 0 1 16 0"/><path d="M10 8.5V5h4v3.5M2.5 16h19v2.5h-19z"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8l-5-5Z"/><path d="M14 3v5h5"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10"/></symbol>
+    <symbol id="i-collapse" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 10l-2 2 2 2"/></symbol>
+  </defs>
+</svg>
+
+<!-- =========================================================
+     LOGIN
+     ========================================================= -->
+<div id="loginScreen" class="login">
+  <div class="login-panel">
     <div class="login-brand">
-      <div class="brand-mark large">PP</div>
-      <div>
-        <strong>Planning Pro</strong>
-        <span>Controle de Atividades</span>
-      </div>
+      <span class="brand-mark" data-brand-mark>PP</span>
+      <div><strong>Planning Pro</strong><span>Programação de atividades de campo</span></div>
     </div>
 
-    <div id="accessChooser" class="login-card access-card">
-      <p class="eyebrow">ACESSO AO SISTEMA</p>
-      <h1>Bem Vindo</h1>
-      <p class="login-subtitle">Escolha o ambiente correspondente ao seu perfil de acesso.</p>
-
-      <div class="access-grid">
-        <button class="access-option" data-role="admin">
-          <span class="access-icon">
-  <svg viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3Z"/>
-    <path d="M9 12l2 2 4-4"/>
-  </svg>
-</span>
-          <span class="access-copy">
-            <strong>Administrador</strong>
-            <small>Dashboard, programação e gestão do sistema</small>
-          </span>
-          <span class="access-arrow">→</span>
+    <div id="accessChooser" class="login-step">
+      <h1>Entrar</h1>
+      <p class="muted">Escolha o seu tipo de acesso.</p>
+      <div class="access-list">
+        <button class="access-option" type="button" data-role="admin">
+          <span class="access-icon"><svg class="icon"><use href="#i-shield"/></svg></span>
+          <span><strong>Planejamento</strong><small>Programação, atividades, equipes e indicadores</small></span>
+          <svg class="icon chevron"><use href="#i-right"/></svg>
         </button>
-        <button class="access-option" data-role="technician">
-          <span class="access-icon">
-  <svg viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M6 3h12v5a6 6 0 0 1-12 0V3Z"/>
-    <path d="M8 14v7h8v-7"/>
-    <path d="M9 18h6"/>
-  </svg>
-</span>
-          <span class="access-copy">
-            <strong>Técnico de campo</strong>
-            <small>Atividades, ponto a ponto e histórico</small>
-          </span>
-          <span class="access-arrow">→</span>
+        <button class="access-option" type="button" data-role="technician">
+          <span class="access-icon field"><svg class="icon"><use href="#i-helmet"/></svg></span>
+          <span><strong>Equipe de campo</strong><small>Atividades da semana e registro de execução</small></span>
+          <svg class="icon chevron"><use href="#i-right"/></svg>
         </button>
       </div>
-
-      <small class="login-footnote">Os acessos e permissões devem ser validados no backend.</small>
     </div>
 
-    <div id="adminLoginCard" class="login-card role-login hidden">
-      <button class="back-login" data-back-login>← Voltar</button>
-      <span class="role-chip admin">ACESSO ADMINISTRATIVO</span>
-      <h1>Entrar como Administrador</h1>
-      <p class="login-subtitle">Acesse indicadores e programação de atividades.</p>
-      <form id="adminLoginForm">
-        <label>E-mail
-          <input id="adminEmail" type="email" autocomplete="username" placeholder="seu@email.com" required>
-        </label>
-        <label>Senha
-          <input id="adminPassword" type="password" autocomplete="current-password" placeholder="Digite sua senha" required>
-        </label>
-        <button class="primary-btn full" type="submit">Entrar no painel</button>
-        <p id="adminLoginMessage" class="form-message"></p>
-      </form>
-      <small class="login-footnote"></small>
-    </div>
+    <form id="adminLoginForm" class="login-step hidden" novalidate>
+      <button class="link-btn" type="button" data-back-login><svg class="icon"><use href="#i-left"/></svg> Voltar</button>
+      <h1>Planejamento</h1>
+      <p class="muted">Acesse com o e-mail e a senha cadastrados.</p>
+      <label class="field">E-mail
+        <input id="adminEmail" type="email" autocomplete="username" placeholder="nome@empresa.com" required>
+      </label>
+      <label class="field">Senha
+        <input id="adminPassword" type="password" autocomplete="current-password" required>
+      </label>
+      <button class="btn primary block" type="submit">Entrar</button>
+      <p id="adminLoginMessage" class="form-message" role="alert"></p>
+    </form>
 
-    <div id="technicianLoginCard" class="login-card role-login hidden">
-      <button class="back-login" data-back-login>← Voltar</button>
-      <span class="role-chip tech">ACESSO DE CAMPO</span>
-      <h1>Entrar como Técnico</h1>
-      <p class="login-subtitle">Use o código de acesso liberado pelo administrador.</p>
-      <form id="technicianLoginForm">
-        <label>Código de acesso
-          <input id="techAccessCode" inputmode="numeric" autocomplete="one-time-code" placeholder="Digite seu código" required>
-        </label>
-        <button class="primary-btn full" type="submit">Entrar na operação</button>
-        <p id="techLoginMessage" class="form-message"></p>
-      </form>
-      <small class="login-footnote">Na integração final, validar <strong>tb_acessos</strong> + permissões.</small>
-    </div>
+    <form id="technicianLoginForm" class="login-step hidden" novalidate>
+      <button class="link-btn" type="button" data-back-login><svg class="icon"><use href="#i-left"/></svg> Voltar</button>
+      <h1>Equipe de campo</h1>
+      <p class="muted">Informe o código de acesso fornecido pelo planejamento.</p>
+      <label class="field">Código de acesso
+        <input id="techAccessCode" class="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="12" placeholder="••••••" required>
+      </label>
+      <button class="btn primary block" type="submit">Entrar</button>
+      <p id="techLoginMessage" class="form-message" role="alert"></p>
+    </form>
   </div>
 </div>
 
-<!-- =========================
+<!-- =========================================================
      APP SHELL
-     ========================= -->
-<div id="appShell" class="app-shell hidden">
-  <aside class="sidebar" id="appSidebar">
-    <div class="brand">
-      <div class="brand-mark">PP</div>
-      <div class="brand-copy"><strong>CONTROLE</strong><span>Ponto a Ponto</span></div>
-      <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="Recolher menu" title="Recolher menu">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6 9 12l6 6"/></svg>
-      </button>
+     ========================================================= -->
+<div id="appShell" class="shell hidden">
+  <aside id="sidebar" class="sidebar" aria-label="Navegação">
+    <div class="sidebar-head">
+      <span class="brand-mark" data-brand-mark>PP</span>
+      <div class="brand-copy"><strong>Planning Pro</strong><span id="sidebarRole">—</span></div>
+      <button id="sidebarToggle" class="icon-btn sidebar-toggle" type="button" aria-label="Recolher menu" title="Recolher menu"><svg class="icon"><use href="#i-collapse"/></svg></button>
     </div>
 
-    <nav id="adminNav" class="side-nav hidden">
-      <button class="nav-item active" data-screen="dashboard" title="Dashboard">
-        <span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span><span class="nav-label">Dashboard</span>
-      </button>
-      <button class="nav-item" data-screen="programacao" title="Programação">
-        <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M7 3v3M17 3v3M4 9h16M6 5h12a2 2 0 0 1 2 2v12H4V7a2 2 0 0 1 2-2Z"/><path d="M8 13h3M8 17h3M14 13h3M14 17h3"/></svg></span><span class="nav-label">Programação</span>
-      </button>
-      <button class="nav-item" data-screen="atividades" title="Atividades">
-        <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5v-15Z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20M8 7h8M8 11h6"/></svg></span><span class="nav-label">Atividades</span>
-      </button>
-      <button class="nav-item" data-screen="program-history" title="Histórico">
-        <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 5h16v15H4z"/><path d="M8 9h8M8 13h6M8 17h4"/><path d="M17 3v4"/></svg></span><span class="nav-label">Histórico</span>
-      </button>
-      <button class="nav-item" data-screen="acessos" title="Pessoas & Acessos">
-        <span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0M16 11a3 3 0 1 0 0-6M15.5 14.5a5.5 5.5 0 0 1 5 5.5"/></svg></span><span class="nav-label">Pessoas & Acessos</span>
-      </button>
-      <button class="nav-item" data-screen="relatorios" title="Relatórios">
-        <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20V7"/><path d="M2 20h21"/></svg></span><span class="nav-label">Relatórios</span>
-      </button>
-      <button class="nav-item" data-screen="profile" title="Perfil">
-        <span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 21a7 7 0 0 1 14 0"/></svg></span><span class="nav-label">Perfil</span>
-      </button>
+    <nav class="nav" data-nav-role="admin">
+      <span class="nav-section">Planejamento</span>
+      <button class="nav-item" data-screen="dashboard" title="Dashboard"><svg class="icon"><use href="#i-dashboard"/></svg><span>Dashboard</span></button>
+      <button class="nav-item" data-screen="programacao" title="Programação"><svg class="icon"><use href="#i-calendar"/></svg><span>Programação</span></button>
+      <button class="nav-item" data-screen="importacoes" title="Importações"><svg class="icon"><use href="#i-history"/></svg><span>Importações</span></button>
+      <button class="nav-item" data-screen="relatorios" title="Relatórios"><svg class="icon"><use href="#i-chart"/></svg><span>Relatórios</span></button>
+      <span class="nav-section">Cadastros</span>
+      <button class="nav-item" data-screen="atividades" title="Atividades"><svg class="icon"><use href="#i-layers"/></svg><span>Atividades</span></button>
+      <button class="nav-item" data-screen="equipes" title="Equipes e acessos"><svg class="icon"><use href="#i-users"/></svg><span>Equipes e acessos</span></button>
+      <button class="nav-item" data-screen="configuracoes" title="Configurações"><svg class="icon"><use href="#i-settings"/></svg><span>Configurações</span></button>
     </nav>
 
-    <nav id="techNav" class="side-nav hidden">
-      <button class="nav-item" data-screen="dashboard" title="Dashboard">
-        <span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span><span class="nav-label">Dashboard</span>
-      </button>
-      <button class="nav-item active" data-screen="home" title="Início">
-        <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="m3 11 9-8 9 8v9H5a2 2 0 0 1-2-2v-7Z"/><path d="M9 20v-6h6v6"/></svg></span><span class="nav-label">Início</span>
-      </button>
-      <button class="nav-item" data-screen="history" title="Histórico">
-        <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 5h16v15H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg></span><span class="nav-label">Histórico</span>
-      </button>
-      <button class="nav-item" data-screen="profile" title="Perfil">
-        <span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 21a7 7 0 0 1 14 0"/></svg></span><span class="nav-label">Perfil</span>
-      </button>
+    <nav class="nav" data-nav-role="technician">
+      <span class="nav-section">Campo</span>
+      <button class="nav-item" data-screen="campo" title="Atividades da semana"><svg class="icon"><use href="#i-clipboard"/></svg><span>Atividades da semana</span></button>
+      <button class="nav-item" data-screen="historico" title="Histórico"><svg class="icon"><use href="#i-history"/></svg><span>Histórico</span></button>
     </nav>
 
-    <div class="sidebar-footer">
-      <button class="nav-item sidebar-settings-btn admin-only" data-screen="configuracoes" title="Configurações" type="button">
-        <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19 13.5 1.5 1.2-1.7 3-1.8-.7-.3 1.9a7.7 7.7 0 0 1-1.8 1l-1.8-.7-1.7-3L7 13.5a7.4 7.4 0 0 1 0-3L5.5 9.3l1.7-3 1.8.7a7.7 7.7 0 0 1 1.8-1l.3-1.9h3.4l.3 1.9a7.7 7.7 0 0 1 1.8 1l1.8-.7 1.7 3L19 10.5a7.4 7.4 0 0 1 0 3Z"/></svg></span><span class="nav-label">Configurações</span>
+    <div class="sidebar-foot">
+      <button class="nav-item" data-screen="perfil" title="Perfil">
+        <span id="sidebarAvatar" class="avatar sm">—</span>
+        <span class="user-copy"><strong id="sidebarUserName">—</strong><small id="sidebarUserMeta">—</small></span>
       </button>
-      <div class="sidebar-status"><span class="online-dot"></span><span id="sidebarRoleText">Sistema online</span></div>
     </div>
   </aside>
+  <div id="sidebarOverlay" class="sidebar-overlay"></div>
 
-  <main class="main-content">
+  <main class="main">
     <header class="topbar">
-      <button id="mobileMenuBtn" class="mobile-menu-btn ghost-btn" type="button" aria-label="Abrir menu" title="Abrir menu">☰</button>
-      <div>
-        <p id="topbarEyebrow" class="eyebrow">CONTROLE OPERACIONAL</p>
-        <h1 id="topbarTitle">DASHBOARD DE ATIVIDADES</h1>
-        <p id="topbarSubtitle" class="subtitle">Acompanhamento da operação em campo</p>
+      <button id="mobileMenuBtn" class="icon-btn mobile-only" type="button" aria-label="Abrir menu"><svg class="icon"><use href="#i-menu"/></svg></button>
+      <div class="topbar-title">
+        <span id="topbarKicker" class="kicker">—</span>
+        <h1 id="topbarTitle">—</h1>
       </div>
       <div class="topbar-meta">
-        <span id="roleBadge" class="role-top-badge">—</span>
-        <span class="online-badge"><i></i> Online</span>
-        <span id="currentDateTime">--/--/---- --:--</span>
+        <span id="syncStatus" class="sync-status" title="Status da conexão"><i></i><span>Conectado</span></span>
+        <button id="themeToggle" class="icon-btn" type="button" aria-label="Alternar tema" title="Alternar tema claro/escuro"><svg class="icon"><use href="#i-moon"/></svg></button>
       </div>
     </header>
 
-    <!-- =========================
-         ADMIN: DASHBOARD
-         ========================= -->
-    <section id="screen-dashboard" class="screen active-screen">
-      <div class="page-title-row">
+    <!-- ===================== ADMIN · DASHBOARD ===================== -->
+    <section id="screen-dashboard" class="screen" data-title="Dashboard" data-kicker="Visão geral">
+      <div class="page-head">
         <div>
-          <span class="section-kicker">VISÃO GERENCIAL</span>
           <h2>Previsto x realizado</h2>
-          <p>Acompanhe a execução das atividades programadas e o saldo operacional.</p>
+          <p class="muted">Execução da programação na semana selecionada.</p>
         </div>
-        <div class="page-actions">
-          <span class="current-week-chip">Semana <strong id="dashboardWeek">W---</strong></span>
-          <button id="exportDashboardJpegBtn" class="ghost-btn">▣ Exportar JPEG</button><button id="exportDashboardPdfBtn" class="primary-btn">⇩ Exportar PDF</button>
-          <button id="refreshDashboard" class="ghost-btn">↻ Atualizar</button>
-        </div>
-      </div>
-
-
-      <div class="metrics-grid dashboard-metrics">
-        <div class="metric-card card">
-          <span>PREVISTO</span>
-          <strong id="metricPlanned">0</strong>
-          <small>atividades programadas</small>
-        </div>
-        <div class="metric-card card">
-          <span>REALIZADO</span>
-          <strong id="metricDone">0</strong>
-          <small>execuções registradas</small>
-        </div>
-        <div class="metric-card card">
-          <span>SALDO</span>
-          <strong id="metricBalance">0</strong>
-          <small>atividades ainda pendentes</small>
-        </div>
-        <div class="metric-card card">
-          <span>REALIZAÇÃO</span>
-          <strong id="metricRate">0%</strong>
-          <small>realizado sobre o previsto</small>
+        <div class="actions">
+          <label class="inline-select">Semana <select id="dashboardWeek"></select></label>
+          <button id="dashboardRefresh" class="btn ghost" type="button"><svg class="icon"><use href="#i-refresh"/></svg><span>Atualizar</span></button>
+          <button id="dashboardJpeg" class="btn ghost" type="button"><svg class="icon"><use href="#i-image"/></svg><span>JPEG</span></button>
+          <button id="dashboardPdf" class="btn primary" type="button"><svg class="icon"><use href="#i-download"/></svg><span>PDF</span></button>
         </div>
       </div>
 
-      <div class="dashboard-grid dashboard-grid-main">
-        <section class="card chart-card dashboard-main-chart">
-          <div class="list-header">
-            <div>
-              <span class="section-kicker">EVOLUÇÃO SEMANAL</span>
-              <h3>Previsto x Realizado</h3>
-            </div>
-            <span class="legend">
-              <span><i class="legend-dot planned"></i>Previsto</span>
-              <span><i class="legend-dot done"></i>Realizado</span>
-            </span>
-          </div>
-          <div id="weeklyBars" class="weekly-bars"></div>
-        </section>
-
-        <section class="card progress-card">
-          <div>
-            <span class="section-kicker">EXECUÇÃO DA SEMANA</span>
-            <h3>Geral</h3>
-          </div>
-          <div class="progress-ring" id="progressRing">
-            <div class="progress-ring-inner">
-              <strong id="ringRate">0%</strong>
-              <span>realizado</span>
-            </div>
-          </div>
-          <div class="progress-summary">
-            <div><span>Previsto</span><strong id="ringPlanned">0</strong></div>
-            <div><span>Realizado</span><strong id="ringDone">0</strong></div>
-            <div><span>Pendente</span><strong id="ringPending">0</strong></div>
-          </div>
-        </section>
-
+      <div class="kpi-grid">
+        <div class="kpi"><span>Programadas</span><strong id="kpiPlanned">0</strong><small>itens na semana</small></div>
+        <div class="kpi ok"><span>Executadas</span><strong id="kpiDone">0</strong><small>com registro de campo</small></div>
+        <div class="kpi warn"><span>Pendentes</span><strong id="kpiPending">0</strong><small>aguardando execução</small></div>
+        <div class="kpi accent"><span>Realização</span><strong id="kpiRate">0%</strong><div class="meter"><i id="kpiRateBar"></i></div></div>
       </div>
-      <div class="dashboard-grid dashboard-grid-secondary">
-        <section class="card chart-card dashboard-detail-card">
-          <div class="list-header"><div><span class="section-kicker">ATIVIDADES</span><h3>Desempenho por atividade</h3></div></div>
-          <div id="activityBreakdownRows" class="breakdown-list"></div>
+
+      <div class="grid-2-1">
+        <section class="card">
+          <div class="card-head">
+            <div><h3>Evolução semanal</h3><p class="muted sm">Últimas semanas com programação</p></div>
+            <div class="legend"><span><i class="dot planned"></i>Previsto</span><span><i class="dot done"></i>Realizado</span></div>
+          </div>
+          <div id="dashboardWeekly" class="bar-chart"></div>
         </section>
-        <section class="card chart-card dashboard-detail-card">
-          <div class="list-header"><div><span class="section-kicker">EQUIPES</span><h3>Execução por equipe</h3></div></div>
-          <div id="dashboardTeamRows" class="breakdown-list"></div>
+        <section class="card">
+          <div class="card-head"><div><h3>Por equipe</h3><p class="muted sm">Semana selecionada</p></div></div>
+          <div id="dashboardTeams" class="progress-list"></div>
         </section>
       </div>
+
+      <section class="card">
+        <div class="card-head"><div><h3>Por atividade</h3><p class="muted sm">Semana selecionada</p></div></div>
+        <div id="dashboardActivities" class="progress-list cols"></div>
+      </section>
     </section>
 
-    <!-- =========================
-         ADMIN: PROGRAMAÇÃO
-         ========================= -->
-    <section id="screen-programacao" class="screen">
-      <div class="page-title-row">
+    <!-- ===================== ADMIN · PROGRAMAÇÃO ===================== -->
+    <section id="screen-programacao" class="screen" data-title="Programação" data-kicker="Planejamento">
+      <div class="page-head">
         <div>
-          <span class="section-kicker">PLANEJAMENTO</span>
           <h2>Programação de atividades</h2>
-          <p>Preencha os campos obrigatórios e confirme a programação antes de gravar.</p>
+          <p class="muted">Escolha a atividade: as colunas da tabela, do template e da importação seguem a estrutura dela.</p>
         </div>
-        <div class="page-actions">
-          <button id="downloadProgramTemplateBtn" class="ghost-btn">⇩ Baixar template Excel</button>
-          <button id="importProgramExcelBtn" class="primary-btn">⇧ Importar Excel</button>
-          <input id="programExcelInput" type="file" accept=".xlsx,.xls,.csv" class="hidden">
+        <div class="actions">
+          <button id="programTemplateBtn" class="btn ghost" type="button"><svg class="icon"><use href="#i-download"/></svg><span>Template Excel</span></button>
+          <button id="programImportBtn" class="btn ghost" type="button"><svg class="icon"><use href="#i-upload"/></svg><span>Importar Excel</span></button>
+          <button id="programNewBtn" class="btn primary" type="button"><svg class="icon"><use href="#i-plus"/></svg><span>Nova programação</span></button>
+          <input id="programFileInput" type="file" accept=".xlsx,.xls,.csv" hidden>
         </div>
       </div>
 
-      <section class="card programming-header-card">
-        <div class="programming-header-title">
-          <div><span class="section-kicker">NOVA PROGRAMAÇÃO</span><h3>Definição da programação</h3></div>
-          <span class="tag-badge">CAMPOS OBRIGATÓRIOS</span>
-        </div>
-        <form id="programForm" class="program-inline-form">
-          <div class="program-required-grid">
-            <label>Semana *
-              <select id="programWeek" required></select>
-            </label>
-            <label>Atividade *
-              <select id="programActivity" required></select>
-            </label>
-            <label>Equipe *
-              <select id="programTeam" required></select>
-            </label>
-          </div>
-          <div id="programCustomFields" class="dynamic-form-grid"></div>
-          <label>Observação
-            <textarea id="programNote" rows="2" maxlength="250" placeholder="Detalhes adicionais da programação..."></textarea>
-          </label>
-          <p id="programFormMessage" class="form-message"></p>
-          <div class="program-inline-actions">
-            <button type="submit" class="primary-btn">Continuar para confirmação →</button>
-          </div>
-        </form>
-
-        <section id="programConfirmationStep" class="program-confirmation-step hidden">
-          <div class="program-stepper" role="tablist" aria-label="Etapas da programação">
-            <button type="button" class="program-step" data-program-step="edit">1. Dados</button>
-            <button type="button" class="program-step active" data-program-step="confirm">2. Confirmar</button>
-          </div>
-          <div class="program-confirmation-head">
-            <span class="section-kicker">CONFIRMAÇÃO DA PROGRAMAÇÃO</span>
-            <h3>Confira antes de gravar</h3>
-            <p>A programação somente será gravada no banco após clicar em <strong>Confirmar</strong>.</p>
-          </div>
-          <div class="program-confirmation-grid">
-            <div class="program-confirmation-card"><span>SEMANA</span><strong id="confirmProgramWeek">—</strong></div>
-            <div class="program-confirmation-card"><span>ATIVIDADE</span><strong id="confirmProgramActivity">—</strong></div>
-            <div class="program-confirmation-card"><span>EQUIPE</span><strong id="confirmProgramTeam">—</strong></div>
-          </div>
-          <div class="program-flag-box">
-            <div>
-              <span class="section-kicker">FLAG DA PROGRAMAÇÃO</span>
-              <strong>Como esta programação deve ser registrada?</strong>
-              <small>As duas opções são cumulativas e não apagam programações anteriores.</small>
-            </div>
-            <div class="program-flag-options" role="group" aria-label="Flag da programação">
-              <button type="button" class="program-flag active" data-program-mode="incluir"><span>＋</span><strong>Incluir</strong><small>Adicionar ao planejamento existente</small></button>
-              <button type="button" class="program-flag" data-program-mode="nova"><span>＋</span><strong>Nova Programação</strong><small>Registrar uma nova programação</small></button>
-            </div>
-          </div>
-          <p id="programConfirmationMessage" class="form-message"></p>
-          <div class="modal-actions program-confirmation-actions">
-            <button type="button" id="editProgramConfirmation" class="secondary-btn">Editar</button>
-            <button type="button" id="confirmProgramConfirmation" class="primary-btn">Confirmar</button>
-          </div>
-        </section>
-      </section>
-
-      <div class="program-import-hint">
-        <span>As programações abaixo permanecem acumuladas no sistema.</span>
-        <span>Use <strong>Incluir</strong> ou <strong>Nova Programação</strong> na confirmação conforme a intenção do lançamento.</span>
+      <div class="toolbar card">
+        <label class="field compact grow-2">Atividade <select id="programActivity"></select></label>
+        <label class="field compact">Semana <select id="programWeekFilter"></select></label>
+        <label class="field compact">Equipe <select id="programTeamFilter"></select></label>
+        <label class="field compact">Situação
+          <select id="programStatusFilter"><option value="">Todas</option><option value="pending">Pendentes</option><option value="done">Executadas</option></select>
+        </label>
+        <label class="field compact grow-2">Busca
+          <span class="search"><svg class="icon"><use href="#i-search"/></svg><input id="programSearch" type="search" placeholder="TAG, equipe, observação…"></span>
+        </label>
       </div>
 
-      <section class="card program-table-card">
-        <div class="program-list-head">
-          <div><span class="section-kicker">PROGRAMAÇÕES CADASTRADAS</span><h3>Lista de atividades programadas</h3></div>
-          <div class="program-summary"><span><b id="programCount">0</b> programações</span></div>
+      <section class="card flush">
+        <div class="card-head padded">
+          <div><h3 id="programTableTitle">Programações</h3><p id="programTableMeta" class="muted sm">—</p></div>
+          <button id="programExportBtn" class="btn ghost sm" type="button"><svg class="icon"><use href="#i-download"/></svg><span>Exportar lista</span></button>
         </div>
-        <div class="table-wrap large-table">
-          <table>
-            <thead><tr><th>SEMANA</th><th>ATIVIDADE</th><th>EQUIPE</th><th>OBSERVAÇÃO</th><th></th></tr></thead>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead id="programTableHead"></thead>
             <tbody id="programTableBody"></tbody>
           </table>
-          <div id="programEmpty" class="empty-state hidden"><div>□</div><strong>Nenhuma programação encontrada</strong><span>Cadastre uma nova programação acima.</span></div>
         </div>
+        <div id="programEmpty" class="empty hidden">
+          <svg class="icon xl"><use href="#i-calendar"/></svg>
+          <strong>Nenhuma programação encontrada</strong>
+          <span>Ajuste os filtros, importe um Excel ou cadastre uma nova programação.</span>
+        </div>
+        <div id="programPager" class="pager"></div>
       </section>
     </section>
 
-    <!-- =========================
-         TECHNICIAN: POINT TO POINT
-         ========================= -->
-    <section id="screen-home" class="screen">
-      <div class="week-banner card">
+    <!-- ===================== ADMIN · IMPORTAÇÕES ===================== -->
+    <section id="screen-importacoes" class="screen" data-title="Importações" data-kicker="Planejamento">
+      <div class="page-head">
         <div>
-          <span class="section-kicker">PROGRAMAÇÃO DE CAMPO</span>
-          <strong>SEMANA ATUAL: <b id="currentWeek">W---</b></strong>
-          <p>Somente equipamentos programados para esta semana são exibidos.</p>
+          <h2>Histórico de importações</h2>
+          <p class="muted">Cargas registradas no banco, agrupadas por arquivo e momento da importação.</p>
         </div>
-        <div class="page-actions tech-report-actions"><button id="exportTechJpegBtn" class="ghost-btn">▣ Exportar gráfico JPEG</button><button id="exportTechPdfBtn" class="primary-btn">⇩ Exportar relatório PDF</button></div>
       </div>
-
-      <div class="filters card">
-        <div class="search-box">
-          <span class="search-icon">⌕</span>
-          <input id="tagSearch" type="search" placeholder="Pesquisar por TAG..." autocomplete="off">
-          <button id="clearSearch" class="clear-search" aria-label="Limpar busca">×</button>
-        </div>
-        <label class="select-field">SYS
-          <select id="sysFilter"><option value="">Todos</option></select>
-        </label>
-        <label class="select-field">SUBSYS
-          <select id="subsysFilter"><option value="">Todos</option></select>
-        </label>
-      </div>
-
-      <div class="technician-mobile-shell">
-        <div class="tech-mobile-filter-bar card">
-          <div class="search-box">
-            <span class="search-icon">⌕</span>
-            <input id="tagSearch" type="search" placeholder="Pesquisar atividade, TAG ou campo..." autocomplete="off">
-            <button id="clearSearch" class="clear-search" aria-label="Limpar busca">×</button>
-          </div>
-          <label class="select-field">Atividade
-            <select id="sysFilter"><option value="">Todas</option></select>
-          </label>
-          <label class="select-field">Equipe
-            <select id="subsysFilter"><option value="">Todas</option></select>
-          </label>
-        </div>
-
-        <section class="technician-focus-card card">
-          <div class="card-heading">
-            <div><span class="section-kicker">ATIVIDADE SELECIONADA</span><h2 id="selectedTagTitle">Selecione uma atividade</h2><p id="selectedActivitySubtitle">Os campos abaixo seguem exatamente a configuração criada pelo Administrador.</p></div>
-            <span id="selectedBadge" class="tag-badge">AGUARDANDO</span>
-          </div>
-          <div id="technicianActivityDetail" class="technician-activity-detail"></div>
-          <div id="technicianCustomFields" class="dynamic-fields-grid"></div>
-          <div class="action-area">
-            <button id="registerBtn" class="primary-btn" disabled>✓ &nbsp;Registrar execução</button>
-            <button id="repeatBtn" class="secondary-btn" disabled>↻ &nbsp;Repetir execução</button>
-          </div>
-          <p id="actionMessage" class="action-message" role="status"></p>
-        </section>
-
-        <section class="technician-list-card card">
-          <div class="list-header">
-            <div><span class="section-kicker">OPERAÇÃO DE CAMPO</span><h2>Atividades da semana</h2><small id="technicianActivityHint">Cada atividade usa a estrutura cadastrada pelo Administrador.</small></div>
-            <div class="tech-bulk-actions">
-              <label class="select-all-label"><input id="selectAllTags" type="checkbox"> Selecionar todos</label>
-              <button id="registerSelectedBtn" class="primary-btn" disabled>✓ Registrar selecionados (<span id="selectedCount">0</span>)</button>
-            </div>
-            <div class="counters">
-              <span><b id="totalCount">0</b> programados</span>
-              <span class="counter-done"><b id="doneCount">0</b> executados</span>
-              <span class="counter-pending"><b id="pendingCount">0</b> pendentes</span>
-            </div>
-          </div>
-          <div id="technicianActivityCards" class="technician-activity-cards"></div>
-          <div id="emptyState" class="empty-state hidden">
-            <div>⌕</div><strong>Nenhuma atividade encontrada</strong>
-            <span>Ajuste a busca, atividade ou equipe.</span>
-          </div>
-        </section>
-      </div>
+      <div id="importHistory" class="stack"></div>
     </section>
 
-    <!-- =========================
-         TECHNICIAN: HISTORY
-         ========================= -->
-    <section id="screen-history" class="screen">
-      <div class="page-title-row">
-        <div><span class="section-kicker">AUDITORIA</span><h2>Histórico de registros</h2><p>Histórico consolidado das execuções em campo.</p></div>
-        <button id="refreshHistory" class="ghost-btn">↻ Atualizar</button>
+    <!-- ===================== ADMIN · RELATÓRIOS ===================== -->
+    <section id="screen-relatorios" class="screen" data-title="Relatórios" data-kicker="Análise">
+      <div class="page-head">
+        <div>
+          <h2>Relatórios</h2>
+          <p class="muted">Recorte a programação por semana, atividade e equipe.</p>
+        </div>
+        <div class="actions">
+          <button id="reportPdf" class="btn primary" type="button"><svg class="icon"><use href="#i-download"/></svg><span>Exportar PDF</span></button>
+        </div>
       </div>
-      <div class="metrics-grid">
-        <div class="metric-card card"><span>COM LOG</span><strong id="historyDone">0</strong><small>TAGs com pelo menos um registro</small></div>
-        <div class="metric-card card"><span>PENDENTES</span><strong id="historyPending">0</strong><small>TAGs sem registro</small></div>
-        <div class="metric-card card"><span>PROGRAMADOS</span><strong id="historyTotal">0</strong><small>equipamentos da semana</small></div>
+
+      <div class="toolbar card">
+        <label class="field compact">Semana <select id="reportWeek"></select></label>
+        <label class="field compact">Atividade <select id="reportActivity"></select></label>
+        <label class="field compact">Equipe <select id="reportTeam"></select></label>
       </div>
-      <section class="log-card card">
-        <div class="list-header"><div><span class="section-kicker">LOGS</span><h3>Últimos registros</h3></div></div>
-        <div id="historyLog" class="history-log"></div>
+
+      <div class="kpi-grid">
+        <div class="kpi"><span>Programadas</span><strong id="reportPlanned">0</strong><small>no recorte</small></div>
+        <div class="kpi ok"><span>Executadas</span><strong id="reportDone">0</strong><small>com registro</small></div>
+        <div class="kpi warn"><span>Pendentes</span><strong id="reportPending">0</strong><small>aguardando</small></div>
+        <div class="kpi accent"><span>Realização</span><strong id="reportRate">0%</strong><div class="meter"><i id="reportRateBar"></i></div></div>
+      </div>
+
+      <section class="card">
+        <div class="card-head">
+          <div><h3>Evolução por semana</h3></div>
+          <div class="legend"><span><i class="dot planned"></i>Previsto</span><span><i class="dot done"></i>Realizado</span></div>
+        </div>
+        <div id="reportWeekly" class="bar-chart"></div>
       </section>
+      <div class="grid-2">
+        <section class="card"><div class="card-head"><h3>Por equipe</h3></div><div id="reportTeams" class="progress-list"></div></section>
+        <section class="card"><div class="card-head"><h3>Por atividade</h3></div><div id="reportActivities" class="progress-list"></div></section>
+      </div>
     </section>
 
-    <!-- =========================
-         ADMIN: HISTÓRICO DE PROGRAMAÇÕES
-         ========================= -->
-    <section id="screen-program-history" class="screen">
-      <div class="page-title-row">
-        <div><span class="section-kicker">AUDITORIA DE PLANEJAMENTO</span><h2>Histórico </h2><p>Registro das cargas de Excel, separando novas programações das inclusões.</p></div>
+    <!-- ===================== ADMIN · ATIVIDADES ===================== -->
+    <section id="screen-atividades" class="screen" data-title="Atividades" data-kicker="Cadastros">
+      <div class="page-head">
+        <div>
+          <h2>Atividades e colunas</h2>
+          <p class="muted">Cada atividade define as próprias colunas. Elas formam o template Excel, a tabela de programação e a tela de campo.</p>
+        </div>
+        <div class="actions">
+          <button id="activityNewBtn" class="btn primary" type="button"><svg class="icon"><use href="#i-plus"/></svg><span>Nova atividade</span></button>
+        </div>
       </div>
-      <div id="programHistoryList" class="program-history-list"></div>
-    </section>
 
-    <!-- =========================
-         ADMIN: ATIVIDADES / MÓDULOS
-         ========================= -->
-    <section id="screen-atividades" class="screen">
-      <div class="page-title-row">
-        <div><span class="section-kicker">ARQUITETURA MODULAR</span><h2>Atividades e módulos</h2><p>Cada atividade funciona como um módulo independente, com colunas próprias e máscara de Excel.</p></div>
-        <div class="page-actions"><button id="newActivityBtn" class="primary-btn">＋ Nova atividade</button></div>
-      </div>
-      <div class="module-layout">
-        <section class="module-list card">
-          <div class="list-header"><div><span class="section-kicker">MÓDULOS</span><h3>Atividades cadastradas</h3></div><span id="moduleCountBadge" class="tag-badge">0</span></div>
-          <div id="moduleCards" class="module-cards"></div>
-        </section>
-        <section class="module-editor card">
-          <div id="moduleEditorEmpty" class="module-empty">
-            <div class="empty-icon">◇</div><strong>Selecione um módulo</strong><span>As colunas personalizadas e a máscara do Excel aparecerão aqui.</span>
+      <div class="split">
+        <aside class="card flush">
+          <div class="card-head padded"><h3>Atividades</h3><span id="activityCount" class="badge">0</span></div>
+          <div id="activityList" class="select-list"></div>
+        </aside>
+
+        <section class="card">
+          <div id="activityEmpty" class="empty">
+            <svg class="icon xl"><use href="#i-layers"/></svg>
+            <strong>Nenhuma atividade selecionada</strong>
+            <span>Crie ou selecione uma atividade para configurar as colunas.</span>
           </div>
-          <div id="moduleEditor" class="hidden">
-            <div class="module-editor-head">
-              <div><span class="section-kicker">CONFIGURAÇÃO DO MÓDULO</span><h3 id="moduleTitle">—</h3><p id="moduleDescription">—</p></div>
-              <div class="module-head-actions"><button id="editActivityBtn" class="ghost-btn">Editar atividade</button><button id="deleteActivityBtn" class="danger-btn">Excluir atividade</button></div>
-            </div>
-            <div class="module-kpis">
-              <div><span>COLUNAS</span><strong id="moduleColumnCount">0</strong></div>
-              <div><span>OBRIGATÓRIAS</span><strong id="moduleRequiredCount">0</strong></div>
-              <div><span>REGISTROS IMPORTADOS</span><strong id="moduleRecordCount">0</strong></div>
-            </div>
-            <div id="activityPdfTemplateActions" class="activity-pdf-actions hidden">
-              <div><span class="section-kicker">MODELO DE RELATÓRIO</span><strong id="activityPdfTemplateTitle">Modelo PDF</strong><small id="activityPdfTemplateDescription">Exporte uma estrutura padrão para uso em campo.</small></div>
-              <button id="exportActivityPdfTemplate" type="button" class="ghost-btn">⇩ Exportar modelo PDF</button>
-            </div>
-            <div class="column-builder-head"><div><span class="section-kicker">MÁSCARA DO EXCEL</span><h4>Colunas personalizadas</h4><p>Crie, edite, ordene e exclua campos. A mesma estrutura será usada na programação e na importação/exportação.</p></div><button id="newColumnBtn" class="primary-btn">＋ Nova coluna</button></div>
-            <div class="column-view-toolbar">
-              <div><span class="section-kicker">VISUALIZAÇÃO</span><strong>Estrutura das colunas</strong><small>Escolha como o modelo deve aparecer na configuração e no celular.</small></div>
-              <div class="segmented-control" role="group" aria-label="Visualização das colunas">
-                <button type="button" class="view-toggle active" data-column-view="stacked">▤ Empilhadas</button>
-                <button type="button" class="view-toggle" data-column-view="side">▥ Lado a lado</button>
+
+          <div id="activityEditor" class="hidden">
+            <div class="card-head">
+              <div>
+                <h3 id="activityTitle">—</h3>
+                <p id="activityDescription" class="muted sm">—</p>
+              </div>
+              <div class="actions">
+                <button id="activityEditBtn" class="btn ghost sm" type="button"><svg class="icon"><use href="#i-edit"/></svg><span>Editar</span></button>
+                <button id="activityDeleteBtn" class="btn ghost danger sm" type="button"><svg class="icon"><use href="#i-trash"/></svg><span>Desativar</span></button>
               </div>
             </div>
-            <div id="columnViewPreview" class="column-view-preview"></div>
-            <div id="columnRows" class="column-list"></div>
-            <div class="excel-preview-wrap">
-              <div class="excel-preview-head"><div><span class="section-kicker">PRÉ-VISUALIZAÇÃO</span><h4>Máscara que será exportada</h4></div><span id="maskFileName" class="file-chip">—</span></div>
-              <div class="table-wrap excel-preview-table"><table id="maskPreviewTable"></table></div>
-              <p id="importResultMessage" class="form-message"></p>
+
+            <div class="mini-stats">
+              <div><span>Colunas</span><strong id="activityColCount">0</strong></div>
+              <div><span>Obrigatórias</span><strong id="activityReqCount">0</strong></div>
+              <div><span>Editáveis em campo</span><strong id="activityEditCount">0</strong></div>
+              <div><span>Programações</span><strong id="activityProgCount">0</strong></div>
+            </div>
+
+            <div class="section-head">
+              <div>
+                <h4>Colunas</h4>
+                <p class="muted sm">Arraste para reordenar. A ordem é a mesma do template Excel.</p>
+              </div>
+              <div class="actions">
+                <button id="activityTemplateBtn" class="btn ghost sm" type="button"><svg class="icon"><use href="#i-download"/></svg><span>Template</span></button>
+                <button id="activityPdfBtn" class="btn ghost sm" type="button"><svg class="icon"><use href="#i-file"/></svg><span>Formulário PDF</span></button>
+                <button id="columnNewBtn" class="btn primary sm" type="button"><svg class="icon"><use href="#i-plus"/></svg><span>Coluna</span></button>
+              </div>
+            </div>
+
+            <div class="fixed-columns">
+              <span class="muted sm">Colunas fixas do template:</span>
+              <span class="chip">SEMANA *</span><span class="chip">ATIVIDADE *</span><span class="chip">EQUIPE *</span><span class="chip">DATA PREVISTA</span><span class="chip">RESPONSÁVEL</span><span class="chip">OBSERVAÇÃO</span>
+            </div>
+
+            <div id="columnList" class="column-list"></div>
+
+            <div class="section-head">
+              <div><h4>Prévia do template</h4><p class="muted sm" id="templateFileName">—</p></div>
+            </div>
+            <div class="table-scroll bordered"><table id="templatePreview" class="data-table preview"></table></div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- ===================== ADMIN · EQUIPES E ACESSOS ===================== -->
+    <section id="screen-equipes" class="screen" data-title="Equipes e acessos" data-kicker="Cadastros">
+      <div class="page-head">
+        <div>
+          <h2>Equipes, pessoas e semanas</h2>
+          <p class="muted">A coluna EQUIPE do Excel é reconhecida pelo nome cadastrado aqui. O código de acesso é usado no login de campo.</p>
+        </div>
+        <div class="actions">
+          <button id="personNewBtn" class="btn primary" type="button"><svg class="icon"><use href="#i-plus"/></svg><span>Nova pessoa</span></button>
+        </div>
+      </div>
+
+      <div class="grid-2-1">
+        <section class="card flush">
+          <div class="card-head padded">
+            <div><h3>Pessoas</h3><p id="peopleMeta" class="muted sm">—</p></div>
+            <span class="search sm"><svg class="icon"><use href="#i-search"/></svg><input id="peopleSearch" type="search" placeholder="Nome, código ou equipe"></span>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead><tr><th>Nome</th><th>Código</th><th>Equipe</th><th>Perfil</th><th>Status</th><th class="right"></th></tr></thead>
+              <tbody id="peopleBody"></tbody>
+            </table>
+          </div>
+          <div id="peopleEmpty" class="empty hidden"><strong>Nenhuma pessoa encontrada</strong></div>
+        </section>
+
+        <div class="stack">
+          <section class="card">
+            <div class="card-head"><h3>Equipes</h3><span id="teamCount" class="badge">0</span></div>
+            <form id="teamForm" class="form-row" novalidate>
+              <label class="field compact grow-2">Nome<input id="teamName" maxlength="100" placeholder="Equipe A" required></label>
+              <label class="field compact grow-2">Disciplina
+                <select id="teamDiscipline" required>
+                  <option value="">Selecione</option>
+                  <option value="ELETRICA">Elétrica</option>
+                  <option value="INSTRUMENTACAO">Instrumentação</option>
+                  <option value="TUBULACAO">Tubulação</option>
+                  <option value="MECANICA">Mecânica</option>
+                  <option value="AUTOMACAO">Automação</option>
+                  <option value="CIVIL">Civil</option>
+                </select>
+              </label>
+              <button class="btn primary" type="submit"><svg class="icon"><use href="#i-plus"/></svg><span>Adicionar</span></button>
+            </form>
+            <p id="teamMessage" class="form-message" role="status"></p>
+            <div id="teamList" class="row-list"></div>
+          </section>
+
+          <section class="card">
+            <div class="card-head"><h3>Semanas</h3><span id="weekCount" class="badge">0</span></div>
+            <form id="weekForm" class="form-row" novalidate>
+              <label class="field compact grow-2">Nova semana
+                <span class="prefixed"><b>W</b><input id="weekNumber" type="number" min="1" max="9999" inputmode="numeric" placeholder="138" required></span>
+              </label>
+              <button class="btn primary" type="submit"><svg class="icon"><use href="#i-plus"/></svg><span>Criar</span></button>
+            </form>
+            <p id="weekMessage" class="form-message" role="status"></p>
+            <div id="weekList" class="chip-list"></div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== ADMIN · CONFIGURAÇÕES ===================== -->
+    <section id="screen-configuracoes" class="screen" data-title="Configurações" data-kicker="Sistema">
+      <div class="page-head">
+        <div>
+          <h2>Identidade visual</h2>
+          <p class="muted">Cor principal da interface e padrão dos PDFs/JPEGs. As preferências ficam salvas neste navegador.</p>
+        </div>
+      </div>
+      <div class="grid-2">
+        <section class="card">
+          <div class="card-head"><h3>Logo e cores</h3></div>
+          <div class="logo-picker">
+            <div class="logo-box"><img id="settingsLogoPreview" alt="" class="hidden"><span id="settingsLogoPlaceholder">LOGO</span></div>
+            <div class="stack sm">
+              <label class="btn ghost sm file-btn"><svg class="icon"><use href="#i-upload"/></svg><span>Enviar logo</span><input id="settingsLogo" type="file" accept="image/png,image/jpeg,image/webp" hidden></label>
+              <button id="settingsLogoRemove" class="btn ghost sm" type="button">Remover</button>
+              <small class="muted">PNG, JPG ou WebP até 400 KB.</small>
             </div>
           </div>
-        </section>
-      </div>
-    </section>
-
-    <!-- =========================
-         ADMIN: PESSOAS & ACESSOS
-         ========================= -->
-    <section id="screen-acessos" class="screen">
-      <div class="page-title-row">
-        <div><span class="section-kicker">CONTROLE DE ACESSO</span><h2>Pessoas e códigos de acesso</h2><p>Cadastre o usuário de campo, gere seu código e defina o perfil/equipe de atuação.</p></div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><button id="newWeekBtn" class="secondary-btn" type="button">＋ Nova semana</button><button id="newAccessBtn" class="primary-btn">＋ Novo usuário</button></div>
-      </div>
-      <div class="access-admin-grid">
-        <div class="metrics-grid access-metrics">
-          <div class="metric-card card"><span>USUÁRIOS</span><strong id="accessTotal">0</strong><small>pessoas cadastradas</small></div>
-          <div class="metric-card card"><span>ATIVOS</span><strong id="accessActive">0</strong><small>com acesso liberado</small></div>
-          <div class="metric-card card"><span>CÓDIGOS</span><strong id="accessCodes">0</strong><small>códigos gerados</small></div>
-        </div>
-        <section class="card team-register-card">
-          <div class="list-header"><div><span class="section-kicker">CADASTRO DE EQUIPES</span><h3>Equipes de execução</h3><p>Cadastre as equipes aqui para vinculá-las aos técnicos e reconhecer a coluna EQUIPE na importação do Excel.</p></div></div>
-          <form id="teamForm" class="team-register-form">
-            <label>Nome da equipe<input id="teamNameInput" type="text" maxlength="100" placeholder="Ex.: Equipe A" required></label>
-            <label>Disciplina<select id="teamDisciplineInput" required><option value="">Selecione a disciplina</option><option>Elétrica</option><option>Instrumentação</option><option>Tubulação</option><option>Mecânica</option><option>Automação</option><option>Civil</option></select></label>
-            <label>Pessoa vinculada (opcional; altera a equipe atual)<select id="teamPersonInput"><option value="">Sem vínculo inicial</option></select></label>
-            <button id="saveTeamBtn" class="primary-btn" type="submit">＋ Cadastrar equipe</button>
-          </form>
-          <p id="teamFormMessage" class="form-message" role="status"></p>
-          <div class="table-wrap team-table-wrap"><table><thead><tr><th>EQUIPE</th><th>DISCIPLINA</th><th>STATUS</th></tr></thead><tbody id="teamTableBody"></tbody></table><div id="teamEmpty" class="empty-state hidden"><div>＋</div><strong>Nenhuma equipe cadastrada</strong><span>Use o formulário acima para cadastrar a primeira equipe.</span></div></div>
-        </section>
-        <section class="card access-table-card">
-          <div class="list-header"><div><span class="section-kicker">CADASTRO</span><h3>Usuários de campo</h3></div><div class="access-search"><input id="accessSearch" type="search" placeholder="Buscar nome, e-mail ou equipe..."></div></div>
-          <div class="table-wrap large-table"><table><thead><tr><th>NOME</th><th>FUNÇÃO</th><th>E-MAIL</th><th>CÓDIGO</th><th>EQUIPE</th><th>PERFIL</th><th>STATUS</th><th></th></tr></thead><tbody id="accessTableBody"></tbody></table><div id="accessEmpty" class="empty-state hidden"><div>◎</div><strong>Nenhum usuário encontrado</strong><span>Cadastre a primeira pessoa para liberar acesso.</span></div></div>
-        </section>
-        <section class="card week-register-card">
-          <div class="list-header"><div><span class="section-kicker">CADASTRO DE SEMANAS</span><h3>Semanas cadastradas</h3><p>Organize as semanas de programação em pastas expansíveis.</p></div><button id="weekPanelNewBtn" class="secondary-btn" type="button">＋ Nova semana</button></div>
-          <div id="weekFolders" class="week-folders"></div>
-        </section>
-      </div>
-    </section>
-
-    <!-- =========================
-         ADMIN: RELATÓRIOS
-         ========================= -->
-    <section id="screen-relatorios" class="screen">
-      <div class="page-title-row">
-        <div><span class="section-kicker">ANÁLISE GERENCIAL</span><h2>Relatórios</h2><p>Explore a programação por semana, atividade e equipe com indicadores consolidados.</p></div>
-        <div class="page-actions"><button id="refreshReports" class="ghost-btn">↻ Atualizar</button><button id="exportReportsPdf" class="primary-btn">⇩ Exportar PDF</button></div>
-      </div>
-      <div class="filters card report-filters">
-        <label class="select-field">SEMANA<select id="reportWeekFilter"><option value="">Todas</option></select></label>
-        <label class="select-field">ATIVIDADE<select id="reportActivityFilter"><option value="">Todas</option></select></label>
-        <label class="select-field">EQUIPE<select id="reportTeamFilter"><option value="">Todas</option></select></label>
-      </div>
-      <div class="metrics-grid report-metrics">
-        <div class="metric-card card"><span>PREVISTO</span><strong id="reportPlanned">0</strong><small>atividades no recorte</small></div>
-        <div class="metric-card card"><span>REALIZADO</span><strong id="reportDone">0</strong><small>execuções registradas</small></div>
-        <div class="metric-card card"><span>EFICIÊNCIA</span><strong id="reportRate">0%</strong><small>realizado sobre previsto</small></div>
-        <div class="metric-card card"><span>TEAMS</span><strong id="reportTeams">0</strong><small>equipes com atividade</small></div>
-      </div>
-      <div class="reports-grid">
-        <section class="card report-chart-card"><div class="list-header"><div><span class="section-kicker">POR EQUIPE</span><h3>Previsto x realizado</h3></div></div><div id="reportTeamBars" class="report-bars"></div></section>
-        <section class="card report-chart-card"><div class="list-header"><div><span class="section-kicker">POR ATIVIDADE</span><h3>Desempenho</h3></div></div><div id="reportActivityRows" class="breakdown-list"></div></section>
-        <section class="card report-chart-card report-wide"><div class="list-header"><div><span class="section-kicker">EVOLUÇÃO</span><h3>Programado x executado por semana</h3></div></div><div id="reportWeekBars" class="report-bars report-week-bars"></div></section>
-      </div>
-    </section>
-
-    <!-- =========================
-         ADMIN: CONFIGURAÇÕES
-         ========================= -->
-    <section id="screen-configuracoes" class="screen">
-      <div class="page-title-row">
-        <div><span class="section-kicker">IDENTIDADE DO SISTEMA</span><h2>Configurações</h2><p>Personalize a identidade visual dos documentos e do sistema. Apenas Administradores podem alterar estas opções.</p></div>
-      </div>
-      <div class="settings-grid">
-        <section class="card settings-card">
-          <div class="list-header"><div><span class="section-kicker"></span><h3>Identidade Visual</h3></div><span class="tag-badge">ADMIN</span></div>
-          <label>Logo da empresa
-            <input id="settingsLogoInput" type="file" accept="image/png,image/jpeg,image/webp">
-          </label>
-          <div class="settings-logo-preview"><div class="logo-preview-paper"><img id="settingsLogoPreview" alt="Logo" class="hidden"><div id="settingsLogoPlaceholder">LOGO</div></div><div><strong>Pré-visualização</strong><small>PNG, JPG ou WebP. A logo será usada no cabeçalho dos PDFs e JPEGs.</small><button id="removeSettingsLogoBtn" type="button" class="ghost-btn">Remover logo</button></div></div>
-          <div class="settings-color-grid">
-            <label>Cor principal<input id="settingsPrimaryColor" type="color"></label>
-            <label>Cor de destaque<input id="settingsAccentColor" type="color"></label>
-            <label>Cor do cabeçalho<input id="settingsHeaderColor" type="color"></label>
-            <label>Cor de fundo<input id="settingsBgColor" type="color"></label>
-            <label>Gráfico — previsto<input id="settingsChartPlanned" type="color"></label>
-            <label>Gráfico — realizado<input id="settingsChartDone" type="color"></label>
+          <div class="color-grid">
+            <label class="field compact">Cor principal<input id="settingsPrimary" type="color"></label>
+            <label class="field compact">Cabeçalho dos documentos<input id="settingsHeader" type="color"></label>
+            <label class="field compact">Gráfico · previsto<input id="settingsPlanned" type="color"></label>
+            <label class="field compact">Gráfico · realizado<input id="settingsDone" type="color"></label>
           </div>
-          <div class="settings-actions"><button id="resetSettingsBtn" type="button" class="secondary-btn">Restaurar padrão</button><button id="saveSettingsBtn" type="button" class="primary-btn">Salvar configurações</button></div>
-          <p id="settingsMessage" class="form-message"></p>
+          <div class="actions end">
+            <button id="settingsReset" class="btn ghost" type="button">Restaurar padrão</button>
+            <button id="settingsSave" class="btn primary" type="button">Salvar</button>
+          </div>
+          <p id="settingsMessage" class="form-message" role="status"></p>
         </section>
-        <section class="card settings-card">
-          <div><span class="section-kicker">MODELO</span><h3>Prévia do documento</h3><p>O mesmo padrão visual será aplicado ao PDF e ao JPEG.</p></div>
-          <div id="stationeryPreview" class="stationery-preview"><div class="stationery-head"><div class="stationery-logo-box">LOGO</div><div><strong>PLANNING PRO</strong><span>Relatório gerencial</span></div></div><div class="stationery-meta"><span>Semana W136</span><span>Responsável: Administrador</span></div><div class="stationery-summary"><div><small>PREVISTO</small><b>60</b></div><div><small>EXECUTADO</small><b>35</b></div><div><small>PENDENTE</small><b>25</b></div><div><small>EXECUÇÃO</small><b>58%</b></div></div><div class="stationery-table"><span>Atividade</span><span>Prev.</span><span>Exec.</span><span>Pend.</span><b>Ponto a Ponto</b><b>32</b><b>21</b><b>11</b><b>Loop Teste</b><b>16</b><b>10</b><b>6</b></div><footer>Documento gerado pelo Planejamento</footer></div>
+        <section class="card">
+          <div class="card-head"><h3>Prévia do documento</h3></div>
+          <div id="docPreview" class="doc-preview">
+            <div class="doc-head"><span class="doc-logo" id="docPreviewLogo">LOGO</span><div><strong>PLANNING PRO</strong><small>Relatório gerencial · W137</small></div></div>
+            <div class="doc-kpis"><div><small>PREVISTO</small><b>60</b></div><div><small>EXECUTADO</small><b>35</b></div><div><small>PENDENTE</small><b>25</b></div><div><small>REALIZAÇÃO</small><b>58%</b></div></div>
+            <div class="doc-table"><span>Atividade</span><span>Prev.</span><span>Exec.</span><span>Pend.</span><b>Ponto a Ponto</b><b>32</b><b>21</b><b>11</b><b>Loop Teste</b><b>16</b><b>10</b><b>6</b></div>
+          </div>
         </section>
       </div>
     </section>
 
-    <!-- =========================
-         PROFILE
-         ========================= -->
-    <section id="screen-profile" class="screen">
-      <div class="profile-layout">
-        <section class="profile-card card">
-          <div id="profileAvatar" class="avatar">TC</div>
-          <span class="section-kicker">USUÁRIO CONECTADO</span>
-          <h2 id="profileName">Usuário</h2>
-          <p id="profileBadge">—</p>
-          <div class="profile-status"><i></i> Sessão ativa</div>
-        </section>
-        <section class="profile-info card">
-          <span class="section-kicker">PERFIL</span>
-          <div class="info-row"><span>Nome</span><strong id="profileName2">—</strong></div>
-          <div class="info-row"><span>Identificador</span><strong id="profileBadge2">—</strong></div>
-          <div class="info-row"><span>Perfil de acesso</span><strong id="profileRole2">—</strong></div>
-          <div class="info-row profile-week-row"><span>Semana atual</span><label class="profile-week-control"><input id="profileWeekInput" type="text" inputmode="text" maxlength="5" placeholder="W136" aria-label="Semana atual"><small id="profileWeekHelp">Defina a semana atual no padrão W###. Ela será usada no Dashboard.</small></label></div>
-          <button id="logoutBtn" class="logout-btn">Sair da conta</button>
-        </section>
+    <!-- ===================== CAMPO · ATIVIDADES DA SEMANA ===================== -->
+    <section id="screen-campo" class="screen" data-title="Atividades da semana" data-kicker="Campo">
+      <div class="field-hero card">
+        <div class="week-stepper">
+          <button id="fieldWeekPrev" class="icon-btn" type="button" aria-label="Semana anterior"><svg class="icon"><use href="#i-left"/></svg></button>
+          <div><span class="kicker">Semana</span><strong id="fieldWeek">W—</strong></div>
+          <button id="fieldWeekNext" class="icon-btn" type="button" aria-label="Próxima semana"><svg class="icon"><use href="#i-right"/></svg></button>
+        </div>
+        <div class="field-progress">
+          <div class="field-progress-top"><span id="fieldTeamLabel" class="muted">—</span><strong id="fieldProgressText">0 de 0</strong></div>
+          <div class="meter lg"><i id="fieldProgressBar"></i></div>
+          <div class="field-counters">
+            <span><b id="fieldTotal">0</b> programadas</span>
+            <span class="ok"><b id="fieldDone">0</b> executadas</span>
+            <span class="warn"><b id="fieldPending">0</b> pendentes</span>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="fieldRefresh" class="btn ghost sm" type="button"><svg class="icon"><use href="#i-refresh"/></svg><span>Atualizar</span></button>
+          <button id="fieldPdf" class="btn ghost sm" type="button"><svg class="icon"><use href="#i-download"/></svg><span>PDF</span></button>
+        </div>
       </div>
+
+      <div class="field-filters">
+        <span class="search"><svg class="icon"><use href="#i-search"/></svg><input id="fieldSearch" type="search" placeholder="Buscar TAG ou qualquer campo"></span>
+        <select id="fieldActivity" aria-label="Atividade"></select>
+        <div class="segmented" role="group" aria-label="Situação">
+          <button type="button" class="active" data-field-status="">Todas</button>
+          <button type="button" data-field-status="pending">Pendentes</button>
+          <button type="button" data-field-status="done">Executadas</button>
+        </div>
+      </div>
+
+      <div class="field-layout">
+        <div>
+          <div class="list-tools">
+            <label class="check"><input id="fieldSelectAll" type="checkbox"><span>Selecionar pendentes visíveis</span></label>
+            <span id="fieldListMeta" class="muted sm">—</span>
+          </div>
+          <div id="fieldList" class="field-list"></div>
+          <div id="fieldEmpty" class="empty hidden">
+            <svg class="icon xl"><use href="#i-clipboard"/></svg>
+            <strong>Nenhuma atividade encontrada</strong>
+            <span id="fieldEmptyText">Não há programação para esta semana.</span>
+          </div>
+        </div>
+
+        <aside id="fieldDetail" class="field-detail card" aria-live="polite">
+          <div class="sheet-handle mobile-only"></div>
+          <div id="fieldDetailEmpty" class="empty">
+            <svg class="icon xl"><use href="#i-clipboard"/></svg>
+            <strong>Selecione uma atividade</strong>
+            <span>Os dados e o registro de execução aparecem aqui.</span>
+          </div>
+          <div id="fieldDetailBody" class="hidden">
+            <div class="card-head">
+              <div>
+                <span id="detailActivity" class="chip primary">—</span>
+                <h3 id="detailTitle">—</h3>
+                <p id="detailMeta" class="muted sm">—</p>
+              </div>
+              <button id="detailClose" class="icon-btn mobile-only" type="button" aria-label="Fechar"><svg class="icon"><use href="#i-x"/></svg></button>
+            </div>
+            <span id="detailStatus" class="status">—</span>
+            <div id="detailFields" class="detail-fields"></div>
+            <div id="detailSaveRow" class="actions end hidden">
+              <button id="detailSave" class="btn ghost sm" type="button"><svg class="icon"><use href="#i-check"/></svg><span>Salvar campos</span></button>
+            </div>
+            <label class="field">Observação da execução (opcional)
+              <textarea id="detailObs" rows="2" maxlength="500" placeholder="Ex.: executado com restrição, aguardando liberação…"></textarea>
+            </label>
+            <button id="detailRegister" class="btn primary block lg" type="button"><svg class="icon"><use href="#i-check"/></svg><span>Registrar execução</span></button>
+            <div class="detail-log">
+              <h4>Registros</h4>
+              <div id="detailLog" class="timeline"></div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <div id="bulkBar" class="bulk-bar hidden">
+        <span><b id="bulkCount">0</b> selecionada(s)</span>
+        <button id="bulkClear" class="btn ghost sm" type="button">Limpar</button>
+        <button id="bulkRegister" class="btn primary" type="button"><svg class="icon"><use href="#i-check"/></svg><span>Registrar execução</span></button>
+      </div>
+    </section>
+
+    <!-- ===================== CAMPO · HISTÓRICO ===================== -->
+    <section id="screen-historico" class="screen" data-title="Histórico" data-kicker="Campo">
+      <div class="page-head">
+        <div>
+          <h2>Registros da semana <span id="historyWeek" class="chip">W—</span></h2>
+          <p class="muted">Execuções registradas nas atividades programadas da sua equipe.</p>
+        </div>
+      </div>
+      <section class="card">
+        <div id="historyList" class="timeline lg"></div>
+      </section>
+    </section>
+
+    <!-- ===================== PERFIL ===================== -->
+    <section id="screen-perfil" class="screen" data-title="Perfil" data-kicker="Conta">
+      <section class="card profile">
+        <span id="profileAvatar" class="avatar lg">—</span>
+        <div>
+          <h2 id="profileName">—</h2>
+          <p id="profileRole" class="muted">—</p>
+        </div>
+        <dl id="profileInfo" class="info-list"></dl>
+        <button id="logoutBtn" class="btn ghost danger" type="button"><svg class="icon"><use href="#i-logout"/></svg><span>Sair</span></button>
+      </section>
     </section>
   </main>
 </div>
 
-<!-- =========================
-     PROGRAMMING MODAL
-     ========================= -->
-<div id="programModal" class="modal hidden">
-  <div class="modal-backdrop"></div>
-  <div class="modal-box program-modal">
-    <button id="closeProgramModal" class="modal-close">×</button>
-    <span class="section-kicker">NOVA PROGRAMAÇÃO</span>
-    <h3>Adicionar atividade</h3>
-    <p>Defina o que será executado, por quem e em qual semana.</p>
-
-    <form id="programForm" class="program-form">
-      <div class="form-grid-2">
-        <label>Semana
-          <select id="programWeek" required></select>
-        </label>
-        <label>Data prevista
-          <input id="programDate" type="date" required>
-        </label>
+<!-- =========================================================
+     MODAIS
+     ========================================================= -->
+<div id="programModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="programModalTitle">
+  <div class="modal-backdrop" data-close-modal></div>
+  <div class="modal-box wide">
+    <button class="icon-btn modal-close" type="button" data-close-modal aria-label="Fechar"><svg class="icon"><use href="#i-x"/></svg></button>
+    <h3 id="programModalTitle">Nova programação</h3>
+    <p class="muted sm">Lançamento manual de um item. Para cargas grandes, use a importação de Excel.</p>
+    <form id="programForm" novalidate>
+      <div class="form-grid">
+        <label class="field">Atividade *<select id="pfActivity" required></select></label>
+        <label class="field">Semana *<select id="pfWeek" required></select></label>
+        <label class="field">Equipe *<select id="pfTeam" required></select></label>
+        <label class="field">Data prevista<input id="pfDate" type="date"></label>
+        <label class="field">Responsável<select id="pfResponsible"></select></label>
       </div>
-      <div class="form-grid-2">
-        <label>Atividade
-          <select id="programActivity" required></select>
-        </label>
-        <label>Equipe
-          <select id="programTeam" required></select>
-        </label>
-      </div>
-      <div class="form-grid-2">
-        <label>Responsável
-          <select id="programResponsible" required></select>
-        </label>
-        <label>Quantidade prevista
-          <input id="programQtyInput" type="number" min="1" step="1" value="1" required>
-        </label>
-      </div>
-      <label>Observação
-        <textarea id="programNote" rows="3" maxlength="250" placeholder="Detalhes adicionais da programação..."></textarea>
-      </label>
-      <div id="programCustomFields" class="dynamic-form-grid"></div>
-      <p id="programFormMessage" class="form-message"></p>
+      <div id="pfCustom" class="form-grid"></div>
+      <label class="field">Observação<textarea id="pfNote" rows="2" maxlength="500"></textarea></label>
+      <p id="programFormMessage" class="form-message" role="alert"></p>
       <div class="modal-actions">
-        <button type="button" id="cancelProgramModal" class="secondary-btn">Cancelar</button>
-        <button type="submit" class="primary-btn">Salvar programação</button>
+        <button class="btn ghost" type="button" data-close-modal>Cancelar</button>
+        <button class="btn primary" type="submit">Salvar programação</button>
       </div>
     </form>
   </div>
 </div>
 
-<div id="activityModal" class="modal hidden">
-  <div class="modal-backdrop"></div>
-  <div class="modal-box program-modal">
-    <button id="closeActivityModal" class="modal-close">×</button>
-    <span class="section-kicker">MÓDULO DE ATIVIDADE</span>
+<div id="importModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="importModalTitle">
+  <div class="modal-backdrop" data-close-modal></div>
+  <div class="modal-box wide">
+    <button class="icon-btn modal-close" type="button" data-close-modal aria-label="Fechar"><svg class="icon"><use href="#i-x"/></svg></button>
+    <h3 id="importModalTitle">Importar programação</h3>
+    <div class="import-summary">
+      <div><span>Arquivo</span><strong id="importFile">—</strong></div>
+      <div><span>Atividade</span><strong id="importActivity">—</strong></div>
+      <div><span>Linhas válidas</span><strong id="importCount">0</strong></div>
+      <div><span>Semanas</span><strong id="importWeeks">—</strong></div>
+    </div>
+    <div id="importErrors" class="alert danger hidden"></div>
+    <div id="importPreviewWrap" class="table-scroll bordered"><table id="importPreview" class="data-table preview"></table></div>
+
+    <div id="importModes" class="choice-grid">
+      <label class="choice">
+        <input type="radio" name="importMode" value="append" checked>
+        <span><strong>Incluir na programação</strong><small>Acrescenta as linhas do arquivo. Nada é apagado.</small></span>
+      </label>
+      <label class="choice">
+        <input type="radio" name="importMode" value="replace">
+        <span><strong>Nova programação</strong><small id="importReplaceHint">Substitui os itens <b>pendentes</b> desta atividade nas semanas do arquivo. Itens já executados são mantidos.</small></span>
+      </label>
+    </div>
+    <label id="importDupWrap" class="check hidden" style="margin-top:12px"><input id="importSkipDup" type="checkbox" checked><span id="importDupText"></span></label>
+    <p id="importMessage" class="form-message" role="alert"></p>
+    <div class="modal-actions">
+      <button class="btn ghost" type="button" data-close-modal>Cancelar</button>
+      <button id="importConfirm" class="btn primary" type="button">Importar</button>
+    </div>
+  </div>
+</div>
+
+<div id="activityModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="activityModalTitle">
+  <div class="modal-backdrop" data-close-modal></div>
+  <div class="modal-box">
+    <button class="icon-btn modal-close" type="button" data-close-modal aria-label="Fechar"><svg class="icon"><use href="#i-x"/></svg></button>
     <h3 id="activityModalTitle">Nova atividade</h3>
-    <p>Cadastre o módulo e, depois, defina as colunas específicas que ele usará.</p>
-    <form id="activityForm" class="program-form">
-      <label>Nome da atividade
-        <input id="activityNameInput" type="text" maxlength="80" placeholder="Ex.: Ponto a Ponto" required>
-      </label>
-      <label>Descrição
-        <textarea id="activityDescriptionInput" rows="3" maxlength="220" placeholder="Descreva o objetivo desta atividade..."></textarea>
-      </label>
-      <p id="activityFormMessage" class="form-message"></p>
-      <div class="modal-actions"><button type="button" id="cancelActivityModal" class="secondary-btn">Cancelar</button><button type="submit" class="primary-btn">Salvar módulo</button></div>
-    </form>
-  </div>
-</div>
-
-<div id="columnModal" class="modal hidden">
-  <div class="modal-backdrop"></div>
-  <div class="modal-box program-modal">
-    <button id="closeColumnModal" class="modal-close">×</button>
-    <span class="section-kicker">COLUNA PERSONALIZADA</span>
-    <h3 id="columnModalTitle">Nova coluna</h3>
-    <p>Essa coluna fará parte da máscara do Excel e dos campos da programação.</p>
-    <form id="columnForm" class="program-form">
-      <div class="form-grid-2">
-        <label>Nome exibido
-          <input id="columnLabelInput" type="text" maxlength="60" placeholder="Ex.: CABINET" required>
-        </label>
-        <label>Chave
-          <input id="columnKeyInput" type="text" maxlength="40" placeholder="Ex.: cabinet" required>
-        </label>
-      </div>
-      <div class="form-grid-2">
-        <label>Tipo de dado
-          <select id="columnTypeInput"><option value="text">Texto</option><option value="number">Número</option><option value="date">Data</option><option value="select">Lista</option><option value="boolean">Sim/Não</option></select>
-        </label>
-        <label class="check-field"><input id="columnRequiredInput" type="checkbox"> <span>Campo obrigatório</span></label>
-        <label class="check-field"><input id="columnTechnicianEditableInput" type="checkbox"> <span>Técnico pode alterar</span></label>
-      </div>
-      <label>Opções da lista (separadas por vírgula)
-        <input id="columnOptionsInput" type="text" maxlength="250" placeholder="Ex.: ATIVO, INATIVO, BLOQUEADO">
-      </label>
-      <p id="columnFormMessage" class="form-message"></p>
-      <div class="modal-actions"><button type="button" id="cancelColumnModal" class="secondary-btn">Cancelar</button><button type="submit" class="primary-btn">Salvar coluna</button></div>
-    </form>
-  </div>
-</div>
-
-<div id="programImportModal" class="modal hidden">
-  <div class="modal-backdrop"></div>
-  <div class="modal-box import-choice-modal">
-    <button id="closeProgramImportModal" class="modal-close">×</button>
-    <span class="section-kicker">IMPORTAÇÃO DE PROGRAMAÇÃO</span>
-    <h3>Como deseja aplicar esta programação?</h3>
-    <p id="programImportDescription">—</p>
-    <div class="import-mode-summary">
-      <span>Arquivo: <b id="programImportFileName">—</b></span>
-      <span>Linhas válidas: <b id="programImportCount">0</b></span>
-    </div>
-    <div class="program-import-choice-grid">
-      <button type="button" class="program-import-choice" data-program-import-mode="new">
-        <span class="program-import-choice-icon">↻</span>
-        <strong>Nova programação</strong>
-        <small>Substitui a programação atual e inicia uma nova carga a partir deste Excel.</small>
-      </button>
-      <button type="button" class="program-import-choice" data-program-import-mode="append">
-        <span class="program-import-choice-icon">＋</span>
-        <strong>Incluir na Programação</strong>
-        <small>Acrescenta as linhas do Excel à programação já existente, sem apagar registros.</small>
-      </button>
-    </div>
-    <p id="programImportMessage" class="form-message"></p>
-    <div class="modal-actions">
-      <button type="button" id="cancelProgramImport" class="secondary-btn">Cancelar</button>
-    </div>
-  </div>
-</div>
-
-<div id="importModeModal" class="modal hidden">
-  <div class="modal-backdrop"></div>
-  <div class="modal-box import-choice-modal">
-    <button id="closeImportModeModal" class="modal-close">×</button>
-    <span class="section-kicker">IMPORTAÇÃO PARA O BANCO</span>
-    <h3>Como deseja importar os registros?</h3>
-    <p id="importModeDescription">O arquivo será validado pela máscara do módulo antes da gravação.</p>
-    <div class="import-mode-grid">
-      <button type="button" class="import-mode-card" data-import-mode="new">
-        <span class="import-mode-icon">↻</span>
-        <strong>Nova importação</strong>
-        <small>Substitui os registros já importados deste módulo.</small>
-      </button>
-      <button type="button" class="import-mode-card" data-import-mode="append">
-        <span class="import-mode-icon">＋</span>
-        <strong>Inclusão</strong>
-        <small>Adiciona os registros do arquivo aos que já existem.</small>
-      </button>
-    </div>
-    <div class="import-mode-summary">
-      <span>Arquivo: <b id="importFileName">—</b></span>
-      <span>Registros atuais: <b id="importExistingCount">0</b></span>
-    </div>
-    <p id="importModeMessage" class="form-message"></p>
-    <div class="modal-actions"><button type="button" id="cancelImportMode" class="secondary-btn">Cancelar</button></div>
-  </div>
-</div>
-
-<div id="accessModal" class="modal hidden">
-  <div class="modal-backdrop"></div>
-  <div class="modal-box program-modal">
-    <button id="closeAccessModal" class="modal-close">×</button>
-    <span class="section-kicker">PESSOA & ACESSO</span>
-    <h3 id="accessModalTitle">Novo usuário</h3>
-    <p>O código gerado será utilizado na tela de Login do Técnico.</p>
-    <form id="accessForm" class="program-form">
-      <div class="form-grid-2">
-        <label>Nome completo
-          <input id="accessNameInput" type="text" maxlength="100" required>
-        </label>
-        <label>Função
-          <input id="accessFunctionInput" type="text" maxlength="80" placeholder="Ex.: Técnico de Instrumentação" required>
-        </label>
-      </div>
-      <div class="form-grid-2">
-        <label>E-mail
-          <input id="accessEmailInput" type="email" maxlength="120" placeholder="nome@empresa.com">
-        </label>
-        <label>Código de acesso
-          <div class="inline-input"><input id="accessCodeInput" type="text" maxlength="8" inputmode="numeric" required><button type="button" id="generateAccessCodeBtn" class="ghost-btn">Gerar</button></div>
-        </label>
-      </div>
-      <div class="form-grid-2">
-        <label>Perfil
-          <select id="accessRoleInput"><option value="technician">Técnico</option><option value="admin">Administrador</option></select>
-        </label>
-        <label>Equipe
-          <select id="accessTeamInput"></select>
-        </label>
-      </div>
-      <label>Status
-        <select id="accessStatusInput"><option value="ATIVO">Ativo</option><option value="INATIVO">Inativo</option></select>
-      </label>
-      <p id="accessFormMessage" class="form-message"></p>
-      <div class="modal-actions"><button type="button" id="cancelAccessModal" class="secondary-btn">Cancelar</button><button type="submit" class="primary-btn">Salvar usuário</button></div>
-    </form>
-  </div>
-</div>
-
-<div id="weekModal" class="modal hidden" aria-hidden="true">
-  <div class="modal-backdrop"></div>
-  <div class="modal-box program-modal week-modal">
-    <button id="closeWeekModal" class="modal-close" type="button" aria-label="Fechar">×</button>
-    <span class="section-kicker">PLANEJAMENTO & PROGRAMAÇÃO</span>
-    <h3 id="weekModalTitle">Nova semana</h3>
-    <p>Cadastre a semana que ficará disponível para lançamento de programações.</p>
-    <form id="weekForm" class="program-form">
-      <label>Semana
-        <div class="week-input-shell">
-          <span>W</span>
-          <input id="weekNumberInput" type="number" min="1" max="999" inputmode="numeric" placeholder="137" required autocomplete="off">
-        </div>
-        <small class="field-hint">Use somente o número. O sistema grava automaticamente no padrão W###.</small>
-      </label>
-      <div id="weekFormMessage" class="form-message"></div>
+    <form id="activityForm" novalidate>
+      <label class="field">Nome *<input id="afName" maxlength="80" placeholder="Ex.: Loop Teste" required></label>
+      <label class="field">Descrição<textarea id="afDescription" rows="3" maxlength="220"></textarea></label>
+      <p id="activityFormMessage" class="form-message" role="alert"></p>
       <div class="modal-actions">
-        <button type="button" id="cancelWeekModal" class="secondary-btn">Cancelar</button>
-        <button type="submit" class="primary-btn">Criar semana</button>
+        <button class="btn ghost" type="button" data-close-modal>Cancelar</button>
+        <button class="btn primary" type="submit">Salvar</button>
       </div>
     </form>
   </div>
 </div>
 
-<div id="deleteModuleConfirm" class="modal hidden">
-  <div class="modal-backdrop"></div>
+<div id="columnModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="columnModalTitle">
+  <div class="modal-backdrop" data-close-modal></div>
   <div class="modal-box">
-    <button id="closeDeleteModuleConfirm" class="modal-close">×</button>
-    <span class="section-kicker">CONFIRMAÇÃO</span>
-    <h3>Excluir módulo?</h3>
-    <p id="deleteModuleText">A atividade e sua estrutura serão removidas localmente.</p>
-    <div class="modal-actions"><button id="cancelDeleteModule" class="secondary-btn">Cancelar</button><button id="confirmDeleteModule" class="primary-btn danger-fill">Excluir</button></div>
+    <button class="icon-btn modal-close" type="button" data-close-modal aria-label="Fechar"><svg class="icon"><use href="#i-x"/></svg></button>
+    <h3 id="columnModalTitle">Nova coluna</h3>
+    <form id="columnForm" novalidate>
+      <div class="form-grid">
+        <label class="field">Nome no Excel *<input id="cfLabel" maxlength="60" placeholder="Ex.: CABINET" required></label>
+        <label class="field">Chave interna<input id="cfKey" maxlength="40" placeholder="gerada automaticamente"><small id="cfKeyHint" class="muted">Identificador usado no banco.</small></label>
+        <label class="field">Tipo
+          <select id="cfType">
+            <option value="text">Texto</option>
+            <option value="number">Número</option>
+            <option value="date">Data</option>
+            <option value="select">Lista de opções</option>
+            <option value="boolean">Sim/Não</option>
+          </select>
+        </label>
+      </div>
+      <label id="cfOptionsWrap" class="field hidden">Opções (separadas por vírgula)<input id="cfOptions" maxlength="500" placeholder="APROVADO, REPROVADO, PENDENTE"></label>
+      <div class="check-row">
+        <label class="check"><input id="cfRequired" type="checkbox"><span>Obrigatória na importação</span></label>
+        <label class="check"><input id="cfEditable" type="checkbox"><span>Equipe de campo pode alterar</span></label>
+      </div>
+      <p id="columnFormMessage" class="form-message" role="alert"></p>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" data-close-modal>Cancelar</button>
+        <button class="btn primary" type="submit">Salvar coluna</button>
+      </div>
+    </form>
   </div>
 </div>
 
-<div id="confirmModal" class="modal hidden">
-  <div class="modal-backdrop"></div>
+<div id="personModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="personModalTitle">
+  <div class="modal-backdrop" data-close-modal></div>
   <div class="modal-box">
-    <button id="closeModal" class="modal-close">×</button>
-    <span class="section-kicker">CONFIRMAÇÃO</span>
-    <h3>Repetir ponto a ponto?</h3>
-    <p>Será acrescentado um novo registro ao histórico desta TAG. A semana programada permanece inalterada.</p>
+    <button class="icon-btn modal-close" type="button" data-close-modal aria-label="Fechar"><svg class="icon"><use href="#i-x"/></svg></button>
+    <h3 id="personModalTitle">Nova pessoa</h3>
+    <form id="personForm" novalidate>
+      <label class="field">Nome completo *<input id="psName" maxlength="100" required></label>
+      <div class="form-grid">
+        <label class="field">Código de acesso *
+          <span class="input-action"><input id="psCode" maxlength="12" inputmode="numeric" required><button id="psGenerate" class="btn ghost sm" type="button">Gerar</button></span>
+        </label>
+        <label class="field">Equipe<select id="psTeam"></select></label>
+        <label class="field">Perfil
+          <select id="psRole"><option value="EXECUTANTE">Equipe de campo</option><option value="ADMINISTRADOR">Administrador</option></select>
+        </label>
+        <label class="field">Status
+          <select id="psStatus"><option value="1">Ativo</option><option value="0">Inativo</option></select>
+        </label>
+      </div>
+      <p class="muted sm">Administradores entram com e-mail e senha do Supabase Auth; o vínculo é feito pelo campo <code>auth_user_id</code>.</p>
+      <p id="personFormMessage" class="form-message" role="alert"></p>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" data-close-modal>Cancelar</button>
+        <button class="btn primary" type="submit">Salvar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="confirmModal" class="modal hidden" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
+  <div class="modal-backdrop" data-close-modal></div>
+  <div class="modal-box narrow">
+    <h3 id="confirmTitle">Confirmar</h3>
+    <p id="confirmText" class="muted"></p>
     <div class="modal-actions">
-      <button id="cancelModal" class="secondary-btn">Cancelar</button>
-      <button id="confirmRepeat" class="primary-btn">Confirmar registro</button>
+      <button id="confirmCancel" class="btn ghost" type="button">Cancelar</button>
+      <button id="confirmOk" class="btn primary" type="button">Confirmar</button>
     </div>
   </div>
 </div>
 
-<div id="toast" class="toast" role="alert"></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="./supabase-config.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>

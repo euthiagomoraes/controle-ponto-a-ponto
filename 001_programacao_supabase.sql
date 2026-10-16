@@ -1,3 +1,5 @@
+-- HISTÓRICO (Rev. 13): estrutura inicial. A tabela tb_programacoes atual usa semana, atividade_id, equipe_id,
+-- dados_personalizados e modo_importacao — não execute este arquivo sobre o banco em produção.
 -- Rev. 13: persistência da programação e controle de edição pelo Técnico
 create extension if not exists pgcrypto;
 
