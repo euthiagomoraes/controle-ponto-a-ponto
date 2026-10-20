@@ -135,9 +135,15 @@ begin
     raise exception 'Há itens que não pertencem à equipe deste técnico.' using errcode = '42501';
   end if;
 
-  update public.tb_programacoes
-  set status = 'EXECUTADO', updated_at = now()
-  where id = any(p_programacao_ids);
+  -- O status é informativo: a situação do item vem de tb_execucoes. Se o banco tiver uma regra
+  -- (tb_programacoes_status_check) que não aceite 'EXECUTADO', a execução é gravada mesmo assim.
+  begin
+    update public.tb_programacoes
+    set status = 'EXECUTADO', updated_at = now()
+    where id = any(p_programacao_ids);
+  exception when check_violation then
+    raise notice 'status EXECUTADO recusado por tb_programacoes_status_check; execução registrada sem alterar o status';
+  end;
 
   return query
   with ins as (

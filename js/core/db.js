@@ -56,6 +56,7 @@ function dbErrorMessage(error, fallback = "Não foi possível concluir a operaç
   if (error?.code === "23503") return "Este registro está vinculado a outros dados (ex.: execuções) e não pode ser removido.";
   if (/null value in column "equipamento_id"/i.test(msg)) return "O banco exige um equipamento para cada programação. Inclua a coluna TAG nesta atividade e preencha-a.";
   if (/tb_equipes_disciplina_check/i.test(msg)) return "Disciplina rejeitada pelo banco. Execute a migration 006_corrigir_disciplina_equipes.sql.";
+  if (/tb_programacoes_status_check/i.test(msg)) return "O banco recusou o status da programação (regra tb_programacoes_status_check). Execute 013_corrigir_status_programacao.sql no SQL Editor do Supabase.";
   if (/chk_tb_programacoes_modo_importacao/i.test(msg)) return "Modo de importação rejeitado pelo banco. Execute a migration 007_corrigir_modo_importacao.sql.";
   if (/failed to fetch|networkerror|load failed/i.test(msg)) return "Sem conexão com o servidor. Verifique a internet e tente novamente.";
   return msg || fallback;

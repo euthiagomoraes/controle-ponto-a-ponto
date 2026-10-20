@@ -319,7 +319,7 @@ button { cursor: pointer; }
 .login-bg .bg-leds .bg-led-run { fill: var(--warn); animation-duration: .9s; }
 .login-bg .bg-trend { fill: none; stroke: var(--chart-done); stroke-width: 2.5; stroke-linejoin: round; stroke-dasharray: 420; stroke-dashoffset: 420; animation: bg-draw 7s ease-in-out infinite; }
 .login-bg .bg-trend.sp { stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 6 6; stroke-dashoffset: 0; animation: none; }
-.login-bg .bg-fade-in { stop-color: var(--bg); stop-opacity: .9; }
+.login-bg .bg-fade-in { stop-color: var(--bg); stop-opacity: .45; }
 .login-bg .bg-fade-out { stop-color: var(--bg); stop-opacity: .1; }
 @keyframes bg-flow { to { stroke-dashoffset: -72; } }
 @keyframes bg-blink { 0%, 48% { opacity: 1; } 50%, 100% { opacity: .2; } }
@@ -338,6 +338,11 @@ button { cursor: pointer; }
 .access-option .chevron { color: var(--subtle); }
 .access-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 10px; background: var(--primary-soft); color: var(--primary); flex: none; }
 .access-icon.field { background: var(--warn-soft); color: var(--warn); }
+
+/* Escolha de acesso translúcida: o fundo animado aparece através do cartão e dos botões. */
+#accessChooser { background: color-mix(in srgb, var(--surface) 38%, transparent); border-color: color-mix(in srgb, var(--line-strong) 70%, transparent); backdrop-filter: blur(1.5px); }
+#accessChooser .access-option { background: color-mix(in srgb, var(--surface) 55%, transparent); border-color: color-mix(in srgb, var(--line-strong) 60%, transparent); }
+#accessChooser .access-option:hover { background: color-mix(in srgb, var(--surface) 85%, transparent); border-color: var(--primary-line); }
 .code-input { font-family: var(--mono) !important; font-size: 22px !important; letter-spacing: .3em; text-align: center; min-height: 54px !important; }
 
 /* =========================================================

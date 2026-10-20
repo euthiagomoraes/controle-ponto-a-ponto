@@ -75,6 +75,7 @@ Migrations em `supabase/migrations/`, na ordem (todas podem ser executadas mais 
 | `010_equipamento_tag_por_sistema.sql` | Equipamento identificado por TAG + SYS + SUBSYS |
 | `011_programacao_sem_unicidade_equipamento.sql` | Permite o mesmo equipamento mais de uma vez na semana (duplicados liberados) |
 | `012_identidade_e_dashboard_campo.sql` | Tabela `tb_configuracoes`: logo e cores do sistema, legíveis na tela de login de qualquer aparelho; só administradores gravam. Ao entrar, o admin publica automaticamente a identidade salva no navegador se o banco ainda não tiver |
+| `013_corrigir_status_programacao.sql` | Ajusta a regra `tb_programacoes_status_check` para aceitar `PROGRAMADO`/`EXECUTADO` (mantendo os valores já usados) e torna o registro de execução tolerante ao status |
 
 ### Segurança
 
