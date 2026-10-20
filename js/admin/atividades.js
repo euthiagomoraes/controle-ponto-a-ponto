@@ -272,10 +272,11 @@ function exportActivityForm() {
   const jsPDF = window.jspdf?.jsPDF;
   if (!jsPDF) return toast("A biblioteca de PDF não carregou.", "error");
   const doc = new jsPDF({ unit: "mm", format: "a4" });
-  let y = pdfHeader(doc, `Formulário de campo · ${activity.name}`, "Preenchimento manual");
+  // Formulário em branco: Semana, Responsável e Equipe são preenchidos à mão em campo.
+  let y = pdfHeader(doc, `Formulário de campo · ${activity.name}`, reportMeta({ week: null, responsible: null, team: null }));
   doc.setTextColor(15, 27, 45);
   doc.setFontSize(9);
-  doc.text("Semana: ____________    Data: ____/____/________    Equipe: ________________________________", 12, y);
+  doc.text("Data da execução: ____/____/________", 12, y);
   y += 10;
   activityColumns(activity).forEach(c => {
     if (y > 260) { doc.addPage(); y = 18; }

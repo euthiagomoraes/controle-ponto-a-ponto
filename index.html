@@ -292,24 +292,25 @@
         <button id="kpiBacklogCard" class="kpi danger kpi-link" type="button" title="Abrir backlog"><span>Backlog</span><strong id="kpiBacklog">0</strong><small id="kpiBacklogText">pendentes de semanas anteriores</small></button>
       </div>
 
-      <div class="grid-2-1">
-        <section class="card">
-          <div class="card-head">
-            <div><h3>Evolução semanal</h3><p class="muted sm">Últimas semanas com programação</p></div>
-            <div class="legend"><span><i class="dot planned"></i>Previsto</span><span><i class="dot done"></i>Realizado</span><span><i class="trend-swatch planned"></i>Tendências</span></div>
-          </div>
-          <div id="dashboardWeekly" class="bar-chart"></div>
-        </section>
+      <!-- Evolução semanal em largura total; abaixo, equipe e atividade lado a lado. -->
+      <section class="card">
+        <div class="card-head">
+          <div><h3>Evolução semanal</h3><p class="muted sm">Últimas semanas com programação</p></div>
+          <div class="legend"><span><i class="dot planned"></i>Previsto</span><span><i class="dot done"></i>Realizado</span><span><i class="trend-swatch planned"></i>Tendências</span></div>
+        </div>
+        <div id="dashboardWeekly" class="bar-chart"></div>
+      </section>
+
+      <div class="grid-2">
         <section class="card">
           <div class="card-head"><div><h3>Por equipe</h3><p class="muted sm">Semana selecionada</p></div></div>
           <div id="dashboardTeams" class="progress-list"></div>
         </section>
+        <section class="card">
+          <div class="card-head"><div><h3>Por atividade</h3><p class="muted sm">Semana selecionada</p></div></div>
+          <div id="dashboardActivities" class="progress-list"></div>
+        </section>
       </div>
-
-      <section class="card">
-        <div class="card-head"><div><h3>Por atividade</h3><p class="muted sm">Semana selecionada</p></div></div>
-        <div id="dashboardActivities" class="progress-list cols"></div>
-      </section>
 
       <div class="grid-2">
         <section class="card">

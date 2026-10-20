@@ -12,31 +12,73 @@ function hexToRgb(hex) {
   return m ? m.slice(1).map(x => parseInt(x, 16)) : [15, 27, 45];
 }
 
-function pdfHeader(doc, title, subtitle) {
+// Equipe exibida no cabeçalho: a escolhida no filtro, a da pessoa de campo ou "Todas as equipes".
+function reportTeamLabel(teamId = "") {
+  if (teamId) return teamName(teamId) || "—";
+  if (state.user?.role === "technician") return teamName(state.user.equipeId) || "Todas as equipes";
+  return "Todas as equipes";
+}
+
+// Campos do cabeçalho. Valor null = campo em branco para preencher à mão (formulários).
+function reportMeta({ week, team, responsible } = {}) {
+  return [
+    ["SEMANA", week === null ? null : (week || "Todas as semanas")],
+    ["RESPONSÁVEL", responsible === null ? null : (responsible || state.user?.nome || "—")],
+    ["EQUIPE", team === null ? null : (team || reportTeamLabel())],
+    ["EMITIDO EM", nowStamp()]
+  ];
+}
+
+// Cabeçalho padrão dos PDFs: faixa com logo e título + linha de informações (Semana / Responsável / Equipe / Emitido em).
+function pdfHeader(doc, title, meta = reportMeta()) {
   const s = state.settings;
   doc.setFillColor(...hexToRgb(s.header));
-  doc.rect(0, 0, 210, 30, "F");
+  doc.rect(0, 0, 210, 26, "F");
   doc.setFillColor(...hexToRgb(s.primary));
-  doc.rect(0, 30, 210, 1.6, "F");
+  doc.rect(0, 26, 210, 1.4, "F");
   let x = 12;
   if (s.logo) {
     try {
       doc.setFillColor(255, 255, 255);
-      doc.roundedRect(10, 6, 30, 18, 2, 2, "F");
+      doc.roundedRect(10, 5, 32, 16, 2, 2, "F");
       const props = doc.getImageProperties(s.logo);
-      const ratio = Math.min(26 / props.width, 14 / props.height);
-      doc.addImage(s.logo, "PNG", 25 - props.width * ratio / 2, 15 - props.height * ratio / 2, props.width * ratio, props.height * ratio);
-      x = 46;
+      const ratio = Math.min(28 / props.width, 12 / props.height);
+      doc.addImage(s.logo, "PNG", 26 - props.width * ratio / 2, 13 - props.height * ratio / 2, props.width * ratio, props.height * ratio);
+      x = 48;
     } catch (error) { console.warn("Logo não aplicada ao PDF:", error); }
   }
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(14);
-  doc.text(title, x, 14);
+  doc.setFontSize(15);
+  doc.text(title, x, 13);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8.5);
-  doc.text(`${subtitle} · Responsável: ${state.user?.nome || "—"}`, x, 21);
-  return 42;
+  doc.setFontSize(8);
+  doc.text("Planning Pro · Programação de atividades de campo", x, 19.5);
+
+  // Linha de informações
+  const top = 32;
+  const colW = [34, 62, 52, 38];
+  doc.setFillColor(244, 246, 249);
+  doc.roundedRect(10, top, 190, 15, 2, 2, "F");
+  let cx = 14;
+  meta.forEach(([label, value], i) => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(6.5);
+    doc.setTextColor(...hexToRgb(s.primary));
+    doc.text(label, cx, top + 5.5);
+    doc.setFontSize(9.5);
+    doc.setTextColor(15, 27, 45);
+    if (value === null) {
+      doc.setDrawColor(150, 160, 175);
+      doc.line(cx, top + 11.5, cx + colW[i] - 8, top + 11.5);
+    } else {
+      const max = Math.floor((colW[i] - 4) / 1.85);
+      const text = String(value);
+      doc.text(text.length > max ? `${text.slice(0, max - 1)}…` : text, cx, top + 11.2);
+    }
+    cx += colW[i];
+  });
+  return top + 23;
 }
 
 function pdfFooter(doc) {
@@ -106,11 +148,11 @@ function groupRows(groups) {
   return groups.map(g => [g.label, g.total, g.done, g.pending, `${g.rate}%`]);
 }
 
-function exportSummaryPDF(title, subtitle, programs, filename) {
+function exportSummaryPDF(title, meta, programs, filename) {
   const jsPDF = window.jspdf?.jsPDF;
   if (!jsPDF) return toast("A biblioteca de PDF não carregou.", "error");
   const doc = new jsPDF({ unit: "mm", format: "a4" });
-  let y = pdfHeader(doc, title, subtitle);
+  let y = pdfHeader(doc, title, meta);
   y = pdfKpis(doc, y, summarize(programs));
   const headers = ["", "PROG.", "EXEC.", "PEND.", "%"];
   const widths = [106, 20, 20, 20, 20];
@@ -122,13 +164,15 @@ function exportSummaryPDF(title, subtitle, programs, filename) {
 
 function exportDashboardPDF() {
   const week = state.dashboardWeek;
-  exportSummaryPDF("Previsto x realizado", `Semana ${week}`, state.programs.filter(p => p.week === week), `dashboard_${week}.pdf`);
+  exportSummaryPDF("Previsto x realizado", reportMeta({ week }), state.programs.filter(p => p.week === week), `dashboard_${week}.pdf`);
 }
 
 function exportReportPDF() {
   const f = reportFilters();
-  const parts = [f.week || "Todas as semanas", activityById(f.activity)?.name, teamName(f.team)].filter(Boolean);
-  exportSummaryPDF("Relatório de programação", parts.join(" · "), reportPrograms(f), `relatorio_${makeKey(parts.join("_")) || "geral"}.pdf`);
+  const activity = activityById(f.activity)?.name;
+  const title = activity ? `Relatório · ${activity}` : "Relatório de programação";
+  const parts = [f.week || "todas", activity, teamName(f.team)].filter(Boolean);
+  exportSummaryPDF(title, reportMeta({ week: f.week, team: reportTeamLabel(f.team) }), reportPrograms(f), `relatorio_${makeKey(parts.join("_")) || "geral"}.pdf`);
 }
 
 function exportFieldPDF() {
@@ -137,7 +181,7 @@ function exportFieldPDF() {
   const programs = filteredFieldPrograms();
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const week = weekLabel(state.field.weekNum);
-  let y = pdfHeader(doc, "Relatório de campo", `${week} · ${teamName(state.user.equipeId) || "Todas as equipes"}`);
+  let y = pdfHeader(doc, "Relatório de campo", reportMeta({ week }));
   y = pdfKpis(doc, y, summarize(programs));
   const rows = programs.map(p => {
     const last = executionsOf(p.id).at(-1);
@@ -148,7 +192,59 @@ function exportFieldPDF() {
   doc.save(`campo_${week}.pdf`);
 }
 
-function exportDashboardJPEG() {
+function loadImage(src) {
+  return new Promise(resolve => {
+    if (!src) return resolve(null);
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+// Cabeçalho do JPEG (mesmo padrão do PDF). Retorna a altura ocupada.
+async function drawCanvasHeader(ctx, W, title, meta) {
+  const settings = state.settings;
+  ctx.fillStyle = settings.header;
+  ctx.fillRect(0, 0, W, 130);
+  ctx.fillStyle = settings.primary;
+  ctx.fillRect(0, 130, W, 6);
+  let x = 60;
+  const logo = await loadImage(settings.logo);
+  if (logo) {
+    const boxW = 170, boxH = 84, ratio = Math.min((boxW - 20) / logo.width, (boxH - 20) / logo.height);
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(50, 23, boxW, boxH, 10) : ctx.rect(50, 23, boxW, boxH);
+    ctx.fill();
+    ctx.drawImage(logo, 50 + (boxW - logo.width * ratio) / 2, 23 + (boxH - logo.height * ratio) / 2, logo.width * ratio, logo.height * ratio);
+    x = 250;
+  }
+  ctx.fillStyle = "#fff";
+  ctx.font = "700 40px Inter, Arial";
+  ctx.fillText(title, x, 70);
+  ctx.font = "20px Inter, Arial";
+  ctx.globalAlpha = .8;
+  ctx.fillText("Planning Pro · Programação de atividades de campo", x, 104);
+  ctx.globalAlpha = 1;
+
+  const top = 160, colW = [260, 460, 420, 300];
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(50, top, W - 100, 92);
+  let cx = 80;
+  meta.forEach(([label, value], i) => {
+    ctx.fillStyle = settings.primary;
+    ctx.font = "700 16px Inter, Arial";
+    ctx.fillText(label, cx, top + 34);
+    ctx.fillStyle = "#0f1b2d";
+    ctx.font = "700 26px Inter, Arial";
+    ctx.fillText(String(value ?? "").slice(0, 32), cx, top + 70);
+    cx += colW[i];
+  });
+  return top + 92;
+}
+
+async function exportDashboardJPEG() {
   const week = state.dashboardWeek;
   const programs = state.programs.filter(p => p.week === week);
   const s = summarize(programs);
@@ -157,36 +253,29 @@ function exportDashboardJPEG() {
   const settings = state.settings;
   const W = 1600;
   const rowH = 54;
-  const H = 360 + (groups.length + teams.length) * rowH + 200;
+  const H = 460 + (groups.length + teams.length) * rowH + 200;
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = "#f4f6f9";
   ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = settings.header;
-  ctx.fillRect(0, 0, W, 150);
-  ctx.fillStyle = settings.primary;
-  ctx.fillRect(0, 150, W, 6);
-  ctx.fillStyle = "#fff";
-  ctx.font = "700 40px Inter, Arial";
-  ctx.fillText("Previsto x realizado", 60, 72);
-  ctx.font = "22px Inter, Arial";
-  ctx.fillText(`Semana ${week} · ${state.user?.nome || ""} · ${nowStamp()}`, 60, 112);
+  const headerBottom = await drawCanvasHeader(ctx, W, "Previsto x realizado", reportMeta({ week }));
 
+  const kpiTop = headerBottom + 30;
   [["PROGRAMADAS", s.total], ["EXECUTADAS", s.done], ["PENDENTES", s.pending], ["REALIZAÇÃO", `${s.rate}%`]].forEach(([label, value], i) => {
-    const x = 60 + i * 375;
+    const x = 50 + i * 380;
     ctx.fillStyle = "#fff";
-    ctx.fillRect(x, 190, 350, 120);
+    ctx.fillRect(x, kpiTop, 350, 120);
     ctx.fillStyle = settings.primary;
     ctx.font = "700 18px Inter, Arial";
-    ctx.fillText(label, x + 24, 228);
+    ctx.fillText(label, x + 24, kpiTop + 38);
     ctx.fillStyle = "#0f1b2d";
     ctx.font = "700 48px Inter, Arial";
-    ctx.fillText(String(value), x + 24, 288);
+    ctx.fillText(String(value), x + 24, kpiTop + 98);
   });
 
-  let y = 360;
+  let y = kpiTop + 170;
   const block = (title, list) => {
     ctx.fillStyle = "#0f1b2d";
     ctx.font = "700 24px Inter, Arial";

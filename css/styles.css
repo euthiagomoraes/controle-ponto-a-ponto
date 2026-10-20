@@ -688,6 +688,7 @@ button { cursor: pointer; }
   .topbar { padding: 0 16px; height: 58px; }
   .screen { padding: 16px 16px 0; }
   .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #kpiBacklogCard { grid-column: 1 / -1; } /* no celular, o Backlog ocupa a linha inteira */
   .grid-2, .split { grid-template-columns: minmax(0, 1fr); }
   .select-list { flex-direction: row; overflow-x: auto; max-height: none; }
   .select-item { flex: 0 0 auto; max-width: 220px; }
